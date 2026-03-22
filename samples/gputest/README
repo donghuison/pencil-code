@@ -3,8 +3,11 @@ To clone Pencil Code together with Astaroth:
 git clone -b master --recurse-submodules https://<username>@github.com/pencil-code/pencil-code.git
 or
 git clone -b master --recurse-submodules https://<username>@pencil-code.org/git/ pencil-code
+git clone -b master --recurse-submodules https://AxelBrandenburg@pencil-code.org/git/ pencil-code
+
 cd pencil-code
 source sourceme.sh
+
 cd src/astaroth/submodule
 git checkout develop
 
@@ -24,8 +27,6 @@ On Clusters, load appropriate CUDA (for NVIDIA) or HIP (for AMD) and MPI modules
 Set 
 
 GPU            = gpu_astaroth
-GPU_VENDOR     = [nvidia|amd]     # nvidia is default
-MULTITHREADING = openmp
 
 in Makefile.local. At first time, this implies to repeat pc_setupsrc.
 
@@ -51,15 +52,6 @@ on LUMI/Dardel:
 Also, there are usually separate partitions for GPU use.
 On some imperfectly configured machines, additional settings are required.
 [which OMP/MPI enironment settings?]
-
-
-
-
-
-
-
-
-
 
 
 ln -s /cfs/klemming/home/b/brandenb/scr/GPU-test/pencil-code/src/astaroth/submodule/acc-runtime/samples/gputest submodule/acc-runtime/samples/gputest
@@ -93,7 +85,8 @@ pc_build -f hosts/lumi/host-uan01-GNU_Linux
 # => adapt settings in "disbatch.sh"
 sbatch disbatch.sh
 
-Axel:
+
+Axel's notes:
 setenv PENCIL_HOME /cfs/klemming/home/b/brandenb/data/pencil-code-git
 module load aocm
 
@@ -158,4 +151,28 @@ brandenb@login1:/cfs/klemming/home/b/brandenb/data/GPU/axel/decay/reconnection/k
 
 brandenb@login1:/cfs/klemming/home/b/brandenb/data/GPU/axel/decay/reconnection/k600_nu5em7_k4_Pm5_128a> cp ../k600_nu5em7_k4_Pm5/src/astaroth/DSL/local/equations.h src/astaroth/DSL/local/
 brandenb@login1:/cfs/klemming/home/b/brandenb/data/GPU/axel/decay/reconnection/k600_nu5em7_k4_Pm5_128a> ls -l src/astaroth/submodule/acc-runtime/acc/
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+New on dardel (16-sep-25)
+
+git clone -b master --recurse-submodules https://AxelBrandenburg@pencil-code.org/git/ pencil-code
+cd pencil-code
+unsetenv PENCIL_HOME
+source sourceme.csh
+
+cd src/astaroth/submodule
+git branch
+git checkout develop
+
+module list
+pc_build -f Cray
+
+vi src/astaroth/DSL/local/equations.h 
+
+To generate DSL code from the Fortran code:
+--------------------------------------------
+Make sure the fortran-parse submodule is up to date with:
+git submodule update --init --remote
+In Makefile.local set TRANSPILATION=on
+And when calling make/pc_build pass GENERATE_DSL_CODE=on
 

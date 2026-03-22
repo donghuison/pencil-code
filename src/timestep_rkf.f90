@@ -1,5 +1,9 @@
 ! $Id$
 !
+!** AUTOMATIC CPARAM.INC GENERATION ****************************
+! CPARAM logical, parameter :: lcourant_dt = .false.
+!***************************************************************
+!
 module Timestep
 !
   use Cdata
@@ -12,7 +16,7 @@ module Timestep
 !
 ! Parameters for adaptive time stepping
   real, parameter :: safety      =  0.95
-  real            :: errcon, dt_next, dt_increase, dt_decrease
+  real            :: errcon, dt_increase, dt_decrease
   real, dimension(mvar) :: farraymin
 !
   contains
@@ -41,7 +45,7 @@ module Timestep
           dt = dt0
         endif
       endif
-      lcourant_dt=.false.
+      dt0 = 0.
 !
       if (eps_rkf0/=0.) eps_rkf=eps_rkf0
 !
@@ -169,7 +173,7 @@ module Timestep
 !
 ! Explicit fifth order Runge--Kutta--Fehlberg time stepping
 !
-      use Mpicomm, only: mpiallreduce_max,MPI_COMM_WORLD
+      use Mpicomm, only: mpiallreduce_max,MPI_COMM_PENCIL
       use Equ, only: pde, impose_floors_ceilings
       use Shear, only: advance_shear
       use Boundcond, only: update_ghosts
@@ -393,7 +397,7 @@ module Timestep
 !
       errmaxs=errmaxs/eps_rkf
 !
-      call mpiallreduce_max(errmaxs,errmax,MPI_COMM_WORLD)
+      call mpiallreduce_max(errmaxs,errmax,MPI_COMM_PENCIL)
 !
     endsubroutine rkck
 !***********************************************************************
@@ -401,7 +405,7 @@ module Timestep
 !
 ! Explicit third order Runge--Kutta--Fehlberg time stepping
 !
-      use Mpicomm, only: mpiallreduce_max,MPI_COMM_WORLD
+      use Mpicomm, only: mpiallreduce_max,MPI_COMM_PENCIL
       use Equ, only: pde, impose_floors_ceilings
       use Shear, only: advance_shear
       use Boundcond, only: update_ghosts
@@ -564,7 +568,7 @@ module Timestep
 !
       errmaxs=errmaxs/eps_rkf
 !
-      call mpiallreduce_max(errmaxs,errmax,MPI_COMM_WORLD)
+      call mpiallreduce_max(errmaxs,errmax,MPI_COMM_PENCIL)
 !
     endsubroutine rkck3
 !***********************************************************************

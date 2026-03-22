@@ -17,9 +17,9 @@
 module Io
 !
   use Cdata
-  use Cparam, only: intlen, fnlen, max_int
   use File_io, only: delete_file, file_exists
   use Messages, only: fatal_error, warning, svn_id
+  use General, only: keep_compiler_quiet
 !
   implicit none
 !
@@ -71,8 +71,6 @@ module Io
 !  be the same as directory, unless specified otherwise.
 !
 !  20-sep-02/wolf: coded
-!
-      use Mpicomm, only: lroot
 !
 !  identify version number
 !
@@ -126,7 +124,6 @@ module Io
 !
       real :: t_sp   ! t in single precision for backwards compatibility
       integer :: na, ne, bytes, out_size, j, nc, ncomps
-      character (len=6) :: ch
       character (len=fnlen) :: file1, file2
       character (len=30) :: vname, vnm
       logical, save :: lcalled_ast=.false.
@@ -241,7 +238,6 @@ module Io
 !   08-nov-2022/ccyang: remove plain text output (never used)
 !
       use Cdata, only: directory_dist
-      use General, only: keep_compiler_quiet
 !
       character (len=*), intent(in) :: label
       integer, intent(in) :: nc
@@ -333,6 +329,8 @@ module Io
       write(lun_output) t_sp, x, y, z, dx, dy, dz
 !
       close(lun_output)
+      if(present(label))     call keep_compiler_quiet(ltruncate)
+      if(present(ltruncate)) call keep_compiler_quiet(ltruncate)
 !
     endsubroutine output_part_snap
 !***********************************************************************
@@ -342,7 +340,6 @@ module Io
 !
 !  21-jan-24/ccyang: adapted from remove_particle() of particles_sub.f90.
 !
-      use General, only: keep_compiler_quiet
       use Messages, only: not_implemented
 !
       integer, dimension(:), intent(in) :: ipar_rmv, ipar_sink
@@ -387,6 +384,7 @@ module Io
 !
 !  03-May-2019/PABourdin: coded
 !
+
       integer, intent(in) :: num, nv, snap
       integer, dimension(nv), intent(in) :: ID
 !
@@ -400,6 +398,8 @@ module Io
       t_sp = t
       write (lun_output) t_sp, nv
       if (nv >= 1) write (lun_output) ID
+
+      call keep_compiler_quiet(snap)
 !
     endsubroutine output_stalker_init
 !***********************************************************************
@@ -909,7 +909,7 @@ module Io
 !  13-Dec-2011/Bourdin.KIS: coded
 !
       use File_io, only: file_exists
-      use Mpicomm, only: mpibcast_logical, MPI_COMM_WORLD
+      use Mpicomm, only: mpibcast_logical, MPI_COMM_PENCIL
 !
       character (len=*), intent(in), optional :: file
 !
@@ -917,7 +917,7 @@ module Io
 !
       if (present (file)) then
         if (lroot) init_read_persist = .not. file_exists (trim (directory_snap)//'/'//file)
-        call mpibcast_logical(init_read_persist,comm=MPI_COMM_WORLD)
+        call mpibcast_logical(init_read_persist,comm=MPI_COMM_PENCIL)
         if (init_read_persist) return
       endif
 !
@@ -952,7 +952,7 @@ module Io
 !
 !  17-Feb-2012/Bourdin.KIS: coded
 !
-      use Mpicomm, only: mpibcast_int, MPI_COMM_WORLD
+      use Mpicomm, only: mpibcast_int, MPI_COMM_PENCIL
 !
       character (len=*), intent(in) :: label
       integer, intent(out) :: id
@@ -972,7 +972,7 @@ module Io
         read (lun_input) id
       endif
 !
-      call mpibcast_int(id,comm=MPI_COMM_WORLD)
+      call mpibcast_int(id,comm=MPI_COMM_PENCIL)
 !
       read_persist_id = .false.
       if (id == -max_int) read_persist_id = .true.

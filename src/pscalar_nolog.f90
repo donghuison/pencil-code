@@ -88,7 +88,7 @@ module Pscalar
 !  Diagnostic variables (needs to be consistent with reset list below).
 !
   integer :: idiag_rhoccm=0, idiag_ccmax=0, idiag_ccmin=0, idiag_ccm=0
-  integer :: idiag_mrclncm=0
+  integer :: idiag_mrclncm=0, idiag_rhoccmax=0, idiag_rhoc2m=0, idiag_rhoc3m=0
   integer :: idiag_Qrhoccm=0, idiag_Qpsclm=0, idiag_mcct=0
   integer :: idiag_gcc5m=0, idiag_gcc10m=0
   integer :: idiag_ucm=0, idiag_uudcm=0, idiag_Cz2m=0, idiag_Cz4m=0
@@ -108,6 +108,8 @@ module Pscalar
   real, dimension(:,:), allocatable :: spharm 
   real, dimension(:,:,:,:), allocatable :: bunit,hhh
   real, dimension (nx) :: bump
+  integer :: icc_end
+  real,dimension(mz,npscalar) :: cc_xyaver
 
   contains
 !***********************************************************************
@@ -213,6 +215,8 @@ module Pscalar
         endif
  
       endif
+
+      icc_end=icc+npscalar-1
 !
     endsubroutine initialize_pscalar
 !***********************************************************************
@@ -403,7 +407,8 @@ module Pscalar
       lpenc_diagnos(i_cc)=.true.
 !
       if (idiag_rhoccm/=0 .or. idiag_Cz2m/=0 .or. idiag_Cz4m/=0 .or. &
-          idiag_Qrhoccm/=0 .or. idiag_Qpsclm/=0 .or. idiag_mrclncm/=0. ) &
+          idiag_Qrhoccm/=0 .or. idiag_Qpsclm/=0 .or. &
+          idiag_mrclncm/=0. .or. idiag_rhoccmax/=0 .or. idiag_rhoc2m/=0) &
           lpenc_diagnos(i_rho)=.true.
 !
       if (idiag_ucm/=0 .or. idiag_uudcm/=0 .or. idiag_uxcm/=0 .or. &
@@ -477,7 +482,6 @@ module Pscalar
       intent(in) :: f
       intent(inout) :: p
 !
-      real, dimension(nx) :: dot2_tmp
       integer :: i
 ! cc
       if (lpencil(i_cc)) p%cc=f(l1:l2,m,n,icc:icc+npscalar-1)
@@ -498,12 +502,15 @@ module Pscalar
 ! gcc2
       if (lpencil(i_gcc2)) then
         do i = 1, npscalar
-          call dot2_mn(p%gcc(:,:,i),dot2_tmp)
-          p%gcc2(:,i)=dot2_tmp
+          call dot2_mn(p%gcc(:,:,i),p%gcc2(:,i))
         enddo
       endif
 ! gcc1
-      if (lpencil(i_gcc1)) p%gcc1=sqrt(p%gcc2)
+      if (lpencil(i_gcc1)) then
+        do i = 1, npscalar
+          p%gcc1(:,i)=sqrt(p%gcc2(:,i))
+        enddo
+      endif
 ! del2cc
       if (lpencil(i_del2cc)) then
         do i = 1, npscalar
@@ -537,6 +544,11 @@ module Pscalar
 !
     endsubroutine calc_pencils_pscalar
 !***********************************************************************
+    subroutine mean_friction_cc(df)
+      real, dimension(mx,my,mz,mvar) :: df
+      df(l1:l2,m,n,icc:icc_end)=df(l1:l2,m,n,icc:icc_end)-LLambda_cc*spread(cc_xyaver(n,:),1,nx)
+    endsubroutine mean_friction_cc
+!***********************************************************************
     subroutine dlncc_dt(f,df,p)
 !
 !  Passive scalar evolution.
@@ -553,7 +565,6 @@ module Pscalar
       type (pencil_case) :: p
 !
       real, dimension (nx) :: diff_op,diff_op2,diffus_pscalar,diffus_pscalar3
-      real :: cc_xyaver
       real :: lam_gradC_fact=1., om_gradC_fact=1., gradC_fact=1.
       integer :: j, k
 !
@@ -561,7 +572,6 @@ module Pscalar
       intent(out) :: df
 !
       character(len=2) :: id
-      integer :: icc2
       real, dimension(nx,3) :: tmp
 !
 !  Identify module and boundary conditions.
@@ -586,20 +596,19 @@ module Pscalar
 !  without changing file size and recompiling everything.
 !
       evolve: if (.not. nopscalar) then ! i.e. if (pscalar)
-        icc2=icc+npscalar-1
 !
 !  Passive scalar equation.
 !
-        df(l1:l2,m,n,icc:icc2)=df(l1:l2,m,n,icc:icc2)-p%ugcc
+        df(l1:l2,m,n,icc:icc_end)=df(l1:l2,m,n,icc:icc_end)-p%ugcc
 !
 !  lpscalar_per_unitvolume
 !
         if (lpscalar_per_unitvolume) &
-          df(l1:l2,m,n,icc:icc2)=df(l1:l2,m,n,icc:icc2)-p%cc*spread(p%divu,2,npscalar)
+          df(l1:l2,m,n,icc:icc_end)=df(l1:l2,m,n,icc:icc_end)-p%cc*spread(p%divu,2,npscalar)
 !
 !  Reaction term. Simple Fisher term for now.
 !
-        if (lreactions) df(l1:l2,m,n,icc:icc2)=df(l1:l2,m,n,icc:icc2)+lambda_cc*p%cc*(1.0-p%cc)
+        if (lreactions) df(l1:l2,m,n,icc:icc_end)=df(l1:l2,m,n,icc:icc_end)+lambda_cc*p%cc*(1.0-p%cc)
 !
 !  Passive scalar sink.
 !
@@ -613,7 +622,7 @@ module Pscalar
           else
             bump=pscalar_sink*exp(-0.5*(x(l1:l2)**2+y(m)**2+z(n)**2)/Rpscalar_sink**2)
           endif
-          df(l1:l2,m,n,icc:icc2)=df(l1:l2,m,n,icc:icc2)-spread(bump,2,npscalar)*p%cc
+          df(l1:l2,m,n,icc:icc_end)=df(l1:l2,m,n,icc:icc_end)-spread(bump,2,npscalar)*p%cc
         endif
 !
 !  Diffusion operator. If lpscalar_per_unitvolume is chosen, use
@@ -658,7 +667,7 @@ module Pscalar
 !
         if (pscalar_diff_hyper3/=0.) then
           if (headtt) print*,'dlncc_dt: pscalar_diff_hyper3=', pscalar_diff_hyper3
-          df(l1:l2,m,n,icc:icc2)=df(l1:l2,m,n,icc:icc2)+pscalar_diff_hyper3*(p%del6cc+p%g5ccglnrho)
+          df(l1:l2,m,n,icc:icc_end)=df(l1:l2,m,n,icc:icc_end)+pscalar_diff_hyper3*(p%del6cc+p%g5ccglnrho)
         endif
 !
 !  Soret diffusion.
@@ -689,7 +698,7 @@ module Pscalar
 !  This makes sense really only for periodic boundary conditions.
 !
         do j=1,3
-          if (gradC0(j)/=0.) df(l1:l2,m,n,icc:icc2)=df(l1:l2,m,n,icc:icc2) &
+          if (gradC0(j)/=0.) df(l1:l2,m,n,icc:icc_end)=df(l1:l2,m,n,icc:icc_end) &
                              -spread(gradC0(j)*p%uu(:,j)*gradC_fact,2,npscalar)
         enddo
 !
@@ -703,11 +712,11 @@ module Pscalar
 !  the turbulent diffusivity under stationary conditions. Only those
 !  results are then comparable with the results of the test-field method.
 !
+       
         if (lmean_friction_cc) then
-          do k = icc, icc2
-            cc_xyaver=sum(f(l1:l2,m1:m2,n,k))/nxygrid   !only for nprocxy=1 - tb improved: calc cc_xyaver in before_boundary
-            df(l1:l2,m,n,k)=df(l1:l2,m,n,k)-LLambda_cc*cc_xyaver
-          enddo
+!TP: stopgap solution of not having to consider arrays of "Profiles" on the GPU
+!    by leaving mean_friction out of the translation
+          call mean_friction_cc(df)
         endif
         !
         ! Add source term due to nucleation of chemical species into nucleii (droplets).
@@ -719,7 +728,7 @@ module Pscalar
         ! and the amount of pscalar is set back to zero for that grid cell. Should note that the
         ! particles are considered as generated as soon as they have been transferred to the
         ! pscalar - not when a new lagrangian particle has been generated. This means that
-        ! there are corresponding source terms also in the equatinos for continuity and
+        ! there are corresponding source terms also in the equations for continuity and
         ! chemical species
         !
         if (lchemistry .and. lparticles) then
@@ -772,6 +781,9 @@ module Pscalar
         if (idiag_Qrhoccm/=0) call sum_mn_name(bump*p%rho*p%cc(:,1),idiag_Qrhoccm)
         if (idiag_mcct/=0)    call integrate_mn_name(p%rho*p%cc(:,1),idiag_mcct)
         if (idiag_rhoccm/=0)  call sum_mn_name(p%rho*p%cc(:,1),idiag_rhoccm)
+        if (idiag_rhoc2m/=0)  call sum_mn_name(p%rho*p%cc(:,2),idiag_rhoc2m)
+        if (idiag_rhoc3m/=0)  call sum_mn_name(p%rho*p%cc(:,3),idiag_rhoc3m)
+        if (idiag_rhoccmax/=0)  call max_mn_name(p%rho*p%cc(:,1),idiag_rhoccmax)
         if (idiag_mrclncm/=0) call sum_mn_name(-p%rho*p%cc(:,1)*alog(p%cc(:,1)),idiag_mrclncm)
         call max_mn_name(p%cc(:,1),idiag_ccmax)
         if (idiag_ccmin/=0)   call max_mn_name(-p%cc(:,1),idiag_ccmin,lneg=.true.)
@@ -898,7 +910,7 @@ module Pscalar
 !
       if (lreset) then
         idiag_rhoccm=0; idiag_ccmax=0; idiag_ccmin=0.; idiag_ccm=0
-        idiag_mrclncm=0
+        idiag_mrclncm=0; idiag_rhoccmax=0; idiag_rhoc2m=0; idiag_rhoc3m=0
         idiag_Qrhoccm=0; idiag_Qpsclm=0; idiag_mcct=0
         idiag_ccmz=0; idiag_ccmy=0; idiag_ccmx=0
         idiag_uxcmz=0; idiag_uycmz=0; idiag_uzcmz=0; idiag_cc2mz=0
@@ -920,6 +932,9 @@ module Pscalar
         call parse_name(iname,cname(iname),cform(iname),'Qpsclm',idiag_Qpsclm)
         call parse_name(iname,cname(iname),cform(iname),'Qrhoccm',idiag_Qrhoccm)
         call parse_name(iname,cname(iname),cform(iname),'rhoccm',idiag_rhoccm)
+        call parse_name(iname,cname(iname),cform(iname),'rhoc2m',idiag_rhoc2m)
+        call parse_name(iname,cname(iname),cform(iname),'rhoc3m',idiag_rhoc3m)
+        call parse_name(iname,cname(iname),cform(iname),'rhoccmax',idiag_rhoccmax)
         call parse_name(iname,cname(iname),cform(iname),'mrclncm',idiag_mrclncm)
         call parse_name(iname,cname(iname),cform(iname),'mcct',idiag_mcct)
         call parse_name(iname,cname(iname),cform(iname),'ccmax',idiag_ccmax)
@@ -1047,8 +1062,17 @@ module Pscalar
       use Sub, only: remove_mean
 
       real, dimension (mx,my,mz,mfarray), intent(INOUT) :: f
+      integer :: k,n
 
       if (lremove_mean.and.lrmv) call remove_mean(f,icc,icc+npscalar-1)
+
+      if (lmean_friction_cc) then
+        do k = icc, icc_end
+          do n=n1,n2
+            cc_xyaver(n,k)=sum(f(l1:l2,m1:m2,n,k))/nxygrid   !only for nprocxy=1 - tb improved: calc cc_xyaver correctly across processes
+          enddo
+        enddo
+      endif
 
     endsubroutine pscalar_before_boundary
 !***********************************************************************
@@ -1092,23 +1116,21 @@ module Pscalar
       real :: tensor_pscalar_diff
 !
       real, dimension (nx) :: tmp,scr
-      integer :: iy,iz,i,j,k
+      integer :: i,j,k
 !
 !  tmp = (Bunit.G)^2 + H.G + Bi*Bj*Gij
 !  for details, see tex/mhd/thcond/tensor_der.tex
 !
-      iy=m-m1+1
-      iz=n-n1+1
       do k = 1, npscalar
-        call dot_mn(bunit(:,iy,iz,:),p%gcc(:,:,k),scr)
-        call dot_mn(hhh(:,iy,iz,:),p%gcc(:,:,k),tmp)
+        call dot_mn(bunit(:,m-nghost,n-nghost,:),p%gcc(:,:,k),scr)
+        call dot_mn(hhh(:,m-nghost,n-nghost,:),p%gcc(:,:,k),tmp)
         tmp=tmp+scr**2
 !
 !  dot with bi*bj
 !
         do j=1,3
         do i=1,3
-          tmp=tmp+bunit(:,iy,iz,i)*bunit(:,iy,iz,j)*p%hcc(:,i,j,k)
+          tmp=tmp+bunit(:,m-nghost,n-nghost,i)*bunit(:,m-nghost,n-nghost,j)*p%hcc(:,i,j,k)
         enddo
         enddo
 !
@@ -1123,10 +1145,41 @@ module Pscalar
 
     use Syscalls, only: copy_addr
 
-    integer, parameter :: n_pars=1
+    integer, parameter :: n_pars=100
     integer(KIND=ikind8), dimension(n_pars) :: p_par
 
     call copy_addr(pscalar_diff,p_par(1))
+    call copy_addr(zoverh,p_par(2))
+    call copy_addr(hoverr,p_par(3))
+    call copy_addr(powerlr,p_par(4))
+    call copy_addr(nopscalar,p_par(5)) ! bool
+    call copy_addr(ll_sh,p_par(6)) ! int
+    call copy_addr(mm_sh,p_par(7)) ! int
+    call copy_addr(tensor_pscalar_diff,p_par(8))
+    call copy_addr(soret_diff,p_par(9))
+    call copy_addr(diffcc_shock,p_par(10))
+    call copy_addr(pscalar_diff_hyper3,p_par(11))
+    call copy_addr(pscalar_sink,p_par(12))
+    call copy_addr(rpscalar_sink,p_par(13))
+    call copy_addr(lam_gradc,p_par(14))
+    call copy_addr(om_gradc,p_par(15))
+    call copy_addr(lambda_cc,p_par(16))
+    call copy_addr(scalaracc,p_par(17))
+    call copy_addr(llambda_cc,p_par(18))
+    call copy_addr(lpscalar_sink,p_par(19)) ! bool
+    call copy_addr(lgradc_profile,p_par(20)) ! bool
+    call copy_addr(lpscalar_diff_simple,p_par(21)) ! bool
+    call copy_addr(lpscalar_per_unitvolume,p_par(22)) ! bool
+    call copy_addr(lpscalar_per_unitvolume_diff,p_par(23)) ! bool
+    call copy_addr(lnotpassive,p_par(24)) ! bool
+    call copy_addr(lupw_cc,p_par(25)) ! bool
+    call copy_addr(lmean_friction_cc,p_par(26)) ! bool
+    call copy_addr(idiag_gcguzm,p_par(27)) ! int
+    call copy_addr(gradc0,p_par(28)) ! real3
+    call copy_addr(spharm,p_par(29)) ! (ny) (nz)
+    call copy_addr(bunit,p_par(30)) ! (nx) (ny) (nz) (3)
+    call copy_addr(hhh,p_par(31)) ! (nx) (ny) (nz) (3)
+    call copy_addr(cc_xyaver,p_par(32)) ! (mz) (npscalar)
 
     endsubroutine pushpars2c
 !***********************************************************************

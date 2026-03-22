@@ -21,8 +21,7 @@ class PDim(object):
         self.mpaux = 0
 
     def keys(self):
-        for i in self.__dict__.keys():
-            print(i)
+        return list(self.__dict__.keys())
 
     def read(self, datadir="data"):
         """
@@ -70,6 +69,9 @@ class PDim(object):
 
 @copy_docstring(PDim.read)
 def pdim(*args, **kwargs):
+    """
+    Wrapper for :py:meth:`PDim.read`
+    """
     pdim_tmp = PDim()
     pdim_tmp.read(*args, **kwargs)
     return pdim_tmp

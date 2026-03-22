@@ -1333,6 +1333,97 @@ module Dustdensity
 !
     endsubroutine pencil_interdep_dustdensity
 !***********************************************************************
+    subroutine get_del6nd_via_global_nd(f,p,k)
+
+      use Sub, only: del6
+
+      integer :: mm,nn
+      real, dimension(mx,my,mz,mfarray) :: f
+      type(pencil_case) :: p
+      integer :: k
+
+      if (iglobal_nd/=0) then
+        if (lfirstpoint) then
+          do mm=1,my; do nn=1,mz
+            f(:,mm,nn,iglobal_nd)=exp(f(:,mm,nn,ilnnd(k)))   !MR: not correct
+          enddo; enddo
+        endif
+        call del6(f,iglobal_nd,p%del6nd(:,k))
+      endif
+
+    endsubroutine get_del6nd_via_global_nd
+!***********************************************************************
+    subroutine get_ccondens(p,ttt)
+!
+!  26-oct-25/TP: carved form calc_pencils_dustdensity
+!
+      use General, only: spline_integral
+
+      type(pencil_case) :: p
+      real, dimension (ndustspec) :: ttt
+
+      real, dimension (ndustspec) :: ff_tmp
+      real, dimension (nx) :: Imr
+      integer :: i,k
+!
+!  (Probably) just temporarily for debugging a division-by-zero problem.
+!
+        !TP: cannot do any across pencil on GPU
+        if (any(p%ppsat==0.) .and. any(p%ppsf(:,:)==0.)) then
+          if (.not.lpencil_check_at_work) then
+            write(0,*) 'p%ppsat = ', minval(p%ppsat)
+            write(0,*) 'p%ppsf = ', minval(p%ppsf)
+            write(0,*) 'p%TT = ', minval(p%TT)
+          endif
+          call fatal_error('calc_pencils_dustdensity','p%ppsat or p%ppsf has zero value(s)')
+        else
+!
+          Imr=Dwater*m_w/Rgas*p%ppsat*p%TT1/rho_w
+          do i=1,nx
+            if (lnoaerosol .or. lnocondens_term) then
+              p%ccondens(i)=0.
+            else
+              if (p%ppsat(i) /= 0.) then
+                do k=1,ndustspec
+!
+!  ldcore means core distribution. (Currently used for fixed core.)
+!  The "difference" is "p%ppwater(i)/p%ppsat(i)-p%ppsf(i,k)/p%ppsat(i)"
+!  "(p%ppwater(i)-p%ppsf(i,k))/p%ppsat(i)", which is the supersaturation ratio
+!
+                  if (ldcore) then
+                    ff_tmp(k)=p%nd(i,k)*dsize(k)*(p%ppwater(i)/p%ppsat(i)-p%ppsf(i,k)/p%ppsat(i))
+                  else
+                    if ((k>1) .and. (k<ndustspec)) then
+!
+!  boundary points
+!
+                     ff_tmp(k)=0.25*(p%nd(i,k-1)*dsize(k-1)  &
+                      *(p%ppwater(i)/p%ppsat(i)-p%ppsf(i,k-1)/p%ppsat(i)))+0.5*(p%nd(i,k)*dsize(k) &
+                      *(p%ppwater(i)/p%ppsat(i)-p%ppsf(i,k)/p%ppsat(i)))+0.25*(p%nd(i,k+1)*dsize(k+1) &
+                      *(p%ppwater(i)/p%ppsat(i)-p%ppsf(i,k+1)/p%ppsat(i)))
+                    else
+!
+!  interior points (important for energy equation)
+!
+                      ff_tmp(k)=p%nd(i,k)*dsize(k)*(p%ppwater(i)/p%ppsat(i)-p%ppsf(i,k)/p%ppsat(i))
+                    endif
+                  endif
+!
+                enddo   ! do k=1,ndustspec
+              endif     ! if (p%ppsat(i) /= 0.)
+!
+              if (any(dsize==0.0)) then
+                ttt=0.0         !fill me in
+              else
+                ttt= spline_integral(dsize,ff_tmp)
+              endif
+              p%ccondens(i)=4.*pi*Imr(i)*rho_w*ttt(ndustspec)
+!
+            endif       ! if (lnoaerosol .or. lnocondens_term)
+          enddo         ! do i=1,nx
+        endif           ! if (any(p%ppsat==0.) .and. any(p%ppsf(:,:)==0.)
+    endsubroutine get_ccondens
+!***********************************************************************
     subroutine calc_pencils_dustdensity(f,p)
 !
 !  Calculate Dustdensity pencils.
@@ -1346,14 +1437,14 @@ module Dustdensity
       real, dimension (mx,my,mz,mfarray) :: f
       type (pencil_case) :: p
 !
-      real, dimension (nx) :: tmp, Imr, T_tmp
+      real, dimension (nx) :: tmp, T_tmp
       real, dimension (nx,3) :: tmp_pencil_3
-      real, dimension (ndustspec) :: ttt, ff_tmp
+      real, dimension (ndustspec) :: ttt
       real, dimension (nx,ndustspec) :: Nd_rho, CoagS
       real, parameter :: aa0= 6.107799961, aa1= 4.436518521e-1
       real, parameter :: aa2= 1.428945805e-2, aa3= 2.650648471e-4
       real, parameter :: aa4= 3.031240396e-6, aa5= 2.034080948e-8, aa6= 6.136820929e-11
-      integer :: i,k,mm,nn
+      integer :: i,k
 !
       intent(inout) :: f,p
 ! nd
@@ -1484,18 +1575,14 @@ module Dustdensity
 ! del6nd
         if (lpencil(i_del6nd)) then
           if (ldustdensity_log) then
-            if (iglobal_nd/=0) then
-              if (lfirstpoint) then
-                do mm=1,my; do nn=1,mz
-                  f(:,mm,nn,iglobal_nd)=exp(f(:,mm,nn,ilnnd(k)))   !MR: not correct
-                enddo; enddo
-              endif
-              call del6(f,iglobal_nd,p%del6nd(:,k))
+            if (.not. lgpu) then
+              call get_del6nd_via_global_nd(f,p,k)
+            else
               !TP: Given the above formulation is incorrect 
               !    (one should not assume the halos to be up to date at least without setting early_finalize)
               !    could we replace it with the one below?
               !    Would make GPU porting easier
-              !call del6_exp(f,ilnnd(k),p%del6nd(:,k))
+              call del6_exp(f,ilnnd(k),p%del6nd(:,k))
             endif
           else
             call del6(f,ind(k),p%del6nd(:,k))
@@ -1592,64 +1679,8 @@ module Dustdensity
 ! ccondens
 !
       if (lpencil(i_ccondens)) then
-!
-!  (Probably) just temporarily for debugging a division-by-zero problem.
-!
-
-        if (any(p%ppsat==0.) .and. any(p%ppsf(:,:)==0.)) then
-          if (.not.lpencil_check_at_work) then
-            write(0,*) 'p%ppsat = ', minval(p%ppsat)
-            write(0,*) 'p%ppsf = ', minval(p%ppsf)
-            write(0,*) 'p%TT = ', minval(p%TT)
-          endif
-          call fatal_error('calc_pencils_dustdensity','p%ppsat or p%ppsf has zero value(s)')
-        else
-!
-          Imr=Dwater*m_w/Rgas*p%ppsat*p%TT1/rho_w
-          do i=1,nx
-            if (lnoaerosol .or. lnocondens_term) then
-              p%ccondens(i)=0.
-            else
-              if (p%ppsat(i) /= 0.) then
-                do k=1,ndustspec
-!
-!  ldcore means core distribution. (Currently used for fixed core.)
-!  The "difference" is "p%ppwater(i)/p%ppsat(i)-p%ppsf(i,k)/p%ppsat(i)"
-!  "(p%ppwater(i)-p%ppsf(i,k))/p%ppsat(i)", which is the supersaturation ratio
-!
-                  if (ldcore) then
-                    ff_tmp(k)=p%nd(i,k)*dsize(k)*(p%ppwater(i)/p%ppsat(i)-p%ppsf(i,k)/p%ppsat(i))
-                  else
-                    if ((k>1) .and. (k<ndustspec)) then
-!
-!  boundary points
-!
-                     ff_tmp(k)=0.25*(p%nd(i,k-1)*dsize(k-1)  &
-                      *(p%ppwater(i)/p%ppsat(i)-p%ppsf(i,k-1)/p%ppsat(i)))+0.5*(p%nd(i,k)*dsize(k) &
-                      *(p%ppwater(i)/p%ppsat(i)-p%ppsf(i,k)/p%ppsat(i)))+0.25*(p%nd(i,k+1)*dsize(k+1) &
-                      *(p%ppwater(i)/p%ppsat(i)-p%ppsf(i,k+1)/p%ppsat(i)))
-                    else
-!
-!  interior points (important for energy equation)
-!
-                      ff_tmp(k)=p%nd(i,k)*dsize(k)*(p%ppwater(i)/p%ppsat(i)-p%ppsf(i,k)/p%ppsat(i))
-                    endif
-                  endif
-!
-                enddo   ! do k=1,ndustspec
-              endif     ! if (p%ppsat(i) /= 0.)
-!
-              if (any(dsize==0.0)) then
-                ttt=0.0         !fill me in
-              else
-                ttt= spline_integral(dsize,ff_tmp)
-              endif
-              p%ccondens(i)=4.*pi*Imr(i)*rho_w*ttt(ndustspec)
-!
-            endif       ! if (lnoaerosol .or. lnocondens_term)
-          enddo         ! do i=1,nx
-        endif           ! if (any(p%ppsat==0.) .and. any(p%ppsf(:,:)==0.)
-      endif             ! if (lpencil(i_ccondens))
+        call get_ccondens(p,ttt)
+      endif
 !
 !  dndr means rhs of dn/dt formula.
 !
@@ -2702,6 +2733,7 @@ module Dustdensity
     endsubroutine dustdensity_after_boundary
 !***********************************************************************
     subroutine get_deltavd_turbu(deltavd_turbu,l,i,j)
+!
       real, intent(OUT) :: deltavd_turbu
       integer, intent(IN) :: l,i,j
 
@@ -2720,6 +2752,7 @@ module Dustdensity
       else
         call fatal_error('get_deltavd_turbu','this should never happen')
       endif
+!
     endsubroutine get_deltavd_turbu
 !***********************************************************************
     subroutine coag_kernel(f,p)
@@ -2752,10 +2785,6 @@ module Dustdensity
             dkern = dkern_cst
           endif
         else
-!
-!
-!  In the following, the "3" should be replaced by nghost,
-!  or one should use l1,l2 etc.
 !
           do l=1,nx
             lgh=l+nghost
@@ -3085,7 +3114,7 @@ module Dustdensity
                       df(lgh,m,n,iudz(k)) = df(lgh,m,n,iudz(k))-dndfac*(p%md(l,i)*f(lgh,m,n,iudz(i)) &
                                            +p%md(l,j)*f(lgh,m,n,iudz(j)) &
                                            -((p%md(l,i)+p%md(l,j))*f(lgh,m,n,iudz(k))))/ &
-                                           (p%md(l,k)*(p%nd(l,k)+dt*df(l,m,n,ind(k))))
+                                           (p%md(l,k)*(p%nd(l,k)+dt*df(lgh,m,n,ind(k))))
                     endif
                   endif
                   exit
@@ -3333,7 +3362,7 @@ module Dustdensity
       type (pencil_case) :: p
       real, dimension (nx,ndustspec) :: dndr_dr,ff_tmp
       real, dimension (nx,ndustspec) :: ppsf_full_i, nd_substep,  nd_new
-      integer :: k, i, jj, kk1,kk2 !, ind_tmp=6
+      integer :: k, i, j, jj, kk1,kk2 !, ind_tmp=6
       real :: GS
 !
       intent(in) :: ppsf_full_i, i
@@ -3345,8 +3374,10 @@ module Dustdensity
 !
         if (.not.lsemi_chemistry) then
           do k=1,ndustspec
-            if (any(p%ppsat==0.0) .or. (dsize(k)==0.)) &
-              call fatal_error('droplet_redistr','p%pp or dsize has zero value(s)')
+            if (dsize(k) == 0.) call fatal_error('droplet_redistr','dsize has zero value(s)')
+            do j = 1,nx
+              if (p%ppsat(j) == 0.0) call fatal_error('droplet_redistr','p%pp has zero value(s)')
+            enddo
           enddo
 !
 !  compute ff_tmp, which is a bit different from the earlier one.
@@ -3647,86 +3678,85 @@ module Dustdensity
     integer, parameter :: n_pars=200
     integer(KIND=ikind8), dimension(n_pars) :: p_par
 
+      call copy_addr(diffnd_hyper3,p_par(1))
+      call copy_addr(diffnd_hyper3_mesh,p_par(2))
+      call copy_addr(diffnd_shock,p_par(3))
+      call copy_addr(diffmd,p_par(4))
+      call copy_addr(diffmi,p_par(5))
+      call copy_addr(ndmin_for_mdvar,p_par(6))
+      call copy_addr(dkern_cst,p_par(7))
 
-        call copy_addr(diffnd_hyper3,p_par(1))
-        call copy_addr(diffnd_hyper3_mesh,p_par(2))
-        call copy_addr(diffnd_shock,p_par(3))
-        call copy_addr(diffmd,p_par(4))
-        call copy_addr(diffmi,p_par(5))
-        call copy_addr(ndmin_for_mdvar,p_par(6))
-        call copy_addr(dkern_cst,p_par(7))
+      ! these are compile-time params now
+      !call copy_addr(ul0,p_par(8))
+      !call copy_addr(tl0,p_par(9))
+      !call copy_addr(teta,p_par(10))
+      !call copy_addr(ueta,p_par(11))
 
-        ! these are compile-time params now
-        !call copy_addr(ul0,p_par(8))
-        !call copy_addr(tl0,p_par(9))
-        !call copy_addr(teta,p_par(10))
-        !call copy_addr(ueta,p_par(11))
-
-        call copy_addr(deltavd_imposed,p_par(12))
-        call copy_addr(rho_w,p_par(13))
-        call copy_addr(dwater,p_par(14))
-        call copy_addr(deltavd_const,p_par(15))
-        call copy_addr(rgas,p_par(16))
-        call copy_addr(m_w,p_par(17))
-        call copy_addr(aa,p_par(18))
-        call copy_addr(dt_substep,p_par(19))
-        call copy_addr(momcons_term_frac,p_par(20))
-        call copy_addr(iglobal_nd,p_par(21)) ! int
-        call copy_addr(ludstickmax,p_par(22)) ! bool
-        call copy_addr(lno_deltavd,p_par(23)) ! bool
-        call copy_addr(ldustnucleation,p_par(24)) ! bool
-        call copy_addr(lcalcdkern,p_par(25)) ! bool
-        call copy_addr(ldustcontinuity,p_par(26)) ! bool
-        call copy_addr(ldeltavd_thermal,p_par(27)) ! bool
-        call copy_addr(ldeltavd_turbulent,p_par(28)) ! bool
-        call copy_addr(ldust_cdtc,p_par(29)) ! bool
-        call copy_addr(ldiffd_simplified,p_par(30)) ! bool
-        call copy_addr(ldiffd_dusttogasratio,p_par(31)) ! bool
-        call copy_addr(ldiffd_hyper3,p_par(32)) ! bool
-        call copy_addr(ldiffd_hyper3lnnd,p_par(33)) ! bool
-        call copy_addr(ldiffd_hyper3_polar,p_par(34)) ! bool
-        call copy_addr(ldiffd_shock,p_par(35)) ! bool
-        call copy_addr(ldiffd_hyper3_mesh,p_par(36)) ! bool
-        call copy_addr(ldiffd_simpl_anisotropic,p_par(37)) ! bool
-        call copy_addr(latm_chemistry,p_par(38)) ! bool
-        call copy_addr(lsubstep,p_par(39)) ! bool
-        call copy_addr(lnoaerosol,p_par(40)) ! bool
-        call copy_addr(lnocondens_term,p_par(41)) ! bool
-        call copy_addr(ldustcondensation_simplified,p_par(42)) ! bool
-        call copy_addr(lsemi_chemistry,p_par(43)) ! bool
-        call copy_addr(lradius_binning,p_par(44)) ! bool
-        call copy_addr(lzero_upper_kern,p_par(45)) ! bool
-        call copy_addr(ldustcoagulation_simplified,p_par(46)) ! bool
-        call copy_addr(lself_collisions,p_par(47)) ! bool
-        call copy_addr(lmice,p_par(48)) ! bool
-        call copy_addr(lmomcons,p_par(49)) ! bool
-        call copy_addr(lmomconsb,p_par(50)) ! bool
-        call copy_addr(lmomcons2,p_par(51)) ! bool
-        call copy_addr(lmomcons3,p_par(52)) ! bool
-        call copy_addr(lmomcons3b,p_par(53)) ! bool
-        call copy_addr(lkernel_mean,p_par(54)) ! bool
-        call copy_addr(lpiecewise_constant_kernel,p_par(55)) ! bool
-        call copy_addr(lfree_molecule,p_par(56)) ! bool
-        call copy_addr(iadvec_ddensity,p_par(57)) ! int
-        call copy_addr(kern_max,p_par(58))
-        call copy_addr(g_condensparam,p_par(59))
-        call copy_addr(supsatratio_given,p_par(60))
-        call copy_addr(supsatratio_omega,p_par(61))
-        call copy_addr(self_collision_factor,p_par(62))
-        call copy_addr(dlnmd,p_par(63))
-        call copy_addr(dlnad,p_par(64))
-        call copy_addr(gs_condensparam,p_par(65))
-        call copy_addr(gs_condensparam0,p_par(66))
-        call string_to_enum(enum_self_collisions,self_collisions)
-        call copy_addr(enum_self_collisions,p_par(67)) ! int
-        call string_to_enum(enum_bordernd,bordernd)
-        call copy_addr(enum_bordernd,p_par(68)) ! int
-        call copy_addr(dsize,p_par(69)) ! (ndustspec)
-        call copy_addr(diffnd_ndustspec,p_par(70)) ! (ndustspec)
-        call copy_addr(mi,p_par(71)) ! (ndustspec)
-        call copy_addr(diffnd_anisotropic,p_par(72)) ! real3
-        call copy_addr(kernel_mean,p_par(73)) ! (ndustspec) (ndustspec)
-        call copy_addr(lcondensing_species,p_par(74)) ! bool
+      call copy_addr(deltavd_imposed,p_par(12))
+      call copy_addr(rho_w,p_par(13))
+      call copy_addr(dwater,p_par(14))
+      call copy_addr(deltavd_const,p_par(15))
+      call copy_addr(rgas,p_par(16))
+      call copy_addr(m_w,p_par(17))
+      call copy_addr(aa,p_par(18))
+      call copy_addr(dt_substep,p_par(19))
+      call copy_addr(momcons_term_frac,p_par(20))
+      call copy_addr(iglobal_nd,p_par(21)) ! int
+      call copy_addr(ludstickmax,p_par(22)) ! bool
+      call copy_addr(lno_deltavd,p_par(23)) ! bool
+      call copy_addr(ldustnucleation,p_par(24)) ! bool
+      call copy_addr(lcalcdkern,p_par(25)) ! bool
+      call copy_addr(ldustcontinuity,p_par(26)) ! bool
+      call copy_addr(ldeltavd_thermal,p_par(27)) ! bool
+      call copy_addr(ldeltavd_turbulent,p_par(28)) ! bool
+      call copy_addr(ldust_cdtc,p_par(29)) ! bool
+      call copy_addr(ldiffd_simplified,p_par(30)) ! bool
+      call copy_addr(ldiffd_dusttogasratio,p_par(31)) ! bool
+      call copy_addr(ldiffd_hyper3,p_par(32)) ! bool
+      call copy_addr(ldiffd_hyper3lnnd,p_par(33)) ! bool
+      call copy_addr(ldiffd_hyper3_polar,p_par(34)) ! bool
+      call copy_addr(ldiffd_shock,p_par(35)) ! bool
+      call copy_addr(ldiffd_hyper3_mesh,p_par(36)) ! bool
+      call copy_addr(ldiffd_simpl_anisotropic,p_par(37)) ! bool
+      call copy_addr(latm_chemistry,p_par(38)) ! bool
+      call copy_addr(lsubstep,p_par(39)) ! bool
+      call copy_addr(lnoaerosol,p_par(40)) ! bool
+      call copy_addr(lnocondens_term,p_par(41)) ! bool
+      call copy_addr(ldustcondensation_simplified,p_par(42)) ! bool
+      call copy_addr(lsemi_chemistry,p_par(43)) ! bool
+      call copy_addr(lradius_binning,p_par(44)) ! bool
+      call copy_addr(lzero_upper_kern,p_par(45)) ! bool
+      call copy_addr(ldustcoagulation_simplified,p_par(46)) ! bool
+      call copy_addr(lself_collisions,p_par(47)) ! bool
+      call copy_addr(lmice,p_par(48)) ! bool
+      call copy_addr(lmomcons,p_par(49)) ! bool
+      call copy_addr(lmomconsb,p_par(50)) ! bool
+      call copy_addr(lmomcons2,p_par(51)) ! bool
+      call copy_addr(lmomcons3,p_par(52)) ! bool
+      call copy_addr(lmomcons3b,p_par(53)) ! bool
+      call copy_addr(lkernel_mean,p_par(54)) ! bool
+      call copy_addr(lpiecewise_constant_kernel,p_par(55)) ! bool
+      call copy_addr(lfree_molecule,p_par(56)) ! bool
+      call copy_addr(iadvec_ddensity,p_par(57)) ! int
+      call copy_addr(kern_max,p_par(58))
+      call copy_addr(g_condensparam,p_par(59))
+      call copy_addr(supsatratio_given,p_par(60))
+      call copy_addr(supsatratio_omega,p_par(61))
+      call copy_addr(self_collision_factor,p_par(62))
+      call copy_addr(dlnmd,p_par(63))
+      call copy_addr(dlnad,p_par(64))
+      call copy_addr(gs_condensparam,p_par(65))
+      call copy_addr(gs_condensparam0,p_par(66))
+      call string_to_enum(enum_self_collisions,self_collisions)
+      call copy_addr(enum_self_collisions,p_par(67)) ! int
+      call string_to_enum(enum_bordernd,bordernd)
+      call copy_addr(enum_bordernd,p_par(68)) ! int
+      call copy_addr(dsize,p_par(69)) ! (ndustspec)
+      call copy_addr(diffnd_ndustspec,p_par(70)) ! (ndustspec)
+      call copy_addr(mi,p_par(71)) ! (ndustspec)
+      call copy_addr(diffnd_anisotropic,p_par(72)) ! real3
+      call copy_addr(kernel_mean,p_par(73)) ! (ndustspec) (ndustspec)
+      call copy_addr(lcondensing_species,p_par(74)) ! bool
 
     endsubroutine pushpars2c
 !***********************************************************************

@@ -51,13 +51,13 @@ module Io
       if (lroot) call svn_id ("$Id$")
 !
       if (lread_from_other_prec) &
-        call warning('register_io','Reading from other precision not implemented')
+          call warning ('register_io', 'Reading from other precision not implemented')
 !
       lmonolithic_io = .true.
 
-      call getenv('HDF5_USE_FILE_LOCKING',locking)
-      if (trim(locking)/='FALSE') &
-        call warning('register_io','HDF5 files are possibly locked; writing may fail.')
+      call get_environment_variable ('HDF5_USE_FILE_LOCKING', locking)
+      if (trim(locking) /= 'FALSE') &
+          call warning ('register_io', 'HDF5 files are possibly locked; writing may fail.')
 !
     endsubroutine register_io
 !***********************************************************************
@@ -588,7 +588,7 @@ module Io
 !
 !  12-Oct-2019/PABourdin: moved code from 'input_snap'
 !
-      use Mpicomm, only: mpibcast_real, mpibcast_logical, MPI_COMM_WORLD
+      use Mpicomm, only: mpibcast_real, mpibcast_logical, MPI_COMM_PENCIL
       use Syscalls, only: system_cmd
 !
       real :: time
@@ -613,17 +613,15 @@ module Io
           if (lerrcont) call recover_time_from_series(time)
         endif
 !
-        call mpibcast_real (time, comm=MPI_COMM_WORLD)
+        call mpibcast_real (time, comm=MPI_COMM_PENCIL)
         t = time
 !
 !  Read further data if not to be omitted.
 !
         if (.not.lomit_add_data) then
 !
-          if (lroot) then
-            allocate (gx(mxgrid), gy(mygrid), gz(mzgrid), stat=alloc_err)
-            if (alloc_err > 0) call fatal_error ('input_snap', 'Could not allocate memory for gx,gy,gz', .true.)
-          endif
+          allocate (gx(mxgrid), gy(mygrid), gz(mzgrid), stat=alloc_err)
+          if (alloc_err > 0) call fatal_error ('input_snap', 'Could not allocate memory for gx,gy,gz', .true.)
 
           lerrcont=.false.
           if (lroot) then
@@ -679,15 +677,15 @@ module Io
           endif
           call distribute_grid (dx_tilde, dy_tilde, dz_tilde, gx, gy, gz)
 
-          call mpibcast_real (dx, comm=MPI_COMM_WORLD)
-          call mpibcast_real (dy, comm=MPI_COMM_WORLD)
-          call mpibcast_real (dz, comm=MPI_COMM_WORLD)
-          call mpibcast_real (Lx, comm=MPI_COMM_WORLD)
-          call mpibcast_real (Ly, comm=MPI_COMM_WORLD)
-          call mpibcast_real (Lz, comm=MPI_COMM_WORLD)
+          call mpibcast_real (dx, comm=MPI_COMM_PENCIL)
+          call mpibcast_real (dy, comm=MPI_COMM_PENCIL)
+          call mpibcast_real (dz, comm=MPI_COMM_PENCIL)
+          call mpibcast_real (Lx, comm=MPI_COMM_PENCIL)
+          call mpibcast_real (Ly, comm=MPI_COMM_PENCIL)
+          call mpibcast_real (Lz, comm=MPI_COMM_PENCIL)
 
 100       if (lroot) call file_close_hdf5
-          call mpibcast_logical(lerrcont, comm=MPI_COMM_WORLD)
+          call mpibcast_logical(lerrcont, comm=MPI_COMM_PENCIL)
           if (lerrcont) then
             call warning('input_snap_finalize','grid data corrupted, reading grid from grid.h5')
             call rgrid('')
@@ -697,6 +695,8 @@ module Io
             call system_cmd('rm -f '//snaplink)
             snaplink=''
           endif
+!
+          deallocate (gx, gy, gz)
 !
         endif
       endif
@@ -1049,7 +1049,12 @@ contains
       write_persist_torus_rect = .true.
       if (write_persist_id (label, id)) return
 !
-      call output_hdf5 ('persist/'//lower_case (label), value)
+      call output_hdf5 ('persist/'//lower_case (label)//'_center', value%center(1))
+      call output_hdf5 ('persist/'//lower_case (label)//'_th', value%th)
+      call output_hdf5 ('persist/'//lower_case (label)//'_ph', value%ph)
+      call output_hdf5 ('persist/'//lower_case (label)//'_r_in', value%r_in)
+      call output_hdf5 ('persist/'//lower_case (label)//'_thick', value%thick)
+      call output_hdf5 ('persist/'//lower_case (label)//'_height', value%height)
       write_persist_torus_rect = .false.
 !
     endfunction write_persist_torus_rect
@@ -1381,7 +1386,7 @@ contains
 !
 !  27-Oct-2018/PABourdin: coded
 !
-      use Mpicomm, only: mpibcast_real, MPI_COMM_WORLD
+      use Mpicomm, only: mpibcast_real, MPI_COMM_PENCIL
 !
       character (len=*) :: file         ! not used
 !
@@ -1389,10 +1394,10 @@ contains
       real, dimension (:), allocatable :: gx, gy, gz
       integer :: alloc_err
 !
+      allocate (gx(mxgrid), gy(mygrid), gz(mzgrid), stat=alloc_err)
+      if (alloc_err > 0) call fatal_error ('rgrid', 'Could not allocate memory for gx,gy,gz', .true.)
+!
       if (lroot) then
-        allocate (gx(mxgrid), gy(mygrid), gz(mzgrid), stat=alloc_err)
-        if (alloc_err > 0) call fatal_error ('rgrid', 'Could not allocate memory for gx,gy,gz', .true.)
-
         filename = trim (datadir)//'/grid.h5'
         call file_open_hdf5 (filename, global=.false., read_only=.true.)
         call input_hdf5 ('grid/x', gx, mxgrid)
@@ -1406,12 +1411,14 @@ contains
         call input_hdf5 ('grid/Lz', Lz)
       endif
       call distribute_grid (x, y, z, gx, gy, gz)
+!
       if (lroot) then
         call input_hdf5 ('grid/dx_1', gx, mxgrid)
         call input_hdf5 ('grid/dy_1', gy, mygrid)
         call input_hdf5 ('grid/dz_1', gz, mzgrid)
       endif
       call distribute_grid (dx_1, dy_1, dz_1, gx, gy, gz)
+!
       if (lroot) then
         call input_hdf5 ('grid/dx_tilde', gx, mxgrid)
         call input_hdf5 ('grid/dy_tilde', gy, mygrid)
@@ -1419,15 +1426,16 @@ contains
         call file_close_hdf5
       endif
       call distribute_grid (dx_tilde, dy_tilde, dz_tilde, gx, gy, gz)
+      deallocate (gx, gy, gz)
 !
-      call mpibcast_real (dx, comm=MPI_COMM_WORLD)
-      call mpibcast_real (dy, comm=MPI_COMM_WORLD)
-      call mpibcast_real (dz, comm=MPI_COMM_WORLD)
-      call mpibcast_real (Lx, comm=MPI_COMM_WORLD)
-      call mpibcast_real (Ly, comm=MPI_COMM_WORLD)
-      call mpibcast_real (Lz, comm=MPI_COMM_WORLD)
+      call mpibcast_real (dx, comm=MPI_COMM_PENCIL)
+      call mpibcast_real (dy, comm=MPI_COMM_PENCIL)
+      call mpibcast_real (dz, comm=MPI_COMM_PENCIL)
+      call mpibcast_real (Lx, comm=MPI_COMM_PENCIL)
+      call mpibcast_real (Ly, comm=MPI_COMM_PENCIL)
+      call mpibcast_real (Lz, comm=MPI_COMM_PENCIL)
 !
-      if (lroot.and.ip <= 4) then
+      if (lroot .and. (ip <= 4)) then
         print *, 'rgrid: Lx,Ly,Lz=', Lx, Ly, Lz
         print *, 'rgrid: dx,dy,dz=', dx, dy, dz
       endif

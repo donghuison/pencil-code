@@ -39,6 +39,7 @@ module Diagnostics
   public :: sum_mn_name_halfy, surf_mn_name, sum_lim_mn_name
   public :: sum_mn_name_halfz
   public :: xysum_mn_name_z, xzsum_mn_name_y, yzsum_mn_name_x
+  public :: xymax_mn_name_z
   public :: phizsum_mn_name_r, ysum_mn_name_xz, zsum_mn_name_xy
   public :: phisum_mn_name_rz, calc_phiavg_profile
   public :: yzintegrate_mn_name_x, xzintegrate_mn_name_y, xyintegrate_mn_name_z
@@ -108,7 +109,7 @@ module Diagnostics
   private
 !
   real, pointer, dimension(:) :: p_phiavg_norm
-  real, dimension (nrcyl,nx) :: phiavg_profile=0.0
+  real, allocatable, dimension (:,:) :: phiavg_profile
   real :: dVol_rel1, dA_xy_rel1, dA_yz_rel1, dA_xz_rel1, dL_y_rel1
 
   character (len=intlen) :: ch1davg, ch2davg
@@ -138,6 +139,11 @@ module Diagnostics
       real :: dxeff,dyeff,dzeff
       real :: intdr_rel, intdtheta_rel, intdphi_rel, intdz_rel, intrdr_sph
       integer :: i
+
+      if(.not.allocated(phiavg_profile)) then
+        allocate(phiavg_profile(nrcyl,nx))
+        phiavg_profile = 0.0
+      endif
 !
 !  Since many of the averaging routines used for diagnostics don't account
 !  for nonequidistant coordinates, warn the user.
@@ -320,7 +326,7 @@ module Diagnostics
       use Sub, only: insert
       use Syscalls, only: system_cmd
 !
-      character (len=1000) :: fform,legend,line
+      character (len=max_diagnostics*max_col_width) :: fform,legend,line
       integer :: iname, nnamel
       real, dimension(2*nname) :: buffer
       integer, parameter :: lun=1
@@ -402,7 +408,7 @@ module Diagnostics
         write(lun,'(a)') trim(line)
         !flush(lun)               ! this is a F2003 feature...
         close(lun)
-        if (lupdate_cvs) call system_cmd("cvs ci -m 'automatic update' >& /dev/null &")
+        if (lupdate_cvs) call system_cmd("cvs ci -m 'automatic update' > /dev/null 2>&1")
 !
 !  Write to stdout.
 !
@@ -746,7 +752,7 @@ module Diagnostics
 !  The result is present everywhere
 !
       average_density=mass/box_volume
-      call mpibcast_real(average_density,comm=MPI_COMM_WORLD)
+      call mpibcast_real(average_density,comm=MPI_COMM_PENCIL)
 !
     endsubroutine get_average_density
 !**********************************************************************
@@ -767,7 +773,7 @@ module Diagnostics
 !
       real, dimension (nlname) :: fmax_tmp, fsum_tmp, fmax, fsum, fweight_tmp
       real :: vol
-      integer :: iname, imax_count, isum_count, nmax_count, nsum_count, itype, maxreq
+      integer :: iname, imax_count, isum_count, nmax_count, nsum_count, itype
       logical :: lweight_comm, lalways
       integer, parameter :: lun=1
       character (len=fnlen) :: datadir='data',path=''
@@ -855,8 +861,16 @@ module Diagnostics
               if (itype==ilabel_max_neg)        &
                   vname(iname)=-fmax(imax_count)
 !
-              if (itype==ilabel_max_reciprocal) &
+              if (itype==ilabel_max_reciprocal) then
+                if (fmax(imax_count)==0.) then
+!                 2026-02-16/Kishore: Fred, this seems a strange thing to do;
+!                 2026-02-16/Kishore: we don't try to filter out negative values
+!                 2026-02-16/Kishore: for ilabel_max_sqrt, do we?
+                  vname(iname)=0.
+                else
                   vname(iname)=1./fmax(imax_count)
+                endif
+              endif
 !
             elseif (itype>0) then
 !
@@ -962,8 +976,11 @@ module Diagnostics
 !MR: but wastes storage in fnamez
 !
 !   6-jun-02/axel: coded
+!   27-mar-2025/Kishore: handling of itype_name_z
 !
-      real, dimension(nz,nprocz,nnamez) :: fsumz
+      use General, only: itoa
+!
+      real, dimension(nz,nprocz) :: fsumz, fmaxz
       integer, dimension(nz) :: nsum, ncount
       integer, dimension(:,:) :: ncountsz
       real, dimension(:,:,:) :: fnamez
@@ -986,12 +1003,15 @@ module Diagnostics
 !
               call mpiallreduce_sum_int(ncount,nsum,nz,IXYPLANE)
 !
+              if(itype_name_z(idiag) == ilabel_sum) then
+!
 !  Form average by dividing by nsum. Dividing by dA_xy_rel1
 !  necessary as below the average is multiplied by that.
 !
-              where (nsum>0) fnamez(:,ipz+1,idiag)=fnamez(:,ipz+1,idiag)/(dA_xy_rel1*nsum)
-              ncountsz(:,idiag)=0
-
+                where (nsum>0) fnamez(:,ipz+1,idiag)=fnamez(:,ipz+1,idiag)/(dA_xy_rel1*nsum)
+                ncountsz(:,idiag)=0
+              endif
+!
             endif
           enddo
         endif
@@ -999,8 +1019,23 @@ module Diagnostics
 !  Communicate over all processors.
 !  The result is only present on the root processor
 !
-        call mpireduce_sum(fnamez,fsumz,(/nz,nprocz,nnamez/))
-        if (lroot) fnamez(:,:,1:nnamez)=fsumz(:,:,1:nnamez)*dA_xy_rel1
+        do idiag=1,nnamez
+          select case(itype_name_z(idiag))
+          case(ilabel_save)
+            call mpireduce_sum(fnamez(:,:,idiag),fsumz,(/nz,nprocz/))
+            if (lroot) fnamez(:,:,idiag)=fsumz
+          case(ilabel_sum)
+            call mpireduce_sum(fnamez(:,:,idiag),fsumz,(/nz,nprocz/))
+            if (lroot) fnamez(:,:,idiag)=fsumz*dA_xy_rel1
+          case(ilabel_max,ilabel_max_dt)
+            call mpireduce_max(fnamez(:,:,idiag),fmaxz,(/nz,nprocz/))
+            if (lroot) fnamez(:,:,idiag)=fmaxz(:,:)
+          case default
+            call fatal_error('xyaverages_z', 'itype_name_z has an unhandled value '// &
+            trim(itoa(itype_name_z(idiag)))//' at idiag='//trim(itoa(idiag))// &
+            ' (cnamez='//trim(cnamez(idiag))//')')
+          endselect
+        enddo
       endif
 !
     endsubroutine xyaverages_z
@@ -1173,6 +1208,7 @@ module Diagnostics
 !   7-aug-03/wolf: coded
 !  24-Nov-2018/PABourdin: redesigned
 !  09-nov-2022/ccyang: reorganized
+!  27-mar-2025/Kishore: handle ilabel_max_dt
 !
       use HDF5_IO, only: output_average
       use Mpicomm, only: mpiwtime
@@ -1180,12 +1216,16 @@ module Diagnostics
       logical, save :: lfirst_call = .true.
       logical :: ltimer
       real :: taver
+      integer :: iname
 !
       taver = 0.0
       t1ddiagnos = tdiagnos
       ltimer = ip <= 12 .and. lroot
 !
       if (nnamez > 0) then
+        do iname=1,nnamez
+          if (itype_name_z(iname)==ilabel_max_dt) fnamez(:,:,iname) = dt*fnamez(:,:,iname)
+        enddo
         if (ltimer) taver = mpiwtime()
         call output_average(datadir, 'xy', nnamez, cnamez, fnamez, nzgrid, t1ddiagnos, lwrite_avg1d_binary, lroot)
         if (ltimer) print *, 'write_1daverages: write xy in ', mpiwtime() - taver, ' seconds'
@@ -1376,7 +1416,7 @@ module Diagnostics
 !  27-aug-13/MR  : reinstated 0p
 !  10-jan-17/MR  : added correction of floating-point formats if not sufficient to hold sign
 !
-      use General, only: safe_character_assign, itoa
+      use General, only: safe_character_assign, itoa, keep_compiler_quiet
 !
       character (len=*) :: cname, cform
       character (len=*) :: ctest
@@ -1462,6 +1502,8 @@ module Diagnostics
       else
         fparse_name=0
       endif
+
+      call keep_compiler_quiet(ncomp)
 !
     endfunction fparse_name
 !***********************************************************************
@@ -1810,7 +1852,7 @@ module Diagnostics
 !  19-jun-11/anders: changed to sum single number of all cores
 !  17-jun-09/ccyang: adapted from max_name
 !  03-sep-09/MR: corrected to real sum
-!  12-apr-16/Jørgen+Nils: overloading with int
+!  12-apr-16/Joergen+Nils: overloading with int
 !
       integer, intent(in) :: a
       integer, intent(in) :: iname
@@ -2155,7 +2197,7 @@ module Diagnostics
       real, dimension (nx) :: a,aux,rlim
       type (pencil_case) :: p
       real :: dv
-      integer :: iname,i,isum
+      integer :: iname
       ! logical, save :: lfirsttime=.true.
 !
       if (iname /= 0) then
@@ -2201,23 +2243,31 @@ module Diagnostics
 !
     endsubroutine sum_lim_mn_name
 !*********************************************************
-    subroutine surf_mn_name(a,iname,ncontrib)
+    subroutine surf_mn_name(a,iname,ncontrib,lcontrib)
 !
 !  Successively calculate surface integral. This routine assumes
 !  that "a" contains the partial result for each pencil, so here
 !  we just need to add up the contributions from all processors.
 !  Start from zero if lfirstpoint=.true.
+!  lcontrib: logical that denotes whether the current processor
+!  should contribute
 !
 !  14-aug-03/axel: adapted from sum_mn_name
 !  15-feb-13/MR: test of iname incorporated
+!  26-Feb-2026/Kishore: added lcontrib
 !
       real, intent(in) :: a
       integer, intent(in) :: iname,ncontrib
+      logical, intent(in), optional :: lcontrib
+!
+      logical :: thisproc
 !
       if (iname>0) then
 !
+        thisproc = loptest(lcontrib, .true.)
+!
         if (lfirstpoint) fname(iname)=0.
-        if (n==ncontrib) fname(iname)=fname(iname)+a
+        if (thisproc .and. n==ncontrib) fname(iname)=fname(iname)+a
 !
 !  Set corresponding entry in itype_name.
 !
@@ -2294,6 +2344,7 @@ module Diagnostics
     subroutine xysum_mn_name_z(a,iname,mask)
 !
 !   3-sep-13/MR: derived from xysum_mn_name_z
+!   27-mar-2025/Kishore: added ilabel_sum
 !
       use Cdata, only: n
 !
@@ -2316,6 +2367,8 @@ module Diagnostics
       else
         call xysum_mn_name_z_npar(a,n,iname,MASK=lmask)
       endif
+!
+      if (iname/=0) itype_name_z(iname) = ilabel_sum
 !
     endsubroutine xysum_mn_name_z
 !***********************************************************************
@@ -2359,6 +2412,44 @@ module Diagnostics
       endif
 !
     endsubroutine xysum_mn_name_z_npar
+!***********************************************************************
+    subroutine xymax_mn_name_z(a,iname,l_dt)
+!
+!  Successively calculate maximum over x,y of a, which is supplied at each call.
+!  The result fnamez is z-dependent.
+!
+!   27-mar-2025/Kishore: coded
+!
+      use Cdata, only: n
+!
+      real, dimension(nx), intent(in) :: a
+      integer, intent(in) :: iname
+      logical, optional, intent(in) :: l_dt
+!
+      integer :: nl
+!
+!  Only do something if iname is not zero.
+!
+      if (iname==0) return
+!
+!       Initialize to -impossible, including other parts of the z-array
+!       which are later merged with an mpi reduce command.
+!
+      !TODO: cleaner way?
+      if (lfirstpoint) fnamez(:,:,iname) = -impossible
+!
+!  n starts with nghost+1, so the correct index is n-nghost
+!
+      nl=n-nghost
+      fnamez(nl,ipz+1,iname)=max(fnamez(nl,ipz+1,iname),maxval(a))
+!
+      if (loptest(l_dt)) then
+        itype_name_z(iname)=ilabel_max_dt
+      else
+        itype_name_z(iname)=ilabel_max
+      endif
+!
+    endsubroutine xymax_mn_name_z
 !***********************************************************************
     subroutine xzsum_mn_name_y(a,iname)
 !
@@ -3155,12 +3246,16 @@ module Diagnostics
 !
       integer :: stat
 !
-      allocate(fname(nnamel),stat=stat)
-      if (stat>0) call fatal_error('allocate_fnames','Could not allocate fname')
-      if (ldebug) print*, 'allocate_fnames    : allocated memory for '// &
-                          'fname   with nname   =', nnamel
-      allocate(fname_keep(nnamel),stat=stat)
-      if (stat>0) call fatal_error('allocate_fnames','Could not allocate fname_keep')
+      if(.not. allocated(fname)) then
+         allocate(fname(nnamel),stat=stat)
+         if (stat>0) call fatal_error('allocate_fnames','Could not allocate fname')
+         if (ldebug) print*, 'allocate_fnames    : allocated memory for '// &
+                             'fname   with nname   =', nnamel
+      endif
+      if(.not. allocated(fname_keep)) then
+        allocate(fname_keep(nnamel),stat=stat)
+        if (stat>0) call fatal_error('allocate_fnames','Could not allocate fname_keep')
+      endif
       fname=0.0
       fname_keep=0.0
 
@@ -3227,6 +3322,7 @@ module Diagnostics
 !   24-nov-09/anders: copied from allocate_yaverages
 !   11-jan-11/MR: parameter nnamel added
 !   25-mar-25/TP: refactored name allocations to their own function
+!   27-mar-2025/Kishore: added allocation of itype_name_z
 !
       integer, intent(in) :: nnamel
 !
@@ -3247,6 +3343,12 @@ module Diagnostics
       if (ldebug) print*, 'allocate_xyaverages: allocated memory for '// &
                           'ncountsz  with nnamez  =', nnamel
       ncountsz=-1
+!
+      allocate(itype_name_z(nnamel),stat=stat)
+      if (stat>0) call fatal_error('allocate_xyaverages','Could not allocate itype_name_z')
+      if (ldebug) print*, 'allocate_xyaverages    : allocated memory for '// &
+                          'itype_name_z with nname   =', nnamel
+      itype_name_z=ilabel_save
 !
     endsubroutine allocate_xyaverages
 !***********************************************************************
@@ -3616,6 +3718,7 @@ module Diagnostics
       if (allocated(cnamez)) deallocate(cnamez)
       if (allocated(cformz)) deallocate(cformz)
       if (allocated(ncountsz)) deallocate(ncountsz)
+      if (allocated(itype_name_z)) deallocate(itype_name_z)
 !
     endsubroutine xyaverages_clean_up
 !***********************************************************************
@@ -3780,7 +3883,7 @@ module Diagnostics
 !
       use General, only: allpos_in_array_int
 
-      integer :: nmax, nsum, nmin, i
+      integer :: nmax, nsum
       logical :: firstcall=.true., firstcall_from_pencil_check=.false.
       integer, dimension(2) :: max_range, sum_range
       !$omp threadprivate(firstcall)
@@ -3790,7 +3893,7 @@ module Diagnostics
 
       sum_range(1) = 1
       sum_range(2) = 40
-      
+
 !  Have to do this ugly workaround since the pencil tests call this function
 !  and we want the first non-pencil-test call.
 !
@@ -3858,7 +3961,7 @@ module Diagnostics
       nnamexy = parallel_count_lines(zaver_in_file)
       nnamerz = parallel_count_lines(phiaver_in_file)
 
-    endsubroutine calc_nnames 
+    endsubroutine calc_nnames
 !***********************************************************************
     subroutine allocate_diagnostic_names()
 !
@@ -3964,6 +4067,11 @@ module Diagnostics
       eps_rkf_save = eps_rkf
     endif
     lpencil_save = lpencil
+    deltay_save = deltay
+
+    scl_factor_target_save = scl_factor_target
+    Hp_target_save = Hp_target
+    appa_target_save = appa_target
 
     endsubroutine save_diagnostic_controls
 !***********************************************************************
@@ -3989,6 +4097,11 @@ module Diagnostics
     tslice = tslice_save
     tsound = tsound_save
     t = t_save
+
+    deltay = deltay_save
+    scl_factor_target   = scl_factor_target_save
+    Hp_target   = Hp_target_save
+    appa_target = appa_target_save
 
     if (ldiagnos) then
       tdiagnos  = t_save

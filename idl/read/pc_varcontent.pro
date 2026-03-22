@@ -116,6 +116,22 @@ indices = [ $
   { name:'irhs', label:'RHS', dims:3 }, $
   { name:'iss_b', label:'Base Entropy', dims:1 }, $
   { name:'iaa', label:'Magnetic vector potential', dims:3 }, $
+  { name:'iacou', label:'Magnetic vector potential in Coulomb gauge', dims:3 }, $
+  { name:'iaadv', label:'Magnetic vector potential in advective gauge', dims:3 }, $
+  { name:'ijbt', label:'time-integrated current helicity density', dims:1 }, $
+  { name:'ij2t', label:'time-integrated magnetic energy density', dims:1 }, $
+  ;{ name:'iacoux', label:'acoux', dims:1 }, $
+  ;{ name:'iacouy', label:'acouy', dims:1 }, $
+  ;{ name:'iacouz', label:'acouz', dims:1 }, $
+  ;{ name:'iaadvx', label:'aadvx', dims:1 }, $
+  ;{ name:'iaadvy', label:'aadvy', dims:1 }, $
+  ;{ name:'iaadvz', label:'aadvz', dims:1 }, $
+  { name:'ioeex', label:'oeex', dims:1 }, $
+  { name:'ioeey', label:'oeey', dims:1 }, $
+  { name:'ioeez', label:'oeez', dims:1 }, $
+  { name:'ieig', label:'eig', dims:3 }, $
+  { name:'iovSH', label:'ovSH', dims:1 }, $
+  { name:'iovRR', label:'ovRR', dims:1 }, $
   { name:'ia0', label:'Electric potential for Lorenz gauge', dims:1 }, $
   { name:'iinfl_phi', label:'Inflaton phi', dims:1 }, $
   { name:'iinfl_dphi', label:'Inflaton time derivative dphi', dims:1 }, $
@@ -131,11 +147,13 @@ indices = [ $
   { name:'ijj', label:'Current density', dims:3 }, $
   { name:'iee', label:'Electric field', dims:3 }, $
   { name:'ie', label:'Electric field', dims:3 }, $
+  { name:'ijxb', label:'Lorentz force', dims:3 }, $
   { name:'iemf', label:'Electromotive force', dims:3 }, $
   { name:'iaak', label:'Real part of vector potential', dims:3 }, $
   { name:'iaakim', label:'Imaginary part of vector potential', dims:3 }, $
   { name:'ieek', label:'Real part of electric field', dims:3 }, $
   { name:'ieekim', label:'Imaginary part of electric field', dims:3 }, $
+  { name:'icurlb', label:'curl of magnetic field', dims:3 }, $
  ;
   { name:'ikappar', label:'kappar', dims:1 }, $
   { name:'itau', label:'tau', dims:1 }, $
@@ -201,8 +219,10 @@ indices = [ $
   { name:'ispec_3vec', label:'Special vector', dims:3 }, $
   { name:'ilorentz', label:'Lorentz factor', dims:1 }, $
   { name:'ihless', label:'Higgsless field', dims:1 }, $
-  { name:'iphi', label:'Electric potential', dims:1 }, $
+  { name:'iphi', label:'Electric or scalar potential', dims:1 }, $
+  { name:'idphi', label:'Derivative of scalar potential', dims:1 }, $
   { name:'iLam', label:'Gauge potential', dims:1 }, $
+  { name:'iLamRA', label:'Gauge potential', dims:1 }, $
   { name:'idiva', label:'divA', dims:1 }, $
   { name:'iecr', label:'Cosmic ray energy density', dims:1 }, $
   { name:'ifcr', label:'Cosmic ray energy flux', dims:3 }, $
@@ -227,6 +247,8 @@ indices = [ $
   { name:'iaxi_impsiLdot', label:'axi_impsiLdot', dims:1 }, $
   { name:'iaxi_TR', label:'axi_TR', dims:1 }, $
   { name:'iaxi_TL', label:'axi_TL', dims:1 }, $
+  { name:'iaxi_uR', label:'axi_uR', dims:1 }, $
+  { name:'iaxi_uL', label:'axi_uL', dims:1 }, $
   { name:'iaxi_imTR', label:'axi_imTR', dims:1 }, $
   { name:'iaxi_imTL', label:'axi_imTL', dims:1 }, $
   { name:'iaxi_TRdot', label:'axi_imTRdot', dims:1 }, $
@@ -308,11 +330,105 @@ indices_aux = [ $
   { name:'ispecaux', label:'Special auxiliary variable', dims:1 }, $
 ; { name:'iTij', label:'Tij', dims:6 }, $
   { name:'iTij_xx', label:'iTij_xx', dims:1 }, $
-  { name:'iTij_xy', label:'iTij_xx', dims:1 }, $
-  { name:'iTij_xz', label:'iTij_xx', dims:1 }, $
-  { name:'iTij_yy', label:'iTij_xx', dims:1 }, $
-  { name:'iTij_yz', label:'iTij_xx', dims:1 }, $
-  { name:'iTij_zz', label:'iTij_xx', dims:1 }, $
+  { name:'iTij_xy', label:'iTij_xy', dims:1 }, $
+  { name:'iTij_xz', label:'iTij_xz', dims:1 }, $
+  { name:'iTij_yy', label:'iTij_yy', dims:1 }, $
+  { name:'iTij_yz', label:'iTij_yz', dims:1 }, $
+  { name:'iTij_zz', label:'iTij_zz', dims:1 }, $
+; { name:'iuij', label:'uij', dims:9 }, $
+; { name:'iguij', label:'uij', dims:9 }, $
+  { name:'iguij1', label:'iguij_xx', dims:1 }, $
+  { name:'iguij2', label:'iguij_xy', dims:1 }, $
+  { name:'iguij3', label:'iguij_xz', dims:1 }, $
+  { name:'iguij4', label:'iguij_yx', dims:1 }, $
+  { name:'iguij5', label:'iguij_yy', dims:1 }, $
+  { name:'iguij6', label:'iguij_yz', dims:1 }, $
+  { name:'iguij7', label:'iguij_zx', dims:1 }, $
+  { name:'iguij8', label:'iguij_zx', dims:1 }, $
+  { name:'iguij9', label:'iguij_zz', dims:1 }, $
+; { name:'ibij', label:'bij', dims:9 }, $
+  { name:'ibij_xx', label:'ibij_xx', dims:1 }, $
+  { name:'ibij_xy', label:'ibij_xy', dims:1 }, $
+  { name:'ibij_xz', label:'ibij_xz', dims:1 }, $
+  { name:'ibij_yx', label:'ibij_yx', dims:1 }, $
+  { name:'ibij_yy', label:'ibij_xy', dims:1 }, $
+  { name:'ibij_yz', label:'ibij_xz', dims:1 }, $
+  { name:'ibij_zx', label:'ibij_zx', dims:1 }, $
+  { name:'ibij_zy', label:'ibij_zy', dims:1 }, $
+  { name:'ibij_zz', label:'ibij_zz', dims:1 }, $
+;
+  { name:'iuschur2x', label:'iuschur2x', dims:1 }, $
+  { name:'iuschur2y', label:'iuschur2y', dims:1 }, $
+  { name:'iuschur2z', label:'iuschur2z', dims:1 }, $
+  { name:'ibschur2x', label:'ibschur2x', dims:1 }, $
+  { name:'ibschur2y', label:'ibschur2y', dims:1 }, $
+  { name:'ibschur2z', label:'ibschur2z', dims:1 }, $
+;
+  { name:'iuschurm_RR', label:'iuschurm_RR', dims:1 }, $
+  { name:'iuschurm_EL', label:'iuschurm_EL', dims:1 }, $
+  { name:'ibschurm_RR', label:'ibschurm_RR', dims:1 }, $
+  { name:'ibschurm_EL', label:'ibschurm_EL', dims:1 }, $
+;
+  { name:'iuschur_SH_xx', label:'iuschur_SH_xx', dims:1 }, $
+  { name:'iuschur_SH_xy', label:'iuschur_SH_xy', dims:1 }, $
+  { name:'iuschur_SH_xz', label:'iuschur_SH_xz', dims:1 }, $
+  { name:'iuschur_SH_yx', label:'iuschur_SH_yx', dims:1 }, $
+  { name:'iuschur_SH_yy', label:'iuschur_SH_yy', dims:1 }, $
+  { name:'iuschur_SH_yz', label:'iuschur_SH_yz', dims:1 }, $
+  { name:'iuschur_SH_zx', label:'iuschur_SH_zx', dims:1 }, $
+  { name:'iuschur_SH_zy', label:'iuschur_SH_zy', dims:1 }, $
+  { name:'iuschur_SH_zz', label:'iuschur_SH_zz', dims:1 }, $
+;
+  { name:'iuschur_RR_xx', label:'iuschur_RR_xx', dims:1 }, $
+  { name:'iuschur_RR_xy', label:'iuschur_RR_xy', dims:1 }, $
+  { name:'iuschur_RR_xz', label:'iuschur_RR_xz', dims:1 }, $
+  { name:'iuschur_RR_yx', label:'iuschur_RR_yx', dims:1 }, $
+  { name:'iuschur_RR_yy', label:'iuschur_RR_yy', dims:1 }, $
+  { name:'iuschur_RR_yz', label:'iuschur_RR_yz', dims:1 }, $
+  { name:'iuschur_RR_zx', label:'iuschur_RR_zx', dims:1 }, $
+  { name:'iuschur_RR_zy', label:'iuschur_RR_zy', dims:1 }, $
+  { name:'iuschur_RR_zz', label:'iuschur_RR_zz', dims:1 }, $
+;
+  { name:'iuschur_EL_xx', label:'iuschur_EL_xx', dims:1 }, $
+  { name:'iuschur_EL_xy', label:'iuschur_EL_xy', dims:1 }, $
+  { name:'iuschur_EL_xz', label:'iuschur_EL_xz', dims:1 }, $
+  { name:'iuschur_EL_yx', label:'iuschur_EL_yx', dims:1 }, $
+  { name:'iuschur_EL_yy', label:'iuschur_EL_yy', dims:1 }, $
+  { name:'iuschur_EL_yz', label:'iuschur_EL_yz', dims:1 }, $
+  { name:'iuschur_EL_zx', label:'iuschur_EL_zx', dims:1 }, $
+  { name:'iuschur_EL_zy', label:'iuschur_EL_zy', dims:1 }, $
+  { name:'iuschur_EL_zz', label:'iuschur_EL_zz', dims:1 }, $
+;
+  { name:'ibschur_SH_xx', label:'ibschur_SH_xx', dims:1 }, $
+  { name:'ibschur_SH_xy', label:'ibschur_SH_xy', dims:1 }, $
+  { name:'ibschur_SH_xz', label:'ibschur_SH_xz', dims:1 }, $
+  { name:'ibschur_SH_yx', label:'ibschur_SH_yx', dims:1 }, $
+  { name:'ibschur_SH_yy', label:'ibschur_SH_yy', dims:1 }, $
+  { name:'ibschur_SH_yz', label:'ibschur_SH_yz', dims:1 }, $
+  { name:'ibschur_SH_zx', label:'ibschur_SH_zx', dims:1 }, $
+  { name:'ibschur_SH_zy', label:'ibschur_SH_zy', dims:1 }, $
+  { name:'ibschur_SH_zz', label:'ibschur_SH_zz', dims:1 }, $
+;
+  { name:'ibschur_RR_xx', label:'ibschur_RR_xx', dims:1 }, $
+  { name:'ibschur_RR_xy', label:'ibschur_RR_xy', dims:1 }, $
+  { name:'ibschur_RR_xz', label:'ibschur_RR_xz', dims:1 }, $
+  { name:'ibschur_RR_yx', label:'ibschur_RR_yx', dims:1 }, $
+  { name:'ibschur_RR_yy', label:'ibschur_RR_yy', dims:1 }, $
+  { name:'ibschur_RR_yz', label:'ibschur_RR_yz', dims:1 }, $
+  { name:'ibschur_RR_zx', label:'ibschur_RR_zx', dims:1 }, $
+  { name:'ibschur_RR_zy', label:'ibschur_RR_zy', dims:1 }, $
+  { name:'ibschur_RR_zz', label:'ibschur_RR_zz', dims:1 }, $
+;
+  { name:'ibschur_EL_xx', label:'ibschur_EL_xx', dims:1 }, $
+  { name:'ibschur_EL_xy', label:'ibschur_EL_xy', dims:1 }, $
+  { name:'ibschur_EL_xz', label:'ibschur_EL_xz', dims:1 }, $
+  { name:'ibschur_EL_yx', label:'ibschur_EL_yx', dims:1 }, $
+  { name:'ibschur_EL_yy', label:'ibschur_EL_yy', dims:1 }, $
+  { name:'ibschur_EL_yz', label:'ibschur_EL_yz', dims:1 }, $
+  { name:'ibschur_EL_zx', label:'ibschur_EL_zx', dims:1 }, $
+  { name:'ibschur_EL_zy', label:'ibschur_EL_zy', dims:1 }, $
+  { name:'ibschur_EL_zz', label:'ibschur_EL_zz', dims:1 }, $
+;
   { name:'iTij1', label:'Tij1', dims:1 }, $
   { name:'iTij2', label:'Tij2', dims:1 }, $
   { name:'iTij3', label:'Tij3', dims:1 }, $

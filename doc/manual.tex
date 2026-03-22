@@ -337,6 +337,11 @@
 \newcommand{\fig}[1]{\Fig{#1}}
 \newcommand{\nab}{\mbox{\boldmath $\nabla$} {}}
 \newcommand{\dd}{{\rm d} {}}
+\newcommand{\yr}{\,{\rm yr}}
+\newcommand{\Gyr}{\,{\rm Gyr}}
+\newcommand{\kms}{\,{\rm km\,s}^{-1}}
+\newcommand{\kpc}{\,{\rm kpc}}
+\def\half{\textstyle{\frac{1}{2}}}
 
 \newcommand{\Bhat}{\hat{B}}
 \newcommand{\BBhat}{\hat{\vec{B}}}
@@ -494,7 +499,7 @@ An up to date list of Pencil Code contributors can be found at
   joishi  & \htmladdnormallink{Jeff S.\ Oishi}{http://cms.jsoishi.org/} & Bates College\\
   JenSchober & \htmladdnormallink{Jennifer Schober}{https://jennifer-schober.com/} & EPFL, Lausanne \\
   Illarl & Illa R.\ Losada & McDonald Observatory, USA \\
-  Iomsn1 & \htmladdnormallink{Simon Candelaresi}{https://www.gla.ac.uk/schools/mathematicsstatistics/staff/simoncandelaresi/} & University of Glasgow \\
+  Iomsn1 & \htmladdnormallink{Simon Candelaresi}{https://simoncandelaresi.com/} & University of Augsburg \\
   grsarson & \htmladdnormallink{Graeme R. Sarson}{http://www.mas.ncl.ac.uk/~ngrs/home.html} & University of Newcastle\\
   fredgent  & \htmladdnormallink{Frederick Gent}{http://fagent.wikidot.com/} & Aalto University, Espoo\\
   fadiesis  & \htmladdnormallink{Fabio Del Sordo}{http://www.nordita.org/~fabio/} & Nordita, Stockholm \\
@@ -517,7 +522,7 @@ An up to date list of Pencil Code contributors can be found at
 
 \vfill
 
-Copyright \copyright{} 2001--2023 Wolfgang Dobler \& Axel Brandenburg
+Copyright \copyright{} 2001--2025 Wolfgang Dobler \& Axel Brandenburg
 \bigskip
 
 Permission is granted to make and distribute verbatim copies of
@@ -646,135 +651,162 @@ several of the following (or other appropriate) papers (listed here in temporal 
 \newcommand{\tmn}[2]{:~#1, ``#2,'' {\em Monthly Notices Roy. Astron. Soc.} (to be submitted)}
 
 \begin{list}{}{\leftmargin 3em \itemindent -3em\listparindent \itemindent
-\itemsep 0pt \parsep 1pt}\item[]
+\itemsep 0pt \parsep 1pt}
 
 % -- Isotropic homogeneous hydro turbulence --
+\item
 Dobler, W., Haugen, N. E. L., Yousef, T. A., \&
 Brandenburg, A.\yprN{2003}{E 68}{026304}
 {1-8}{Bottleneck effect in three-dimensional turbulence simulations}
 (\astroph{0303324})
 
 % -- Isotropic homogeneous MHD turbulence --
+\item
 Haugen, N. E. L., Brandenburg, A., \& Dobler, W.\yapjlS{2003}{597}{L141}
 {L144}{Is nonhelical hydromagnetic turbulence peaked at small scales?}
 (\astroph{0303372})
 
 % -- Passive scalar diffusion --
+\item
 Brandenburg, A., K\"apyl\"a, P., \& Mohammed, A.\ypf{2004}{16}{1020}
 {1027}{Non-Fickian diffusion and tau-approximation from numerical turbulence}
 (\astroph{0306521})
 
 % -- Dust in the fluid approximation --
+\item
 Johansen, A., Andersen, A. C., \& Brandenburg, A.\yana{2004}{417}{361}
 {371}{Simulations of dust-trapping vortices in protoplanetary discs}
 (\astroph{0310059})
 
 % -- Supersonic turbulence --
+\item
 Haugen, N. E. L., Brandenburg, A., \& Mee, A. J.\ymn{2004}{353}{947}
 {952}{Mach number dependence of the onset of dynamo action}
 (\astroph{0405453})
 
 % -- Homochirality --
+\item
 Brandenburg, A., \& Multam\"aki, T.\yjourS{2004}{Int.\ J.\ Astrobiol.}{3}{209}
 {219}{How long can left and right handed life forms coexist?}
 (\qbio{0407008})
 
 % -- Geodynamo --
+\item
 McMillan, D. G., \& Sarson, G. R.\ypepi{2005}{153}{124}
 {135}{Dynamo simulations in a spherical shell of ideal gas using a
 high-order Cartesian magnetohydrodynamics code}
 
 % -- Radiation transfer --
+\item
 Heinemann, T., Dobler, W., Nordlund, \AA., \&
 Brandenburg, A.\yana{2006}{448}{731}
 {737}{Radiative transfer in decomposed domains}
 (\astroph{0503510})
 
 % -- Star-in-a-box simulation --
+\item
 Dobler, W., Stix, M., \& Brandenburg, A.\yapj{2006}{638}{336}
 {347}{Convection and magnetic field generation in fully convective spheres}
 (\astroph{0410645})
 
 % -- Cosmic ray diffusion --
+\item
 Snodin, A. P., Brandenburg, A., Mee, A. J., \& Shukurov, A.\ymn{2006}{373}{643}
 {652}{Simulating field-aligned diffusion of a cosmic ray gas}
 (\astroph{0507176})
 
 % -- Dust represented as particles --
+\item
 Johansen, A., Klahr, H., \& Henning, T.\yapj{2006}{636}{1121}
 {1134}{Dust sedimentation and self-sustained Kelvin-Helmholtz turbulence
 in protoplanetary disc mid-planes}
 (\astroph{0512272})
 
 % -- Core accretion in the context of Code comparison --
+\item
 de Val-Borro, M. and 22 coauthors (incl.\ Lyra, W.)\ymn{2006}{370}{529}
 {558}{A comparative study of disc-planet interaction}
 (\astroph{0605237})
 
 % -- Self-gravity --
+\item
 Johansen, A., Oishi, J. S., Mac Low, M. M., Klahr, H., Henning, T.,
 \& Youdin, A.\ynat{2007}{448}{1022}
 {1025}{Rapid planetesimal formation in turbulent circumstellar disks}
 (\arXiv{0708.3890})
 
 % -- Global models of protoplanetary disks --
+\item
 Lyra, W., Johansen, A., Klahr, H., \& Piskunov, N.\yana{2008}{479}{883}
 {901}{Global magnetohydrodynamical models of turbulence in protoplanetary disks I. A cylindrical potential on a Cartesian grid and transport of solids}
 (\arXiv{0705.4090})
 
 % -- Test-field method --
+\item
 Brandenburg, A., R\"adler, K.-H., Rheinhardt, M., \& K\"apyl\"a, P. J.\yapj{2008}{676}{740}
 {751}{Magnetic diffusivity tensor and dynamo effects in rotating
 and shearing turbulence}
 (\arXiv{0710.4059})
 
 % -- Global simulations of planet formation --
+\item
 Lyra, W., Johansen, A., Klahr, H., \& Piskunov, N.\yana{2008}{491}{L41}{L44}{Embryos grown in the dead zone. Assembling the first protoplanetary cores in low-mass selfgravitating circumstellar disks of gas and solids}
 
 % -- N-body solver --
+\item
 Lyra, W., Johansen, A., Klahr, H., \& Piskunov, N.\yana{2009}{493}{1125}
 {1139}{Standing on the shoulders of giants. Trojan Earths and vortex trapping in low-mass selfgravitating protoplanetary disks of gas and solids}
 
 % -- Cylindrical grid --
+\item
 Lyra, W., Johansen, A., Zsom, A., Klahr, H., \& Piskunov, N.\yana{2009}{497}{869}
 {888}{Planet formation bursts at the borders of the dead zone in 2D numerical simulations of circumstellar disks}
 (\arXiv{0901.1638})
 
 % -- Spherical coordinates --
+\item
 Mitra, D., Tavakol, R., Brandenburg, A., \& Moss, D.\yapj{2009}{697}{923}
 {933}{Turbulent dynamos in spherical shell segments of varying geometrical extent} (\arXiv{0812.3106})
 
 % -- Particle impaction on a cylinder --
+\item
 Haugen, N. E. L., \& Kragset, S.\yjfm{2010}{661}{239}
 {261}{Particle impaction on a cylinder in a crossflow as function of Stokes and Reynolds numbers}
 
 % -- Nonlinear test-field method --
+\item
 Rheinhardt, M., \& Brandenburg, A.\yanaN{2010}{520}{A28}
 {Test-field method for mean-field coefficients with MHD background}
 (\arXiv{1004.0689})
 
 % -- Turbulent combustion --
+\item
 Babkovskaia, N., Haugen, N. E. L., Brandenburg, A.\yjour{2011}{J.\ Comp.\ Phys.}{230}{1}
 {12}{A high-order public domain code for direct numerical simulations of turbulent combustion}
 (\arXiv{1005.5301})
 
 % -- Particle Block Domain Decomposition (PBDD) --
+\item
 Johansen, A., Klahr, H., \& Henning, Th.\yanaN{2011}{529}{A62}
 {High-resolution simulations of planetesimal formation in turbulent protoplanetary discs}
 
 % -- superparticles --
+\item
 Johansen, A., Youdin, A. N., \& Lithwick, Y.\yanaN{2012}{537}{A125}
 {Adding particle collisions to the formation of asteroids and Kuiper belt objects via streaming instabilities}
 
 % -- photoelectric effect in debris disks --
+\item
 Lyra, W. \& Kuchner, W. \ynat{2013}{499}{184}{187}
 {Formation of sharp eccentric rings in debris disks with gas but without planets}
 
 % -- mutual drag force --
+\item
 Yang, C.-C., \& Johansen, A.\yapjs{2016}{224}{39}
 {Integration of Particle-Gas Systems with Stiff Mutual Drag Interaction}
 
 % -- gravitational waves --
+\item
 Roper Pol, A., Brandenburg, A. Kahniashvili, T., Kosowsky, A., \& Mandal, S.\ygafd{2020}{114}{130}
 {161}{The timestep constraint in solving the gravitational wave equations sourced by hydromagnetic turbulence}
 
@@ -2325,6 +2357,91 @@ main variable (f) array, the main reason it that with static allocation
 the compiler can check whether we are out of bounds.
 
 % ---------------------------------------------------------------------- %
+\subsection{GPUs}
+
+Pencil Code can also be run on GPUs via automatic code translation to the Astaroth GPU library. 
+This requires you to have the following libraries: 
+\begin{verbatim}
+  cmake version >= 3.21,bison,flex,CUDA or HIP,python
+\end{verbatim}
+
+The Astaroth library and the code translator for it come together with Pencil Code as git submodules.
+To get them and/or update them to the latest versions run:
+\begin{verbatim}
+  git submodule update --init --remote
+\end{verbatim}
+
+In \file{src/Makefile.local} add the following options:
+\begin{verbatim}
+  GPU=gpu_astaroth
+\end{verbatim}
+
+Compilation and running are done in the same manner as for normal CPU setups.
+By default the code assumes communication is done with CUDA-aware MPI, which means the GPUs speak directly to each other.
+If you have to ask is your MPI CUDA-aware enabled then it most likely is not.
+Thus trying to run the code in CUDA-aware mode will most likely cause a segmentation fault and the code to crash. 
+
+To turn off CUDA-aware MPI add the following options to \file{run.in}
+\begin{verbatim}
+&gpu_run_pars
+  lcuda_aware_mpi=F
+/
+\end{verbatim}
+
+The GPU-enabled version uses threads to compute the diagnostics alongside the time integration happening on the GPUs.
+Because of this you should have at least 2 threads executing per process.
+An example using 7 threads per process would be:
+\begin{verbatim}
+export OMP_NUM_THREADS=7
+export OMP_MAX_ACTIVE_LEVELS=2
+export OMP_PROC_BIND=close,spread
+export OMP_WAIT_POLICY=PASSIVE
+\end{verbatim}
+,where the other options are helpful to get maximal performance out of the multithreading.
+If you are using SLURM you would put these exports into your sbatch file. 
+Additionally if you are using CUDA-aware MPI with MPICH (for example on the LUMI supercomputer) put the following export before calling run.x but after calling start.x
+\begin{verbatim}
+export MPICH_GPU_SUPPORT_ENABLED=1
+\end{verbatim}
+
+The normal usage of GPUs will imply that compilation will happen during the run of the simulation.
+%Because of this for module environments it is imperative that the same modules are used for the run as for the initial compilation.
+%AB: swapped. OK?
+Because of this, it is imperative for module environment that the same modules are used for the run as for the initial compilation.
+To ensure this, add the following to your sbatch script:
+\begin{verbatim}
+source src/.moduleinfo
+\end{verbatim}
+
+Note that not all of Pencil Code can run on GPUs. 
+%This is most predominant when regarding the particles either in the Particle-in-Cell (PIC) method or with the N-body solver of Pencil Code, neither of which are GPU accelerated.
+%AB: modified
+This is particularly obvious in view of the particle modules either in the Particle-in-Cell (PIC) or the $N$-body solvers of Pencil Code, neither of which are GPU accelerated.
+Additionally, more complicated computations outside of the RHSs are not (yet) included like the Navier-Stokes Characteristic Boundary Condition (NSCBC) and granulation calculations in the corona modules.
+To see which of the commited samples are 100 percent known to run on GPUs, check the list gpu\_test in \file{bin/pc_autotest}.
+As a rule of thumb, if the sample only requires the following features it can be run on GPUs:
+%AB: I have wrapped these verbatim lines, and sometimes modified. Is this text also in some code? And if so, where?
+\begin{itemize}
+  \item Declare the name of the pencil in the header of the proper physics
+      module. Pencils names must appear come in a ";" separated list, with
+      dimensions in parenthesis after the name [(3) for vector, (3,3) for
+      matrix, etc.].
+  \item Set interdependency of the new pencil (i.e.\ what other pencils does it
+      depend on) in the subroutine \code{pencil_interdep_modulename}
+  \item Make rule for calculating the pencil in \code{calc_pencils_modulename}
+  \item Request the new pencil based on the input parameters in any relevant
+      physics module
+\end{itemize}
+\begin{itemize}
+  \item Integration of PDEs and ODEs.
+  \item  Boundary conditions that can be formulated
+         as local operations. (Boundary conditions outside of those already covered require
+         explicit use of code tools to generate the GPU code.)
+  \item Calculations of averages or other reductions before time integration.
+	(Cases outside of those already covered require explicit use of code tools to generate the GPU code.)
+  \item Fourier transforms (requires handwritten modifications to add new physics).
+\end{itemize}
+% ---------------------------------------------------------------------- %
 \subsection{Using a non-equidistant grid}
 \index{mesh, nonuniform}\index{grid, nonuniform}\index{nonuniform grid}
 
@@ -2351,7 +2468,7 @@ $\zeta(z)$:
   \frac{df}{dz}     =   \zeta'(z)\, f'(\zeta) \; ,
   \qquad
   \frac{d^2f}{dz^2} =   \zeta'^2(z)\,f''(\zeta)
-                        + \zeta''(z) \zeta'(z) f'(\zeta) \; .
+                        + \zeta''(z) f'(\zeta) \; .
 \end{equation}
 Internally, the code uses the quantities
 $\var{dz_1} \equiv 1/z' = \zeta'(z)$ and
@@ -5397,7 +5514,7 @@ This part of the code can be invoked by setting \code{EOS=eos_ionization}
 (or \code{EOS=eos_temperature_ionization}) in the \file{Makefile.local} file.
 The equation of state described below works for variable ionization, and the
 entropy offset is different from that used in Eq.~(\ref{EOSsimple}), which
-is now no longer valid.  As a replacement, one can use
+is now no longer applicable.  As a replacement, one can use
 \code{EOS=eos_fixed_ionization}, where the degree of ionization can be given
 by hand.  Here the normalization of the entropy is the same as for
 \code{EOS=eos_ionization}.  This case is described in more detail
@@ -5468,8 +5585,13 @@ $x_{\rm He}$ gives the ratio of neutral helium to the total amount of hydrogen.
 The dependence of temperature on entropy is shown in Fig.~\ref{pTTss}
 for different values of the density.
 
+Note that for an ideal gas, $\ln T=s/c_\mathrm{v}+(\gamma-1)\ln\rho$, and that
+$c_\mathrm{v}$ is larger when $y=1$, and smaller when $y=0$.
+But this is a large effect when $\rho$ is small.
+
 For further details regarding the procedure of solving for the entropy
 see Sect.~\ref{S-Ioni} in the appendix.
+The full set of ionization equations is presented in \cite{BB16}.
 
 % ---------------------------------------------------------------------- %
 
@@ -5529,6 +5651,15 @@ The \path{chemistry_H2_ignition_rkf} directory, for example, has the file
 \file{tran.dat}, which contains the parameters characterizing the transport
 properties, and \file{chem.inp}, which contains the NASA polynomials;
 see Eq.~(18) of Ref.~\cite{BHB11}.
+
+To set the number of chemical species required add the following to your \file{src/cparam.local}
+where the first number is the number of species and the second one is the number of degrees of freedom per species:
+\begin{verbatim}
+  ! NCHEMSPEC CONTRIBUTION 16*1
+\end{verbatim}
+
+Importantly the code always assumes a single degree of freedom per chemical species and thus changing the second
+parameter won't have any effect.
 
 % ---------------------------------------------------------------------- %
 
@@ -5660,6 +5791,12 @@ All dust species fulfill the continuity equation
 \begin{equation}
   {\partial\rho_{\rm d}\over\partial t}+\nab\cdot(\rho_{\rm d}\uv_{\rm d})=0.
 \end{equation}
+To set the number of dust species and their degrees of freedom add the following to your \file{src/cparam.local}
+where the first number is the number of species and the second one is the number of degrees of freedom per species:
+\begin{verbatim}
+  ! NDUSTSPEC CONTRIBUTION 3*4
+\end{verbatim}
+
 %\begin{equation}
 %\rho\left[{\partial\uv\over\partial t}+\uv\cdot\nab\uv-\fv(\uv)\right]
 %=-\nab p+\Fv-\beta(\uv-\uv_{\rm d}),
@@ -5861,7 +5998,7 @@ where $\rho_{\rm e}$ is obtained through time-integration of
 the charge continuity equation,
 \begin{equation}
 \frac{\partial\rho_{\rm e}}{\partial t}=-\Div\Jv,
-\label{dEdt}
+\label{dEdt2}
 \end{equation}
 which, in turn, follows from Eq.~(\ref{dEdt}) by taking its divergence.
 
@@ -6006,6 +6143,153 @@ to have a time-evolving mass.
 
 The module \file{pointmasses.f90} is also an $N$-body solver.
 \index{Point masses}
+
+% ---------------------------------------------------------------------- %
+
+\subsection{Cosmological expansion and scale factor}
+\index{Cosmological expansion}
+\index{Scale factor}
+
+Superconformal coordinates are defined
+through $\dd t=\dd t_\mathrm{phys}/a^n$, where $n=3/2$ \cite{BJ04} or $n=2$
+\cite{MS98} and $t_\mathrm{phys}$ is the physical (or cosmic) time.
+To obtain $a(t)$, we assume a standard $\Lambda$CDM universe and integrate
+$\dd\ln a/\dd t_\mathrm{phys}=H(a)$, where
+\begin{equation}
+H(a)=H_0\sqrt{\Omega_\mathrm{rad}/a^4+\Omega_\mathrm{mat}/a^3+\Omega_\Lambda}
+\label{Ha}
+\end{equation}
+is the prescribed dependence of the Hubble parameter on $a(t)$.
+We work with conformal time $t$, use $\dd/\dd t_\mathrm{phys}
+=a^{-n}\dd/\dd t$, and integrate to obtain $t_\mathrm{phys}(t)$
+and $a(t)$, i.e.,
+\begin{equation}
+\frac{\dd t_\mathrm{phys}}{\dd t}=a^n \quad\mbox{and}\quad
+\frac{\dd\ln a}{\dd t}=a^n H(a).
+\label{dlna+tphys}
+\end{equation}
+To obtain the initial conditions for early times, we consider the limit
+$a\to0$, so \Eq{Ha} becomes $H(a)=H_0\Omega_\mathrm{rad}^{1/2}/a^2$.
+We then integrate $t_\mathrm{phys}=\int\dd a/(aH)$, which yields
+$t_\mathrm{phys}=a^2/(2H_0\Omega_\mathrm{rad}^{1/2})$,
+i.e., $a=(2H_0\Omega_\mathrm{rad}^{1/2}t_\mathrm{phys})^{1/2}$.
+This relation is independent of $n$, but assumes that we start at a
+redshift that is well in the radiation-dominated era.
+Here we consider the initial redshifts $z_\ast=4500$ and $z_\ast=10^6$.
+Thus, we solve \Eq{dlna+tphys} with the initial conditions
+\begin{equation}
+a=a_\ast\equiv1/(1+z_\ast),\quad
+t_\mathrm{phys}=t_\mathrm{phys}^\ast\equiv a_\ast^2/(2H_0\Omega_\mathrm{rad}^{1/2}).
+\end{equation}
+
+The sample \code{samples/2d-tests/dark-matter} uses the special module
+\code{SPECIAL=special/Lambda_CDM} with input
+\begin{verbatim}
+&special_init_pars
+  ascale_type='general'
+  redshift0=4500.
+  nconformal=2.
+/
+\end{verbatim}
+
+\begin{figure*}[t!]\begin{center}
+\includegraphics[width=\textwidth]{pt_vs_tph_comp}
+\end{center}\caption{
+$\Omega_\mathrm{rad}=10^{-4}$, $\Omega_\Lambda=0.73$,
+with $\Omega_\mathrm{rad}=10^{-4}$, $\Omega_\mathrm{mat}=0.31$,
+and $H_0=0.0692\Gyr^{-1}\approx0.71\kms\kpc^{-1}$.
+In the last panel, the dashed-dotted lines denote $z=1100$ at $t_\mathrm{phys}=370,000\yr$
+and $z=0$ at $t_\mathrm{phys}=13.8\Gyr$.
+}\label{pt-vs-tph-comp}\end{figure*}
+
+In Fig.~\ref{pt-vs-tph-comp}, we compare the dependence of $t_\mathrm{phys}(t)$ for
+$n=2$, 3/2, and 1 using $z_\ast=4500$ and $10^6$ and a constant time step.
+The range $10^3\geq a(t)\geq1$, corresponding to the time interval from
+recombination to the present time, is marked by dashed-dotted lines.
+We see that the dependence $t_\mathrm{phys}(t)$ is concave for $n=2$
+and convex for $n=1$, but approximately linear for $n=3/2$.
+This indicates that the exponent $n=3/2$ distributes the local change
+in $t_\mathrm{phys}(t)$ approximately uniformly over the interval from
+recombination to the present time.
+
+We recall that in all cases, our initial conformal time is always zero.
+However, when comparing $t_\mathrm{phys}(t)$ for different initial
+redshifts, we can make the curves overlap by adding a suitable offset
+$t_0$ to $t\to t+t_0$ for the runs with the smaller initial redshift.
+We see that the curves for $z_\ast=4500$ and $10^6$ overlap well,
+although there is a very small difference at the very beginning of the
+runs with $z_\ast=4500$ relative to those with $z_\ast=10^6$.
+
+% ---------------------------------------------------------------------- %
+
+\subsection{Scale factor at the end of reheating}
+\index{Reheating}
+
+At the end of cosmological inflation, during what is called reheating,
+the scale factor changes from a quadratic to a linear growth profile.
+A smooth function $a(t)$ is obtained by solving the Friedmann
+equations for a piecewise constant equation of state, $w(a)$, which
+relates the pressure with the density through $p=w\rho$.
+Under the assumption of zero curvature, i.e., the Universe is conformally
+flat, but expanding, the Friedmann equations can be written as a single
+equation which, in physical time, takes the form
+\begin{equation}
+a^{-1}\,\dd^2a/\dd t_{\rm phys}^2
+=-\half H^2\left[1+3w(a)\right],
+\end{equation}
+where $H=a^{-1}\dd a/\dd t_{\rm phys}$ is the standard Hubble parameter.
+Here, $w(a)=1/3$ during the radiation-dominated era and $w(a)=0$ during
+reheating when there were no photons, which is therefore equivalent to the
+matter-dominated era that also occurs later after recombination and
+before the Universe began to accelerate again.
+The accelerated exponential expansion of the Universe during inflation,
+and also the late acceleration of the present Universe, correspond to
+$w=-1$, but this will not be considered in the present paper.
+
+It is convenient to solve the Friedmann equation with zero curvature
+in conformal time.
+It then takes the form $a''/a=\half{\cal H}^2\,(1-3w)$,
+where ${\cal H}=a'/a$ is the conformal Hubble parameter.
+It is related to the usual one, $H$, through
+${\cal H}=\dd a/\partial t_{\rm phys}=aH$.
+Note the opposite sign of the terms on the right-hand side and the
+opposite sign in front of $3w(a)$ compared to the formulation in terms
+of physical time.
+The equation for $a''$ is easily solved by splitting it into two
+first-order equations and introducing a new variable $b(t)$ and solving
+for
+\begin{equation}
+a'=b, \quad b'=(b^2/2a)(1-3w);
+\end{equation}
+see Refs.~\cite{HRPB23,BP23} for similar work in another context.
+
+\Fig{pprof} shows the solution for $a(t)$ and the ratios
+$a'/a$ and $a''/a$ compensated by $t$ and $t^2$, respectively,
+which allows us to see more clearly how $a'/a$ changes from $2/t$
+to $1/t$ and $a''/a$ changes from $2/t^2$ to zero as we go from the
+reheating era to the radiation-dominated Universe after reheating.
+
+\begin{figure}[t!]
+\hspace{-16pt}\includegraphics[width=\columnwidth]{pprof}
+\caption[]{
+$t$ dependence of
+(a)~the scale factor $a(t)$,
+(b)~the compensated Hubble coefficient ${\cal H}t=t\,a'/a$, and
+(c)~the compensated left-hand side of the Friedmann equation, $t^2\,a''/a$.
+In (a), the asymptotic dependences $a=t^2$ and $2t$ for $t\ll1$
+and $\gg1$ are overplotted as dashed-dotted orange lines.
+In (c), the function $3w(a(t))$
+is overplotted as a dotted red line.
+\label{pprof}}\end{figure}
+
+The sample \code{samples/1d-tests/inflationary-B-genesis} reads in a file
+\code{a_vs_eta.dat} with input
+\begin{verbatim}
+&run_pars
+  lread_scl_factor_file_new=T
+/
+\end{verbatim}
+which uses the subroutine \code{calc_scl_factor} in \code{sub.f90}.
 
 % ---------------------------------------------------------------------- %
 
@@ -6242,7 +6526,7 @@ easy to extract for each wavevector the increment of the stress,
 $\delta\tilde{T}_{+/\times}$, and to use it in an improved update
 of the GW field through
 \begin{eqnarray}
-\tilde{h}_{+/\times}\!\!&=&\!\!...+\delta\tilde{T}_{+/\times}\left(1-\sin\omega\delta t/\omega\delta t\right)\\
+\tilde{h}_{+/\times}\!\!&=&\!\!...+\delta\tilde{T}_{+/\times}\left(1-\sin\omega\delta t/\omega\delta t\right)/\omega^2\\
 \dot\tilde{h}_{+/\times}\!\!&=&\!\!...+\delta\tilde{T}_{+/\times}\left(1-\cos\omega\delta t\right)/\omega^2\delta t
 \end{eqnarray}
 This more accurate solver is invoked by setting \cmd{itorder_GW=2},
@@ -12043,7 +12327,6 @@ Reynolds number at the viscous scale is then another 2--3 orders
 of magnitude larger and does therefore not impose a constraint
 in view of the physical viscosity that is applied in such calculations.
 
-%XX
 \subsection{Ionization}
 \index{Ionization}
 \label{S-Ioni}
@@ -12613,7 +12896,7 @@ Note that the formulation above is slightly misleading, because
 \subsubsection{Mixed advection operator}
 
 \begin{equation}
-\uv\times\Bv=\uv\times\nab\Bv
+\uv\times\Bv=\uv\times\nab\Av
 =u_j\epsilon_{ijk}\epsilon_{klm}A_{m;l}
 =u_j(\delta_{il}\delta_{jm}-\delta_{im}\delta_{jl})A_{m;l}
 =u_jA_{j;i}-u_jA_{i;j}
@@ -13386,6 +13669,24 @@ number of the available modules.
 \section{Startup and run-time parameters}
 \label{S-all-parameters}
 
+\subsection{Autogenerated list of start and run parameters}
+
+The parameters are grouped by the module in which the corresponding namelist appears
+(note that the global parameters which are specified in \name{init_pars} and
+\name{run_pars}) are shown under \file{param_io.f90}).
+In due course of time, the table below will replace those in sections
+\ref{S-all-init-params} and \ref{S-all-run-params}.
+In the square brackets that follow the description of a parameter, `init'
+means that the parameter can be used \file{start.in}, while `run' means that
+it can be used in \file{run.in}.
+The square brackets also contain the default value if known.\footnote{
+The variables that do not have a default value listed are most likely initialized
+separately from their declaration.
+The default values of such variables need to be manually documented.
+}
+
+\input{inlinedoc-param.tex}
+
 \subsection[Startup parameters for \File{start.in}]%
 {List of startup parameters for \file{start.in}}
 \label{S-all-init-params}
@@ -13494,6 +13795,10 @@ double precision, $\varepsilon\approx10^{-15}$.
                & if set \code{T} for any or some of the three directions,
                  the mesh is shifted by 1/2 meshpoint in that or those
                  directions so that the mesh goes through the origin.\\
+  \var{lshift_origin_lower} [\code{F,F,F}]
+               & if set \code{T} for any or some of the three directions,
+                 the mesh is shifted by 1/2 meshpoint \textit{downward} in that or those
+                 directions so that, again, the mesh goes through the origin.\\
   \var{unit_system} [\code{'cgs'}]
                & you can set this character string to \index{SI units}
                  \code{'SI'}, which means that you can give \index{Units}
@@ -14914,9 +15219,18 @@ branch. \\
 {12}{A high-order public domain code for direct numerical simulations of turbulent combustion}
 (\arXiv{1005.5301})
 
+\bibitem{BJ04}
+Banerjee, R., \& Jedamzik, K.,
+  \emph{Phys. Rev. D} \textbf{70}, 123003 (2004)
+  ``Evolution of cosmic magnetic fields: From the very early Universe, to recombination, to the present''
+
 \bibitem{BB14} Barekat, A., \& Brandenburg, A.,
   \emph{Astron. Astrophys.} \textbf{571}, A68 (2014)
   ``Near-polytropic stellar simulations with a radiative surface''
+
+\bibitem{BB16} Bhat, P., \& Brandenburg, A.,
+  \emph{Astron. Astrophys.} \textbf{587}, A90 (2016)
+  ``Hydraulic effects in a radiative atmosphere with ionization''
 
 \bibitem{Ref-2} Brandenburg, A.,
   \emph{Astrophys. J.} \textbf{550}, 824--840 (2001)
@@ -14979,6 +15293,10 @@ A. Brandenburg, T. Kahniashvili, S. Mandal, A. Roper Pol, A. G. Tevzadze, and T.
   ``Dynamo-generated turbulence and large scale magnetic fields
   in a Keplerian shear flow''
 
+\bibitem{BP23} Brandenburg, A., \& Protiti, U.,
+  \emph{Entropy} \textbf{25}, 1270 (2023)
+  ``Electromagnetic conversion into kinetic and thermal energies''
+
 \bibitem{Collatz66}Collatz, L.,
   \emph{The numerical treatment of differential equations},
   Springer-Verlag, New York, p.\ 164 (1966)
@@ -15004,6 +15322,10 @@ Cambridge University Press (2008)
   \emph{Phys.~Rev.~E} \textbf{70}, 026405 (2004)
   ``Inertial range scaling in numerical turbulence with hyperviscosity''
 
+\bibitem{HRPB23} He, Y., Roper Pol, A., \& Brandenburg, A.
+  \emph{J. Cosmol. Astropart. Phys.} \textbf{06}, 025 (2023)
+  ``Modified propagation of gravitational waves from the early radiation era''
+
 \bibitem{HockneyEastwood1981}Hockney, R.~W., \& Eastwood, J.~W.,
   \emph{Computer Simulation Using Particles},
   McGraw-Hill, New York (1981)
@@ -15027,6 +15349,10 @@ Cambridge University Press (2008)
 \bibitem{Lele92}Lele, S. K.,
   \emph{J. Comp. Phys.} \textbf{103}, 16--42 (1992)
   ``Compact finite difference schemes with spectral-like resolution''
+
+\bibitem{MS98} Martel, H., \& Shapiro, P. R.
+  \emph{Month. Not. Roy. Soc.} \textbf{297}, 467--485 (1998)
+  ``A convenient set of comoving cosmological variables and their application''
 
 \bibitem{MTW} Misner, C. W., Thorne, K. S. \& Wheeler, J. A.
   \emph{Gravitation},

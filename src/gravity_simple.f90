@@ -50,13 +50,32 @@ module Gravity
   real, dimension(mx) :: xdep=0.0
   real, dimension(mz) :: zdep=0.0
   real, parameter :: g_A_cgs=4.4e-9, g_C_cgs=1.7e-9, Rsol_cgs=2.6231e22
-  real :: gravx=0.0, gravy=0.0, gravz=0.0
+  real :: gravx=0.0, gravy=0.0
+  real :: gravz=0.0 !PAR_DOC: vertical gravity component $g_z$.
   real :: kx_gg=1.0, ky_gg=1.0, kz_gg=1.0, gravz_const=1.0, reduced_top=1.0
   real :: xgrav=impossible, ygrav=impossible, zgrav=impossible
   real :: xinfty=0.0, yinfty=0.0, zinfty=impossible, zclip=impossible
   real :: dgravx=0.0, pot_ratio=1.0
-  real :: z1=0.0, z2=1.0, xref=0.0, zref=impossible, sphere_rad=0.0, g_ref=0.0
-  real :: nu_epicycle=1.0, nu_epicycle2=1.0
+  real :: zref=impossible !PAR_DOC: \label{zref-init}%
+    !PAR_DOC: reference height where in the initial stratification
+    !PAR_DOC: $c_{\rm s}^2=c_{\rm s0}^2$ and $\ln\rho=\ln\rho_0$.
+    !PAR_DOC: Default = 0.
+  real :: z1=0.0 !PAR_DOC: specific to the solar convection case
+    !PAR_DOC: \code{initlnrho='piecew-poly'}.
+    !PAR_DOC: The stable layer is $z_0 < z < z_1$, the unstable layer
+    !PAR_DOC: $z_1 < z < z_2$, and the top (isothermal) layer is
+    !PAR_DOC: $z_2 < z < z_{\rm top}$.
+  real :: z2=1.0 !PAR_DOC: specific to the solar convection case
+    !PAR_DOC: \code{initlnrho='piecew-poly'}.
+    !PAR_DOC: The stable layer is $z_0 < z < z_1$, the unstable layer
+    !PAR_DOC: $z_1 < z < z_2$, and the top (isothermal) layer is
+    !PAR_DOC: $z_2 < z < z_{\rm top}$.
+  real :: xref=0.0, sphere_rad=0.0, g_ref=0.0
+  real :: nu_epicycle=1.0 !PAR_DOC: vertical epicyclic frequency; for accretion
+    !PAR_DOC: discs it should be equal to Omega, but not for
+    !PAR_DOC: galactic discs; see Eq.~(\ref{disc-gravz-init}) in
+    !PAR_DOC: Sect.~\ref{VerticalStratification}.
+  real :: nu_epicycle2=1.0
   real :: nux_epicycle=0.0, nux_epicycle2=0.0
   real :: g_A, g_C, g_A_factor=1.0, g_C_factor=1.0
   real :: g_E, g_F, Rgal=impossible, Rsol=impossible
@@ -65,8 +84,15 @@ module Gravity
   real :: accretor_grav=0., accretor_speed=0., accretor_rsoft=0., kaccretor, cdt_accretor=0.
   integer :: n_pot=10
   integer :: n_adjust_sphersym=0
-  character (len=labellen) :: gravx_profile='zero', gravy_profile='zero', &
-                              gravz_profile='zero', grav_type='default'
+  character (len=labellen) :: gravx_profile='zero'
+  character (len=labellen) :: gravy_profile='zero'
+  character (len=labellen) :: gravz_profile='zero' !PAR_DOC: constant gravity
+    !PAR_DOC: $g_z = \texttt{gravz}$
+    !PAR_DOC: (\code{gravz_profile='const'}) gravity
+    !PAR_DOC: or linear profile $g_z = \texttt{gravz}\cdot z$
+    !PAR_DOC: (\code{gravz_profile='linear'}, for accretion discs and
+    !PAR_DOC: similar).
+  character (len=labellen) :: grav_type='default'
 
   integer :: enum_gravx_profile = 0
   integer :: enum_gravy_profile = 0
@@ -85,7 +111,9 @@ module Gravity
   real :: g0=0.0
   real :: lnrho_bot=0.0, lnrho_top=0.0, ss_bot=0.0, ss_top=0.0
   real :: kappa_x1=0.0, kappa_x2=0.0, kappa_z1=0.0, kappa_z2=0.0
-  real :: grav_tilt=0.0, grav_amp=0.0
+  real :: grav_tilt=0.0 !PAR_DOC: specific to the tilted gravity case (angle wrt
+    !PAR_DOC: the vertical direction).
+  real :: grav_amp=0.0 !PAR_DOC: specific to the tilted gravity case (amplitude).
 !
   namelist /grav_init_pars/ &
       gravx_profile, gravy_profile, gravz_profile, gravx, gravy, gravz, &
@@ -246,7 +274,7 @@ module Gravity
 !
       use General, only: notanumber
       use Sub, only: cubic_step
-      use Mpicomm, only: mpibcast_real, MPI_COMM_WORLD
+      use Mpicomm, only: mpibcast_real, MPI_COMM_PENCIL
       use SharedVariables, only: get_shared_variable
 !
       real, dimension(mx,my,mz,mfarray) :: f
@@ -376,10 +404,14 @@ module Gravity
         potx_xpencil=(tanh((x+pi/3.)/0.1)+tanh(-(x-pi/3.)/0.1))/2.*&
                      gravx*(.5*cos(2*(x-pi/2.))-0.5) + potx_const
 !
+!  Keplerian gravity; use sphere_rad as a smoothing radius
+!
       case ('kepler')
-        if (lroot) print*,'initialize_gravity: kepler x-grav, gravx=',gravx
-        gravx_xpencil=-gravx/x**2
-        potx_xpencil=-gravx/x + potx_const
+        if (lroot) print*,'initialize_gravity: kepler x-grav, gravx, sphere_rad=',gravx, sphere_rad
+        !gravx_xpencil=-gravx/x**2
+        !potx_xpencil=-gravx/x + potx_const
+        gravx_xpencil=-gravx/(x+sphere_rad)**2
+        potx_xpencil=-gravx/(x+sphere_rad)**2 + potx_const
         g0=gravx
 !
       case ('kepler_2d')
@@ -702,7 +734,7 @@ module Gravity
             if (lroot) call warning('initialize_gravity', 'central body mass is ignored')
           else
             if (ipx==0) gravitational_const = -gravx_xpencil(l1)*x(l1)**2/mass_cent_body
-            if (nprocx>1) call mpibcast_real(gravitational_const,comm=MPI_COMM_WORLD)
+            if (nprocx>1) call mpibcast_real(gravitational_const,comm=MPI_COMM_PENCIL)
           endif
         else
           if (gravitational_const<=0.) &
@@ -1567,6 +1599,13 @@ module Gravity
     call copy_addr(cdt_accretor,p_par(22))
     call copy_addr(z1,p_par(23))
     call copy_addr(z2,p_par(24))
+    call copy_addr(kappa_z1,p_par(25))
+    call copy_addr(zclip,p_par(26))
+    call copy_addr(zinfty,p_par(27))
+    call copy_addr(nu_epicycle,p_par(28))
+    call copy_addr(zref,p_par(29))
+    call copy_addr(n_pot,p_par(30))
+    call copy_addr(reduced_top,p_par(31))
 
     endsubroutine pushpars2c
 !***********************************************************************

@@ -27,12 +27,11 @@ class Grid(object):
         self.Lx = self.Ly = self.Lz = 0
 
     def keys(self):
-        for i in self.__dict__.keys():
-            print(i)
+        return list(self.__dict__.keys())
 
-    def read(self, datadir="data", proc=-1, quiet=False, precision="f", trim=False, param=None):
+    def read(self, datadir="data", proc=-1, quiet=True, precision="f", trim=False, param=None):
         """
-        read(datadir='data', proc=-1, quiet=False, trim=False)
+        read(datadir='data', proc=-1, quiet=True, trim=False)
 
         Read the grid data from the pencil code simulation.
         If proc < 0, then load all data and assemble.
@@ -61,6 +60,7 @@ class Grid(object):
 
         import numpy as np
         import os
+        import glob
         from scipy.io import FortranFile
         from pencil import read
 
@@ -115,19 +115,16 @@ class Grid(object):
                 read_precision = "f"
 
             if proc < 0:
-                proc_dirs = list(
-                    filter(
-                        lambda string: string.startswith("proc"), os.listdir(datadir)
-                    )
-                )
-                if proc_dirs.count("proc_bounds.dat") > 0:
-                    proc_dirs.remove("proc_bounds.dat")
                 if param.lcollective_io:
                     # A collective IO strategy is being used
                     proc_dirs = ["allprocs"]
-
-                if len(proc_dirs) == 0:
-                    raise FileNotFoundError("Assumed io_dist, but could not find processor directories")
+                else:
+                    orig_dir = os.getcwd()
+                    os.chdir(datadir)
+                    proc_dirs = glob.glob('proc*[0-9]')
+                    os.chdir(orig_dir)
+                    if len(proc_dirs) == 0:
+                        raise FileNotFoundError("Assumed io_dist, but could not find processor directories")
 
             else:
                 proc_dirs = ["proc" + str(proc)]
@@ -270,23 +267,26 @@ class Grid(object):
         Restrict the grid arrays according to the index ranges irange_[xyz]
         """
         if irange_x != None:
-            self.x = self.x[irange_x[0]:irange_x[1]]
-            self.dx_1 = self.dx_1[irange_x[0]:irange_x[1]]
-            self.dx_tilde = self.dx_tilde[irange_x[0]:irange_x[1]]
+            self.x = self.x[irange_x]
+            self.dx_1 = self.dx_1[irange_x]
+            self.dx_tilde = self.dx_tilde[irange_x]
 
         if irange_y != None:
-            self.y = self.y[irange_y[0]:irange_y[1]]
-            self.dy_1 = self.dy_1[irange_y[0]:irange_y[1]]
-            self.dy_tilde = self.dy_tilde[irange_y[0]:irange_y[1]]
+            self.y = self.y[irange_y]
+            self.dy_1 = self.dy_1[irange_y]
+            self.dy_tilde = self.dy_tilde[irange_y]
 
         if irange_z != None:
-            self.z = self.z[irange_z[0]:irange_z[1]]
-            self.dz_1 = self.dz_1[irange_z[0]:irange_z[1]]
-            self.dz_tilde = self.dz_tilde[irange_z[0]:irange_z[1]]
+            self.z = self.z[irange_z]
+            self.dz_1 = self.dz_1[irange_z]
+            self.dz_tilde = self.dz_tilde[irange_z]
 
 
 @copy_docstring(Grid.read)
 def grid(*args, **kwargs):
+    """
+    Wrapper for :py:meth:`Grid.read`
+    """
     grid_tmp = Grid()
     grid_tmp.read(*args, **kwargs)
     return grid_tmp

@@ -61,12 +61,12 @@ def ogvar(*args, **kwargs):
         Precision of the data. Either float 'f' or double 'd'.
     """
 
-    from pencil.sim import __Simulation__
+    from pencil.sim import Simulation
 
     started = None
 
     for a in args:
-        if type(a, __Simulation__):
+        if isinstance(a, Simulation):
             started = a.started()
             break
     else:
@@ -85,7 +85,8 @@ def ogvar(*args, **kwargs):
         return False
 
     if "var_file" in kwargs:
-        if isinstance(kwargs["var_file"], __Simulation__):
+        #2026-01-30/Kishore: unclear why it ever makes sense for var_file to be a Simulation object.
+        if isinstance(kwargs["var_file"], Simulation):
             kwargs["var_file"] = "ogvar.dat"
     else:
         if "varfile" in kwargs:
@@ -127,8 +128,7 @@ class ogDataCube(DataCube):
         super(ogDataCube, self).__init__()
 
     def keys(self):
-        for i in self.__dict__.keys():
-            print(i)
+        return list(self.__dict__.keys())
 
     def transform(self, trim_all):
         """

@@ -3,7 +3,6 @@
 ! CPARAM logical, parameter :: ltraining = .false.
 !
 !***************************************************************
-!
   module Training
 
     use Cparam
@@ -15,8 +14,12 @@
 
     contains
 !***************************************************************
-    subroutine initialize_training
+    subroutine initialize_training(f)
  
+     real, dimension (mx,my,mz,mfarray) :: f
+
+      call keep_compiler_quiet(f)
+
     endsubroutine initialize_training
 !***********************************************************************
     subroutine register_training
@@ -63,7 +66,7 @@
 
     endsubroutine rprint_training
 !***************************************************************
-    subroutine div_reynolds_stress(f,df)
+    subroutine div_sgs_stresses(f,df)
 
       real, dimension (mx,my,mz,mfarray) :: f
       real, dimension (mx,my,mz,mvar) :: df
@@ -71,7 +74,7 @@
       call keep_compiler_quiet(f)
       call keep_compiler_quiet(df)
 
-    endsubroutine div_reynolds_stress
+    endsubroutine div_sgs_stresses
 !***************************************************************
     subroutine finalize_training
 

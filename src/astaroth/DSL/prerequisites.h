@@ -1,5 +1,6 @@
 // Provides all declarations and functions needed for the formulation of the PDEs' rhss by DSL code
 // and finally for the definition of the solve kernel.
+#include "../typedefs.h"
 #define IN_DSL 1
 #define double real
 #define cpu_pow pow
@@ -12,7 +13,13 @@ struct PC_rhs_update
 	real3 dt
 	real max_advec
 }
-
+struct PC_gridpars
+{
+ 	real3 dline_1
+       	real dxyz_2
+        real dxyz_4
+        real dxyz_6
+}
 enum PC_SUB_STEP_NUMBER
 {
 	PC_FIRST_SUB_STEP,
@@ -23,6 +30,11 @@ enum PC_SUB_STEP_NUMBER
 }
 
 #include "PC_nghost.h"
+
+#define n__mod__cdata (vertexIdx.z+1)
+#define m__mod__cdata (vertexIdx.y+1)
+#define AC_n__mod__cdata (vertexIdx.z+1)
+#define AC_m__mod__cdata (vertexIdx.y+1)
 
 #define AC_mx AC_mlocal.x
 #define AC_my AC_mlocal.y
@@ -44,7 +56,9 @@ enum PC_SUB_STEP_NUMBER
 #include "../stdlib/math"
 #include "../stdlib/grid/funcs.h"
 #include "../stdlib/utils/intrinsics.h"
+#ifndef LTRAINING
 #include "../stdlib/slope_limited_diffusion.h"
+#endif
 
 #include "../../../cparam_c.h"
 #include "../../../cparam_pencils.inc_c.h"
@@ -63,8 +77,9 @@ enum PC_SUB_STEP_NUMBER
 #include "../stdlib/utils/kernels.h"
 //#include "../stdlib/map.h"
 #include "PC_modulepardecs.h"
-#include "../stdlib/derivs.h"
-#include "../stdlib/operators.h"
+
+#include "../stdlib/general_derivs.h"
+#include "../stdlib/general_operators.h"
 #define AC_NGHOST NGHOST
 
 // declare here reduction results needed for the timestep
@@ -73,16 +88,21 @@ enum PC_SUB_STEP_NUMBER
   output real AC_maxadvec    // for all velocities - fluid and wave
 #endif
 #ifdef LENTROPY
-  output real AC_maxchi
-  #define LENERGY 1       // a hack for the moment
+  output real AC_maxdiffchi
+  #define LENERGY 1          // a hack for the moment
 #endif
 global output real AC_maximum_error
 #ifdef LVISCOSITY
-  output real AC_maxnu
+  output real AC_maxdiffnu
+#endif
+#ifdef LMAGNETIC
+  output real AC_maxdiffeta
 #endif
 
 output real AC_dt1_max
-global output  real AC_Arms
+global output real AC_Arms
+const int AC_xbot__mod__equationofstate=1
+const int AC_xtop__mod__equationofstate=nx
 
 #ifdef LDENSITY
   #define LNRHO RHO
@@ -94,5 +114,6 @@ global output  real AC_Arms
   #include "../forcing/pcstyleforcing.h"
 #endif
 
-#include "../steps_two.h"
+#include "../get_grid_mn.h"
+#include "../steps_two_full.h"
 #include "equations.h"

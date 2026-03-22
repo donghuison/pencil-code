@@ -37,14 +37,21 @@ module EquationOfState
   real :: xHe=0.0
   real :: mu=1.0
   !real :: cs0=1.0, cs20=1.0, cs20t, rho0=1., lnrho0=0., rho01=1.0, pp0=1.0
-  real :: cs0=impossible, cs20=1.0, cs20t, rho0=1., lnrho0=0., rho01=1.0, pp0=1.0
-  real :: gamma=5.0/3.0
-  real :: Rgas_cgs=0.0, Rgas, error_cp=1.0e-6
+  real :: cs0=impossible !PAR_DOC: can be used to set the dimension of velocity;
+    !PAR_DOC: larger values can be used to decrease stratification.
+    !PAR_DOC: Default = 1.
+  real :: rho0=1. !PAR_DOC: \label{cs0-rho0-init}%
+    !PAR_DOC: reference values of sound speed and density,
+    !PAR_DOC: i.\,e.~values at height \var{zref}.
+  real :: cs20=1.0, cs_t=1.0, lnrho0=0., rho01=1.0, pp0=1.0
+  real :: gamma=5.0/3.0 !PAR_DOC: adiabatic index $\gamma=c_p/c_v$.
+  real :: Rgas, error_cp=1.0e-6
   real :: gamma_m1    !(=gamma-1)
   real :: gamma1      !(=1/gamma)
   real :: cp=impossible, cp1=impossible, cv=impossible, cv1=impossible
   real :: pres_corr=0.1
-  real :: cs2bot=impossible, cs2top=impossible
+  real :: cs2bot=impossible !PAR_DOC: sound speed at bottom. Needed for some types of stratification.
+  real :: cs2top=impossible !PAR_DOC: sound speed at top. Needed for some types of stratification.
   real :: fac_cs=1.0, cs20_tdep_rate=1.0, cs2_tdep_ascale_power=0.
   real, pointer :: mpoly
   real :: sigmaSBt=1.0
@@ -54,9 +61,9 @@ module EquationOfState
   logical :: leos_isochoric=.false., leos_isobaric=.false.
   logical :: leos_localisothermal=.false.
   logical :: lanelastic_lin=.false., lcs_as_aux=.false., lcs_as_comaux=.false.
-  logical :: lcs2_tdep=.false.
+  logical :: lcs2_tdep=.false., lhubble_eos=.false.
 !
-  character (len=labellen) :: meanfield_Beq_profile
+  !character (len=labellen) :: meanfield_Beq_profile
   real, pointer :: meanfield_Beq, chit_quenching, uturb
   real, dimension(:), pointer :: B_ext
   logical, pointer :: lrelativistic_eos
@@ -85,7 +92,8 @@ module EquationOfState
       xHe, mu, cp, cs0, rho0, gamma, error_cp, &
       pres_corr, sigmaSBt, &
       lanelastic_lin, lcs_as_aux, lcs_as_comaux, &
-      lcs2_tdep, cs20_tdep_rate, tdep_cs2_type, cs2_tdep_ascale_power
+      lcs2_tdep, cs20_tdep_rate, tdep_cs2_type, &
+      cs2_tdep_ascale_power, lhubble_eos
 !
 !  Module variables
 !
@@ -96,6 +104,7 @@ module EquationOfState
   integer, parameter :: XBOT=1, XTOP=nx
   real, dimension(:,:), pointer :: reference_state
 !
+  integer :: enum_tdep_cs2_type = 0
   contains
 !***********************************************************************
     subroutine register_eos
@@ -116,6 +125,7 @@ module EquationOfState
 ! Shared variables
 !
       call put_shared_variable('cs20',cs20,caller='register_eos')
+      call put_shared_variable('cs_t',cs_t,caller='register_eos')
       call put_shared_variable('gamma',gamma)
       call put_shared_variable('cp',cp)
       call put_shared_variable('cv',cv)
@@ -489,6 +499,8 @@ module EquationOfState
       if (lwrite_slices) then
         where(cnamev=='gpx'.or.cnamev=='gpy') cformv='DEFINED'
       endif
+
+      call keep_compiler_quiet(lreset)
 !
     endsubroutine rprint_eos
 !***********************************************************************
@@ -957,7 +969,9 @@ module EquationOfState
         elseif (leos_isothermal) then
 !
 !  Allow here for the possibility of a time-dependent sound speed
-!  Note that we scale here cs^2, not cs. Therefore we use the name XX
+!  Note that we scale here cs^2, not cs. Therefore we use the name
+!  cs2_tdep_ascale_power. But an alternative implementation is to use
+!  lhubble_eos=T with ascale_type='general' below.
 !
           if (lpenc_loc(i_cs2)) then
             if (lcs2_tdep) then
@@ -966,6 +980,7 @@ module EquationOfState
                 p%cs2=cs20*exp(-cs20_tdep_rate*t)
               case ('ascale_power')
                 p%cs2=cs20*ascale**cs2_tdep_ascale_power
+                cs_t=cs0*ascale**(.5*cs2_tdep_ascale_power)
               case default
                 call fatal_error('calc_pencils_eos_pencpar','unknown value of tdep_cs2_type')
               endselect
@@ -1126,6 +1141,15 @@ module EquationOfState
       case default
         call fatal_error('calc_pencils_eos','unknown combination of eos vars')
       endselect
+!
+!  Scaling with scale factor. Note the alternative implementation above.
+!
+      if (lhubble_eos) then
+        select case (ascale_type)
+          case ('default'); call fatal_error('calc_pencils_eos_pencpar','unexpected combination')
+          case ('general'); p%cs2=p%cs2*ascale**(2.*(nconformal-1.))
+        endselect
+      endif
 !
 !  cs as optional auxiliary variables
 !
@@ -4546,6 +4570,7 @@ module EquationOfState
     subroutine pushpars2c(p_par)
 !
     use Syscalls, only: copy_addr
+    use General,  only: string_to_enum
 
     integer, parameter :: n_pars=200
     integer(KIND=ikind8), dimension(n_pars) :: p_par
@@ -4584,6 +4609,10 @@ module EquationOfState
     call copy_addr(ieosvar1,p_par(32)) ! int
     call copy_addr(lpres_grad,p_par(33)) ! bool
     call copy_addr(sigmasbt,p_par(34)) 
+    call string_to_enum(enum_tdep_cs2_type,tdep_cs2_type)
+    call copy_addr(enum_tdep_cs2_type,p_par(35)) ! int
+    call copy_addr(cs2_tdep_ascale_power,p_par(36))
+    call copy_addr(lhubble_eos,p_par(37)) ! bool
 
     endsubroutine pushpars2c
 !***********************************************************************

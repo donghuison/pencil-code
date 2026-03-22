@@ -9,6 +9,10 @@ import re
 import subprocess
 from typing import Any, Callable, List, Tuple
 import os
+import pytest
+from decorator import decorate
+
+import pencil as pc
 
 from proboscis_dummy import (
     TestProgram,
@@ -145,3 +149,41 @@ def get_rundir(path):
     if not os.path.isdir(run_dir):
         raise Exception("Run directory {} does not exist".format(run_dir))
     return run_dir
+
+def compile_and_run_sample(path):
+    """
+    Compiles and runs the sample at `path`. Returns the corresponding simulation object.
+    """
+    rundir = get_rundir(path)
+    sim = pc.sim.get(rundir, quiet=True)
+
+    if sim is False:
+        raise RuntimeError(f"Could not get simulation in {rundir}")
+
+    sim.compile(
+        bashrc=False,
+        cleanall=False,
+        autoclean=True,
+        raise_errors=True,
+        )
+    sim.run(bashrc=False, cleardata=True, raise_errors=True)
+
+    return sim
+
+def _require_sample_markers(sample):
+    return [
+        pytest.mark.xdist_group(f"requires_datadir_{sample}"),
+        pytest.mark.integration,
+        ]
+
+def require_sample(sample):
+    def decorator(func):
+        def wrapper(func, *args, **kwargs):
+            return func(*args, **kwargs)
+        func = decorate(func, wrapper)
+
+        for d in _require_sample_markers(sample):
+            func = d(func)
+
+        return func
+    return decorator

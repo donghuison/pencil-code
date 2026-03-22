@@ -1,5 +1,9 @@
 ! $Id$
 !
+!** AUTOMATIC CPARAM.INC GENERATION ****************************
+! CPARAM logical, parameter :: lcourant_dt = .true.
+!***************************************************************
+!
 ! MODULE_DOC: This is a highly specified timestep module currently only working
 ! MODULE_DOC: together with the special module coronae.f90.
 !
@@ -34,7 +38,6 @@ module Timestep
 
       if (dt0 < 0.) dt = 0
       ldt = (dt==0.)
-      lcourant_dt = .true.
       num_substeps = 3
 
     endsubroutine initialize_timestep
@@ -99,7 +102,7 @@ module Timestep
           ! Timestep growth limiter
           if (real(ddt) > 0.) dt1_local=max(dt1_local,dt1_last)
           ! Get global time step limite
-          call mpiallreduce_max(dt1_local,dt1,MPI_COMM_WORLD)
+          call mpiallreduce_max(dt1_local,dt1,MPI_COMM_PENCIL)
           dt=1.0/dt1
 ! in pde(f,df,p) ghost cells of f-array are set
           fsub = f
@@ -148,7 +151,7 @@ module Timestep
 !  Get time step for heat conduction in sub step
         call calc_hcond_timestep(fsub,p,dt1_hcond_max)
         dt1_energy_local=maxval(dt1_hcond_max(1:nx))
-        call mpiallreduce_max(dt1_energy_local,dt1_energy,MPI_COMM_WORLD)
+        call mpiallreduce_max(dt1_energy_local,dt1_energy,MPI_COMM_PENCIL)
 !
         dt_energy = 1d0/dt1_energy
 !  Set time step to the super-timestep

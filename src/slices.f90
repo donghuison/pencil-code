@@ -8,7 +8,6 @@ module Slices
 !
   use Cdata
   use Messages
-  use Mpicomm, only: mpiallreduce_or
   use Sub, only: xlocation, zlocation, update_snaptime, read_snaptime, position
 !
   implicit none
@@ -39,23 +38,44 @@ contains
 !
       logical, save :: lfirst_call=.true.
       character (len=fnlen) :: file
+      real :: tvid_write
+      real :: t_trigger
 !
 !  Output vid-data in 'dvid' time intervals
 !
       file = trim(datadir)//'/tvid.dat'
       if (lfirst_call) then
         call read_snaptime(file,tvid,nvid,dvid,t)
+        tvid_write=tvid
         lfirst_call=.false.
       endif
 !
 !  This routine sets lvideo=T whenever its time to write a slice
 !
-      call update_snaptime(file,tvid,nvid,dvid,t,lvideo)
+      select case (trigger_vid)
+        case ('ascale')
+          t_trigger=ascale
+        case ('redshift')
+          t_trigger=1./ascale-1.
+        case ('tphys')
+          t_trigger=tphys
+        case ('code_time')
+          t_trigger=t
+        case default
+          call fatal_error('wvid_prepare','no such trigger_vid='//trim(trigger_vid))
+      end select
+      call update_snaptime(file,tvid,nvid,dvid,dble(t_trigger),lvideo)
+!
+!  output quantity: time or something else (e.g., ascale)
+!
+      if (.not. lfirst_call) then
+        tvid_write=t_trigger
+      endif
 !
 !  Save current time so that the time that is written out in
 !  output_slice() is not from the next time step
 !
-      if (lvideo) tslice = t
+      if (lvideo) tslice = tvid_write
 !
     endsubroutine wvid_prepare
 !***********************************************************************
@@ -182,8 +202,7 @@ contains
           inamev=inamev+1
         endif
       enddo
-      if (ip<=12.and.lroot) print*,'wvid: written slices in ',&
-                                   mpiwtime()-time1,' seconds'
+      if (ip<=12.and.lroot) print*,'wvid: written slices in ',mpiwtime()-time1,' seconds'
 !
     endsubroutine wvid
 !***********************************************************************
@@ -204,7 +223,7 @@ contains
       use IO, only: output_slice_position
       use Mpicomm, only: set_rslice_communicator
     
-      character(LEN=80) :: text, data
+      character(LEN=80) :: text, datastr
 
       lwrite_slice_xy=.false. 
       lwrite_slice_xz=.false. 
@@ -419,29 +438,29 @@ contains
       if (lroot.and.dvid>0.) then  !MR: tbdone: write global position from all procs
 
         write (*,*)'setup_slices: slice_position = '//slice_position
-        text=''; data=''
+        text=''; datastr=''
         if (lwrite_slice_yz) then
-          text='ix_loc,'; data=itoa(ix_loc)
+          text='ix_loc,'; datastr=itoa(ix_loc)
         endif
         if (lwrite_slice_xz) then
-          text=trim(text)//'iy_loc,'; data=trim(data)//' '//itoa(iy_loc)
+          text=trim(text)//'iy_loc,'; datastr=trim(datastr)//' '//itoa(iy_loc)
         endif
         if (lwrite_slice_xy) then
-          text=trim(text)//'iz_loc,'; data=trim(data)//' '//itoa(iz_loc)
+          text=trim(text)//'iz_loc,'; datastr=trim(datastr)//' '//itoa(iz_loc)
         endif
         if (lwrite_slice_xy2) then
-          text=trim(text)//'iz2_loc,'; data=trim(data)//' '//itoa(iz2_loc)
+          text=trim(text)//'iz2_loc,'; datastr=trim(datastr)//' '//itoa(iz2_loc)
         endif
         if (lwrite_slice_xy3) then
-          text=trim(text)//'iz3_loc,'; data=trim(data)//' '//itoa(iz3_loc)
+          text=trim(text)//'iz3_loc,'; datastr=trim(datastr)//' '//itoa(iz3_loc)
         endif
         if (lwrite_slice_xy4) then
-          text=trim(text)//'iz4_loc,'; data=trim(data)//' '//itoa(iz4_loc)
+          text=trim(text)//'iz4_loc,'; datastr=trim(datastr)//' '//itoa(iz4_loc)
         endif
         if (lwrite_slice_xz2) then
-          text=trim(text)//'iy2_loc,'; data=trim(data)//' '//itoa(iy2_loc)
+          text=trim(text)//'iy2_loc,'; datastr=trim(datastr)//' '//itoa(iy2_loc)
         endif
-        write (*,*) 'setup_slices: '//trim(text)//' (video files) = '//data
+        write (*,*) 'setup_slices: '//trim(text)//' (video files) = '//datastr
       endif
 !
       call alloc_slice_buffers(slice_xy,slice_xz,slice_yz,slice_xy2,slice_xy3,slice_xy4,slice_xz2)

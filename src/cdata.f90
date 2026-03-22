@@ -17,7 +17,9 @@ module Cdata
 !
 !  Default CVS Id.
 !
-  character (len=linelen) :: cvsid='no cvsid is given in start.in or run.in!'
+  character (len=linelen) :: cvsid='no cvsid is given in start.in or run.in!' !PAR_DOC:
+    !PAR_DOC: the \name{svn} identification string, which allows you to
+    !PAR_DOC: keep track of the version of \file{start.in} or \file{run.in}.
 !
 !  Polar grid
 !
@@ -32,11 +34,31 @@ module Cdata
 !
 !  Units (need to be in real(KIND=rkind8)).
 !
-  character (len=3) :: unit_system='cgs'
+  character (len=3) :: unit_system='cgs' !PAR_DOC: you can set this character string to \index{SI units}
+    !PAR_DOC: \code{'SI'}, which means that you can give \index{Units}
+    !PAR_DOC: physical dimensions in \index{SI units} SI units.
+    !PAR_DOC: The default is \index{cgs units} cgs units.
   logical :: lfix_unit_std=.false.
-  real(KIND=rkind8) :: unit_length=impossible,unit_velocity=impossible
-  real(KIND=rkind8) :: unit_density=impossible,unit_temperature=impossible
-  real(KIND=rkind8) :: unit_magnetic=impossible,unit_entropy=impossible
+  real(KIND=rkind8) :: unit_length=impossible !PAR_DOC: allows you to set the
+    !PAR_DOC: unit length. Suppose you want
+    !PAR_DOC: the unit length to be $1\,{\rm kpc}$, then you would
+    !PAR_DOC: say \code{unit_length='3e21'}. (Of course, politically
+    !PAR_DOC: correct would be to say \code{unit_system='SI'} in
+    !PAR_DOC: which case you say \code{unit_length='3e19'}.)
+    !PAR_DOC: Default: 1.
+  real(KIND=rkind8) :: unit_velocity=impossible !PAR_DOC:
+    !PAR_DOC: Example: if you want km/s you say \code{unit_length='1e5'}.
+    !PAR_DOC: Default: 1.
+  real(KIND=rkind8) :: unit_density=impossible !PAR_DOC:
+    !PAR_DOC: Example: if you want your unit density to be
+    !PAR_DOC: $10^{-24}\,{\rm g}/{\rm cm}^3$ you say
+    !PAR_DOC: \code{unit_density='1e-24'}.
+    !PAR_DOC: Default: 1.
+  real(KIND=rkind8) :: unit_temperature=impossible !PAR_DOC:
+    !PAR_DOC: Example: \code{unit_temperature='1e6'} if you want mega-Kelvin.
+    !PAR_DOC: Default: 1.
+  real(KIND=rkind8) :: unit_magnetic=impossible
+  real(KIND=rkind8) :: unit_entropy=impossible
   real(KIND=rkind8) :: sigma_Thomson=impossible
   real :: mu0=1., mu01=0. !  magnetic permeability [should be in Magnetic]
 !
@@ -76,6 +98,10 @@ module Cdata
   real, dimension (mz) :: z,dz_1,dz2,dz_tilde,zprim,dVol_z,dVol1_z
   real, dimension (mz) :: dAyz_z, dAxz_z
   real :: dx,dy,dz,dxmin,dxmax
+  real :: dx1_scalar=0.,dy1_scalar=0.,dz1_scalar=0.
+  real :: dx2_scalar,dy2_scalar,dz2_scalar
+  real :: dx4_scalar,dy4_scalar,dz4_scalar
+  real :: dx6_scalar,dy6_scalar,dz6_scalar
   real, dimension (-nghost:nghost) :: dx2_bound=0., dy2_bound=0., dz2_bound=0.
   real, dimension (nxgrid) :: xgrid, dx1grid, dxtgrid
   real, dimension (nygrid) :: ygrid, dy1grid, dytgrid
@@ -130,16 +156,17 @@ module Cdata
   real, dimension (nygrid) :: sinth_weight_across_proc
   real, dimension (nx) :: rcyl_mn=1.,rcyl_mn1=1.,rcyl_mn2=1.,rcyl_weight
   real, dimension (nx) :: glnCrossSec
-  real, dimension (nrcyl) :: rcyl  ! used for phi-averages
-  real, dimension (mx) :: x12    ! for slope-limted-diffusion
-  real, dimension (my) :: y12    ! for slope-limted-diffusion
-  real, dimension (mz) :: z12    ! for slope-limted-diffusion
+  real, dimension (nrcyl) :: rcyl        ! used for phi-averages
+  real, dimension (mx) :: x12            ! for slope-limted-diffusion
+  real, dimension (my) :: y12, sinth12   ! for slope-limted-diffusion
+  real, dimension (mz) :: z12            ! for slope-limted-diffusion
 !
 !  Grid parameters.
 !
   real, dimension(3) :: coeff_grid=1.0
   real, dimension(3) :: dxi_fact=1.0
   real, dimension(3) :: trans_width=1.0
+  real, dimension(3) :: trans_delta=1.0
   real, dimension(3,2) :: xyz_step=1.0,xi_step_frac=1.0,xi_step_width=1.5
   real :: zeta_grid0=0.0
   real :: xbot_slice=0.0,xtop_slice=1.0
@@ -148,10 +175,16 @@ module Cdata
   real :: r_rslice=0.
   integer :: nth_rslice=min(nxgrid,nygrid,nzgrid)/2, nph_rslice=min(nxgrid,nygrid,nzgrid)
   real :: glnCrossSec0=0.0, CrossSec_x1=-1., CrossSec_x2=1., CrossSec_w=.1
-  logical, dimension(3) :: lperi=.true., &                                       ! all directions periodic
-                           lshift_origin=.false., lshift_origin_lower=.false., & ! don't shift origin
-                           lpole=.false., &                                      ! in spherical coords: pole excluded
-                           lequidist=.true.                                      ! grid equidistant in every direction
+  logical, dimension(3) :: lperi=.true. !PAR_DOC: vector of the form ($x$,$y$,$z$);
+                                        !PAR_DOC: determines whether the corresponding
+                                        !PAR_DOC: direction is periodic
+  logical, dimension(3) :: lsymmgrid=.true.
+  logical, dimension(3) :: lshift_origin=.false. !PAR_DOC: if set \code{T} for any or some of the three directions,
+    !PAR_DOC: the mesh is shifted by 1/2 meshpoint in that or those
+    !PAR_DOC: directions so that the mesh goes through the origin.
+  logical, dimension(3) :: lshift_origin_lower=.false. !PAR_DOC: same as above, but downward.
+  logical, dimension(3) :: lpole=.false. ! in spherical coords: pole excluded
+  logical, dimension(3) :: lequidist=.true. ! grid equidistant in every direction
   logical :: lignore_nonequi=.false., lcart_equi=.true.
   character (len=labellen), dimension(3) :: grid_func='linear'
   character (len=labellen) :: pipe_func='error_function'
@@ -170,7 +203,12 @@ module Cdata
   character (len=labellen) :: der2_type='standard'
   logical :: lall_onesided=.false.
   character (len=labellen), dimension(3) :: xyz_units='one'
-  real, dimension(3) :: Lxyz=impossible,xyz0=-pi,xyz1=impossible,xyz_star=0.0
+  real, dimension(3) :: Lxyz=impossible !PAR_DOC: vector of the form ($x$, $y$, $z$);
+                                        !PAR_DOC: determines the box size
+  real, dimension(3) :: xyz0=-pi !PAR_DOC: vector of the form ($x$, $y$, $z$);
+                                 !PAR_DOC: determines the left (lower) corner
+                                 !PAR_DOC: of the box
+  real, dimension(3) :: xyz1=impossible,xyz_star=0.0
   real, dimension(3) :: Lxyz_loc,xyz0_loc,xyz1_loc
   real :: r_int=0.,r_ext=impossible   ! for spherical shell problems
   real :: r_int_border=impossible,r_ext_border=impossible
@@ -178,12 +216,15 @@ module Cdata
   real :: Area_xy=1., Area_yz=1., Area_xz=1.
   logical :: lfirst=.false.,llast=.false.,ldt_paronly=.false.
   logical :: ldt=.true.
-  logical :: lcourant_dt=.true.
   logical :: lupdate_courant_dt=.false.
 !
 !  Time integration parameters.
 !
   real :: dt=0.0
+  !    dt_next is needed for correct continuation with RKF:
+  !    we store the calculated dt that would have been used for the next timestep
+  !    instead of the currently used one
+  real :: dt_next=0.0
   real :: tmax=1e33, tstart=0.0
   real :: max_walltime=0.0  ! in seconds
   real :: dt_incr=0.0, dt0=0.
@@ -192,7 +233,8 @@ module Cdata
 !AB: 5 autotests failed after having decreased cdtv. I suggest to reassess
 !AB: this more carefully and discuss it first in the newsletter.
   real :: cdtv=0.25, cdtv2=0.03, cdtv3=0.01
-  real :: cdtsrc=0.2, cdtf=0.9
+  real :: cdtsrc=1.0  !PAR_DOC: empirical time step factor for source terms (1/time)
+  real :: cdtf=0.9
   real :: ddt=0.0, dtinc=0.5, dtdec=0.5
   real :: dtmin=1.0e-6, dtmax=1.0e37, dt_epsi=1e-7, dt_ratio=1e-5
   real :: nu_sts=0.1
@@ -210,9 +252,17 @@ module Cdata
   integer :: ix_loc=1,iy_loc=1, iy2_loc=1
   integer :: iz_loc=1,iz2_loc=1, iz3_loc=1, iz4_loc=1
   integer :: iproc=0,ipx=0,ipy=0,ipz=0,iproc_world=0,ipatch=0
-  logical :: lprocz_slowest=.true.,lzorder=.false.,lmorton_curve=.false.,ltest_bcs=.true.,lcpu_timestep_on_gpu=.false., &
-             lsuppress_parallel_reductions=.false.,lread_all_vars_from_device = .false., lcuda_aware_mpi=.true.
-  logical :: lac_sparse_autotuning=.false.
+  logical :: lverbose_performance_log = .false.
+  logical :: lprocz_slowest=.true. !PAR_DOC: if set to \code{F}, the ordering
+                                   !PAR_DOC: of processor numbers is changed,
+                                   !PAR_DOC: so the $z$ processors are now in
+                                   !PAR_DOC: the inner loop. Since \var{nprocy}=4
+                                   !PAR_DOC: is optimal (see Sect.~\ref{Bandwidth}),
+                                   !PAR_DOC: you may want to put
+                                   !PAR_DOC: \var{lprocz_slowest}=T when
+                                   !PAR_DOC: \code{nygrid}$>$\code{nzgrid}.
+  logical :: lzorder=.false.,lmorton_curve=.false.
+  logical :: lsuppress_parallel_reductions=.false.
   integer :: xlneigh,ylneigh,zlneigh ! `lower' processor neighbours
   integer :: xuneigh,yuneigh,zuneigh ! `upper' processor neighbours
   integer :: poleneigh               ! `pole' processor neighbours
@@ -254,6 +304,7 @@ module Cdata
   logical :: lstep1=.true.
   logical :: lchemonly=.false.
   logical :: lsplit_second=.false.
+  logical :: lit1_logspacing=.false.
 !
 !  Input/output of data.
 !
@@ -262,25 +313,77 @@ module Cdata
   character (len=fnlen) :: directory_snap='',directory_dist='',directory_collect=''
   character (len=fnlen) :: modify_filename='modify.dat'
   character (len=fmtlen) :: fmt_avgs='e14.5e3'
+  character (len=labellen) :: trigger_snap='code_time'  !PAR_DOC: trigger quantity for snapshot output
+  character (len=labellen) :: trigger_spec='code_time'  !PAR_DOC: trigger quantity for spectral output
+  character (len=labellen) :: trigger_vid='code_time'   !PAR_DOC: trigger quantity for video output
   logical :: lsnap=.false., lsnap_down=.false., lspec=.false., lspec_start=.false., lspec_at_tplusdt=.false.
-  real :: dsnap=100., dsnap_down=0., d1davg=impossible, d2davg=100., dvid=0., dspec=impossible
+  real :: dsnap=100. !PAR_DOC: save a snapshot (VAR file) every dsnap time units
+  real :: dsnap_down=0. !PAR_DOC: save a downsampled snapshot every dsnap time units
+  real :: d1davg=impossible !PAR_DOC: save 1D (xy, yz, ...) averages every d1davg
+    !PAR_DOC: time units (overrides it1d)
+  real :: d2davg=100. !PAR_DOC: save 2D (x, y, ...) averages every d2davg time
+    !PAR_DOC: units
+  real :: dvid=0. !PAR_DOC: save slice (video) files every dvid time units.
+  real :: dspec=impossible !PAR_DOC: save power spectra every dspec time units
+  real :: dit1=impossible
   real :: dtracers=0., dfixed_points=0.
   real :: crash_file_dtmin_factor=-1.0
-  real :: km0EM=0., km1EM=0.
+  real :: km0EM=0., km1EM=0., tmax_logspacing=1.
   integer :: farray_smooth_width=6
   integer :: isave=100, ialive=0, isaveglobal=0, nv1_capitalvar=1
   logical :: lwrite_ts_hdf5=.true., lsave=.false.
-  logical :: lread_aux=.false., lwrite_aux=.false., lwrite_dvar=.false.
+  logical :: lread_aux=.false. !PAR_DOC: This controls whether auxiliary variables
+                               !PAR_DOC: are read from snapshots. This is only
+                               !PAR_DOC: required for configurations in which the
+                               !PAR_DOC: auxiliary variables are actually not
+                               !PAR_DOC: calculated at each timestep (e.g., when
+                               !PAR_DOC: you set \code{kinematic_flow='from-snap'}
+                               !PAR_DOC: in \name{hydro_run_pars}).
+  logical :: lwrite_aux=.false. !PAR_DOC: if set \code{T}, write auxiliary
+                                !PAR_DOC: variables (those calculated at each step,
+                                !PAR_DOC: but not evolved mathematically) to
+                                !PAR_DOC: \file{var.dat} after the evolved quantities.
+  logical :: lwrite_dvar=.false.
   logical :: lenforce_maux_check=.true., lwrite_avg1d_binary = .false.
-  logical :: lread_oldsnap=.false., lwrite_var_anyway=.false., lbackup_snap=.false.
+  logical :: lread_oldsnap=.false. !PAR_DOC: if set \code{T}, the old snapshot
+                                   !PAR_DOC: will be read in by start.csh before
+                                   !PAR_DOC: producing (overwriting) initial conditions.
+                                   !PAR_DOC: For example, if you just want to add a
+                                   !PAR_DOC: perturbation to the magnetic field, you'd
+                                   !PAR_DOC: give no initial condition for density and
+                                   !PAR_DOC: velocity (so you keep the data from a
+                                   !PAR_DOC: hopefully relaxed run), and just add
+                                   !PAR_DOC: whatever you need for the magnetic field.
+                                   !PAR_DOC: In this connection you may want to
+                                   !PAR_DOC: \cmd{touch NOERASE}, so as not to erase
+                                   !PAR_DOC: the previous data. Also, in
+                                   !PAR_DOC: file{start.in}, put:
+                                   !PAR_DOC: \cmd{ireset_tstart=0, lread_oldsnap=T, lwrite_var_anyway=T}
+  logical :: lwrite_var_anyway=.false., lbackup_snap=.false.
   logical :: lwrite_last_powersnap=.false., lwrite_fsum=.false.
-  logical :: lread_oldsnap_rho2lnrho=.false., lread_oldsnap_nomag=.false.
+  logical :: lread_oldsnap_rho2lnrho=.false.
+  logical :: lread_oldsnap_nomag=.false. !PAR_DOC: if set \code{T}, the
+    !PAR_DOC:  old snapshot from a non-magnetic run
+    !PAR_DOC:  will be read in before producing (overwriting) initial
+    !PAR_DOC:  conditions. This allows one to let a hydrodynamic
+    !PAR_DOC:  run relax before adding a magnetic field. However,
+    !PAR_DOC:  for this to work one has to modify {\it manually}
+    !PAR_DOC:  \file{data/param.nml} by adding an entry for
+    !PAR_DOC:  \var{MAGNETIC_INIT_PARS} or \var{PSCALAR_INIT_PARS}.
+    !PAR_DOC:  In addition, for \code{idl} to read correctly after the
+    !PAR_DOC:  first restarted run, you must adjust the value of \var{mvar}
+    !PAR_DOC:  in \file{data/dim.dat}
   logical :: lread_oldsnap_lnrho2rho=.false., lread_oldsnap_noshear=.false.
   logical :: lread_oldsnap_nohydro=.false., lread_oldsnap_nohydro_nomu5=.false.
   logical :: lread_oldsnap_onlyA=.false., lread_oldsnap_mskipvar=.false.
   logical :: lread_oldsnap_nohydro_efield=.false., lread_oldsnap_nohydro_ekfield=.false.
   logical :: ldivu_perp=.false.
-  logical :: lread_oldsnap_nopscalar=.false.
+  logical :: lread_oldsnap_nopscalar=.false. !PAR_DOC: if set \code{T}, the old
+    !PAR_DOC: snapshot from a run without
+    !PAR_DOC: passive scalar will be read in before producing
+    !PAR_DOC: (overwriting) initial conditions. This allows one to
+    !PAR_DOC: let a hydrodynamic run relax before adding a passive
+    !PAR_DOC: scalar.
   logical :: lread_oldsnap_notestfield=.false.
   logical :: lread_oldsnap_notestflow=.false.
   logical :: lread_oldsnap_notestscalar=.false.
@@ -315,17 +418,24 @@ module Cdata
 !
   logical :: lread_scl_factor_file=.false., lread_scl_factor_file_new=.false.
   real :: scl_factor_target, Hp_target, appa_target, wweos_target
-  real :: Hubble=0., ascale=1., sqrt_ascale=1., nconformal=1.5
+  !$omp threadprivate(scl_factor_target,Hp_target,appa_target)
+  real :: Hubble=0., ascale=1., sqrt_ascale=1., nconformal=1.5, tphys=0.
   character(LEN=fnlen) :: ascale_type='default'
   integer :: enum_ascale_type = 0
 !
 ! Debugging
 !
-  integer :: ip=14
+  integer :: ip=14 !PAR_DOC: (anti-)verbosity level: \code{ip=1} produces lots of
+                   !PAR_DOC: diagnostic output, \code{ip=14} virtually none.
+!
+! User-defined way to cap theta for specific computations
+!
+  real :: thetamin = 0.0 
 !
 !  Rotation and shear parameters.
 !
   real :: Omega=0.0, theta=0.0, phi=0.0, qshear=0.0, Sshear=0.0, deltay=0.0
+  !$omp threadprivate(deltay)
 !DM : Omega is now used in the viscosity routine too, for Lambda effect in rotating
 ! coordinate. This should be taken care of by 'shared variables' if in future
 ! Omega should be moved from cdata to hydro.
@@ -336,13 +446,24 @@ module Cdata
              lreference_state=.false., lfullvar_in_slices=.false., &
              lsubstract_reference_state=.false., ldensity_linearstart=.false.
   logical :: lforcing_cont=.false.
-
-
   logical :: lgravx=.false.,lgravy=.false.,lgravz=.false.
   logical :: lgravx_gas=.true.,lgravy_gas=.true.,lgravz_gas=.true.
   logical :: lgravx_dust=.true.,lgravy_dust=.true.,lgravz_dust=.true.
   logical :: lgravr=.false.
-  logical :: lwrite_ic=.true.,lnowrite=.false.,lserial_io=.false.
+  logical :: lwrite_ic=.true. !PAR_DOC: if set \code{T}, the initial data are
+                              !PAR_DOC: written into the file \file{VAR0}. This
+                              !PAR_DOC: is generally useful, but doing this all
+                              !PAR_DOC: the time uses up plenty of disk space.
+  logical :: lnowrite=.false. !PAR_DOC: if set \code{T}, all initialization files
+                              !PAR_DOC: are written, including the param.nml file,
+                              !PAR_DOC: except \file{var.dat}. This option allows
+                              !PAR_DOC: you to use old \file{var.dat} files, but
+                              !PAR_DOC: updates all other initialization files.
+                              !PAR_DOC: This could be useful after having changed
+                              !PAR_DOC: the code and, in particular, when the
+                              !PAR_DOC: \file{var.dat} files will be overwritten
+                              !PAR_DOC: by \file{remesh.csh}.
+  logical :: lserial_io=.false.
   logical :: lmodify=.false.
   logical :: lroot=.true.,lcaproot=.false.,ldebug=.false.,lfft=.true.
   logical :: lproc_pt=.false., lproc_p2=.false.
@@ -367,6 +488,8 @@ module Cdata
   logical :: lghostfold_usebspline = .false.
   logical :: lcooling_ss_mz = .false.
   logical :: lshock_heat = .true.
+  logical :: lklein_gordon = .false.
+  logical :: ldisp_current = .false.
   real :: density_scale_factor=impossible
 !
 !  Used together with entropy, turns iss into ilntt (i.e., entropy
@@ -374,13 +497,15 @@ module Cdata
 !  temperature_idealgas.f90 procedure, but draws on the more available
 !  functionality extent in entropy.f90.
 !
-  logical :: pretend_lnTT=.false.
+  logical :: pretend_lnTT=.false. !PAR_DOC: \index{pretend_lnTT}
+    !PAR_DOC: selects $\ln T$ as fundamental thermodynamic variable
+    !PAR_DOC: in the entropy module
   logical :: lphase=.false.
 !
 !  Type counters.
 !
   integer :: nvar,naux,naux_com,nscratch,nglobal,n_odevars=0
-  real, dimension(:), allocatable :: f_ode, df_ode
+  real, dimension(:), allocatable :: f_ode, df_ode, f_ode_diagnostics
   logical :: lode=.false.
 !
 !  Variable indices (default zero, set later by relevant physics modules).
@@ -426,10 +551,11 @@ module Cdata
   integer :: iam=0,iamx=0,iamy=0,iamz=0
   integer :: ivisc_heat=0,ibb=0,ibx=0,iby=0,ibz=0,ijj=0,ijx=0,ijy=0,ijz=0
   integer :: ieta_planet=0
+  integer :: ijbt=0, ij2t=0
   integer :: ibb_sph=0, ibb_sphr=0, ibb_spht=0, ibb_sphp=0
   integer :: inusmag=0, ietasmag=0
   integer :: iaak, iaakim, ieek, ieekim
-  integer :: iee=0,iex=0,iey=0,iez=0,ialfven=0
+  integer :: iee=0,iex=0,iey=0,iez=0,ialfven=0, iWW=0, iWW1=0, iWW2=0, iWW3=0
   integer :: iFF_diff=0, iFF_diff1=0,  iFF_diff2=0, &
              iFF_div_uu=0, iFF_div_aa=0, iFF_div_ss=0, iFF_div_rho=0, iFF_char_c=0, iFF_heat=0
   integer :: isld_char=0, ivisc_forc=0,ivisc_forcx=0,ivisc_forcy=0,ivisc_forcz=0
@@ -466,6 +592,8 @@ module Cdata
   integer :: iuu_fluc=0, iuu_flucx=0, iuu_flucy=0, iuu_flucz=0
   integer :: iuu_sph=0, iuu_sphr=0, iuu_spht=0, iuu_sphp=0
   integer :: ics=0, icool_prof=0
+  integer :: iglobal_hcond=0, iglobal_glhc=0
+  integer :: iglobal_glhcx=0, iglobal_glhcy=0, iglobal_glhcz=0
 !
 !  Variables to count the occurance of derivative calls per timestep
 !  for optimisation purposes.  To use uncomment the array and
@@ -520,6 +648,7 @@ module Cdata
   real :: tspec,tdiagnos,dtdiagnos,t1ddiagnos,t2davgfirst,eps_rkf_diagnos
   real, dimension (mname) :: fweight=0.0
   integer, dimension(:)   , allocatable :: itype_name
+  integer, dimension(:)   , allocatable :: itype_name_z
   real, dimension(:)      , allocatable, target :: fname,fname_keep
   real, dimension(:,:)    , allocatable, target :: fnamer,fname_sound
   real, dimension(:,:,:)  , allocatable, target :: fnamex, fnamey, fnamez, fnamexy, fnamexz
@@ -545,7 +674,7 @@ module Cdata
 
   logical :: lout=.false.,headt=.false.,headtt=.true.,lrmv=.false.
   logical :: ldiagnos=.false.,lvideo=.false.,lwrite_prof=.true.,lout_sound=.false.
-  logical :: lrhs_diagnostic_output=.false.
+  logical :: ldiagnostic_output=.false.
   logical :: ltracers=.false.,lfixed_points=.false.
   logical :: l2davg=.false.,l2davgfirst=.false.
   logical :: l1davg=.false.,l1davgfirst=.false.,l1dphiavg=.false.
@@ -625,6 +754,7 @@ module Cdata
   integer :: idiag_Rmesh3=0     ! DIAG_DOC: $R_{\rm mesh}^{(3)}$
   integer :: idiag_maxadvec=0   ! DIAG_DOC: maxadvec
   integer :: idiag_eps_rkf=0    ! DIAG_DOC: time step accuracy threshold
+  integer :: idiag_dtvmaxz=0       ! XYAVG_DOC: z-dependent version of dtv
 !
 !  Emergency brake:
 !   When toggled the code will stop at the next convenient point
@@ -639,7 +769,9 @@ module Cdata
 !  Write snapshots with no ghost cells in the missing direction,
 !  can save lots of hard disk space for 2-D runs.
 !
-  logical :: lwrite_2d=.false.
+  logical :: lwrite_2d=.false. !PAR_DOC: if set \code{T}, only 2D-snapshots are
+                               !PAR_DOC: written into VAR files in the case of
+                               !PAR_DOC: 2D-runs with $nygrid=1$ or $nzgrid=1$.
 !
 !  Bidiagonal second derivatives; default to true.
 !
@@ -652,6 +784,8 @@ module Cdata
   logical :: vel_phispec=.false.,mag_phispec=.false.,uxj_phispec=.false.,vec_phispec=.false.
   logical :: uxy_spec=.false., bxy_spec=.false., jxbxy_spec=.false.
   character (LEN=labellen*4) :: xy_spec=''
+  character (LEN=labellen*4) :: pdfs='' !used to calculate PDFs of any variables in the f-array. Example: pdfs='ux,uy,lnrho'
+  character (LEN=labellen*4) :: cross_spec='' !used to calculate cross spectra. Example: cross_spec='u.ru'
   character (LEN=labellen), dimension(n_xy_specs_max) :: xy_specs=''
   logical :: EP_spec=.false., hEP_spec=.false., nd_spec=.false., ud_spec=.false., abs_u_spec=.false.
   logical :: ro_spec=.false., TT_spec=.false., ss_spec=.false., cc_spec=.false., cr_spec=.false.
@@ -673,6 +807,7 @@ module Cdata
   logical :: ab_phispec=.false.,ou_phispec=.false.
   logical :: rhocc_pdf=.false.,cc_pdf=.false.,lncc_pdf=.false.
   logical :: gcc_pdf=.false., lngcc_pdf=.false., lnspecial_pdf=.false., special_pdf=.false.
+  logical :: lnrho_pdf=.false.
   logical :: FI_mixfrac_pdf2d=.false.
   logical :: cosEB_pdf=.false.
   logical :: ang_jb_pdf1d=.false., ang_ub_pdf1d=.false., ang_ou_pdf1d=.false.
@@ -684,8 +819,9 @@ module Cdata
   logical :: ou_polar=.false., ab_polar=.false., jb_polar=.false.
   logical :: uut_spec=.false., uut_polar=.false., ouout_spec=.false.,ouout2_spec=.false.,ouout_polar=.false.
   logical :: out_spec=.false., uot_spec=.false.
-  logical :: saffman_ub=.false., saffman_mag=.false., saffman_mag_c=.false.
+  logical :: saffman_ub=.false., saffman_mag=.false., saffman_mag_uc=.false., saffman_mag_c=.false.
   logical :: saffman_aa=.false., saffman_aa_c=.false., saffman_bb=.false.
+  logical :: saffman_EEM=.false., saffman_EEM_uc=.false.
   logical :: uu_fft3d=.false., oo_fft3d=.false., bb_fft3d=.false., jj_fft3d=.false.
   logical :: uu_xkyz=.false., oo_xkyz=.false., bb_xkyz=.false., jj_xkyz=.false.
   logical :: uu_kx0z=.false., oo_kx0z=.false., bb_kx0z=.false., jj_kx0z=.false.
@@ -849,13 +985,24 @@ module Cdata
 !  The index corresponds to the vertex buffer index on Astaroth
 !  Size of mfarray to make sure we can store the handle (for 1 to mvar -1)
 !
-   integer, dimension(mfarray) :: maux_vtxbuf_index = -1
+   integer, dimension(mfarray) :: maux_vtxbuf_index     = -1
+   integer, dimension(mfarray) :: read_vtxbuf_from_gpu  =  0
    integer :: enum_unit_system = 0
 !
 !  Define and initialize lambda5, so that it can be used to tell whether
 !  or not the chiral MHD special module is used.
 !
   real :: lambda5 = 0.0
+
+  logical :: lrhs_test_at_work = .false.
+!
+! Swap order in which init_uu and init_lnrho are called in start.f90
+! The default is lnrho first, but for geostrophic initial condition
+! one needs to know the density before setting the velocity. It can 
+! also be done with an initial condition, but this is simpler since it
+! can use the control flow already in place for lanelastic.
+!
+  logical :: lswap_init_lnrho_uu = .false.
 !
 !  Variables for concurrency
 !
@@ -863,6 +1010,8 @@ module Cdata
   logical :: l1dphiavg_save, l1davgfirst_save, ldiagnos_save, l2davgfirst_save
   logical :: lout_save, l1davg_save, l2davg_save, lout_sound_save, lvideo_save
   logical :: lchemistry_diag_save
+  real :: deltay_save,scl_factor_target_save,Hp_target_save, appa_target_save
+  logical :: ltimestep_diagnostics = .false.
 
   real(KIND=rkind8) :: t_save,tspec_save
   real :: t1ddiagnos_save,t2davgfirst_save,tslice_save,tsound_save
@@ -884,6 +1033,7 @@ module Cdata
 !$omp threadprivate(fname,fnamex,fnamey,fnamez,fnamer,fnamexy,fnamexz,fnamerz,fname_keep,fname_sound,ncountsz)
 !$omp threadprivate(l1dphiavg, l1davgfirst, l2davgfirst, ldiagnos,lout, l1davg, l2davg, lout_sound, lvideo)
 !$omp threadprivate(t,tspec,tdiagnos,t1ddiagnos,t2davgfirst,tslice,tsound,itdiagnos,dtdiagnos,eps_rkf_diagnos)
+!$omp threadprivate(maxdiffus,maxadvec,advec2,advec_cs2)
 !
 ! For use in offloaded code:
 !!$omp declare target(ldensity_nolog,l2,m2,n2)

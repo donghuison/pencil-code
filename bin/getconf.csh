@@ -138,6 +138,7 @@ endif
 
 # Check for particles
 set lparticles=0
+# such grepping can be misleading: unneeded namelists are ignored
 if { ( grep particles_init_pars start.in >& /dev/null ) } set lparticles=1
 
 # Check for massive particles
@@ -842,7 +843,7 @@ else if (($hn =~ r*[cg]*.bullx)) then
   set remote_top     = 0
   set local_binary = 0
 #--------------------------------------------------
-else if (($hn =~ c*.mahti.csc.fi)) then
+else if (($hn =~ *.mahti.csc.fi)) then
   echo "Mahti - CSC, Kajaani, Finland"
   if ($?SLURM_JOB_ID) then
     echo "Running job: $SLURM_JOB_ID"
@@ -880,6 +881,23 @@ else if (($hn =~ atlas*) && ($USER =~ monteiro)) then
   set local_binary = 0
 #--------------------------------------------------
 #else if (($hn =~ uan* && $masterhost == lumi)) then
+else if (($hostname =~ frontier*)) then
+  echo "Frontier - Oak Ridge, USA"
+  if ($?SLURM_JOB_ID) then
+    echo "Running job: $SLURM_JOB_ID"
+    if (!($?SLURM_SUBMIT_DIR)) then
+      setenv SLURM_SUBMIT_DIR `pwd`
+    endif
+    touch $SLURM_SUBMIT_DIR/data/jobid.dat
+    echo $SLURM_JOB_ID >> $SLURM_SUBMIT_DIR/data/jobid.dat
+  endif
+  set mpirun = 'srun'
+  set npops = "-n $ncpus"
+  set local_disc = 0
+  set one_local_disc = 0
+  set remote_top     = 0
+  set local_binary = 0
+#--------------------------------------------------
 else if (($hn =~ nid* && $masterhost == lumi)) then
   echo "Lumi - CSC, Kajaani, Finland"
   if ($?SLURM_JOB_ID) then
@@ -2282,7 +2300,7 @@ endif
 #  echo 'MODULE_[PRE|IN|SUF]FIX="'$MODULE_PREFIX'", "'$MODULE_INFIX'", "'$MODULE_SUFFIX'"'
 #endif
 
-setenv PC_MODULES_LIST `tac src/Makefile.local | grep -m 1 '^ *SPECIAL *=' | tr "[A-Z]" "[a-z]" | sed -e's/.*= *//' -e's/special\///g'` 
+setenv PC_MODULES_LIST `grep '^ *SPECIAL *=' src/Makefile.local | tail -n 1 | tr "[A-Z]" "[a-z]" | sed -e's/.*= *//' -e's/special\///g'` 
 
 # Determine data directory (defaults to `data')
 if (-r datadir.in) then
@@ -2330,7 +2348,7 @@ endif
 
 # Create subdirectories on local scratch disc (start.csh will also create
 # them under $datadir/)
-set HDF5=`tac src/Makefile.local | grep -m1 '^ *IO *=' | grep -Ec '^ *IO *= *io_hdf5'`
+set HDF5=`grep '^ *IO *=' src/Makefile.local | tail -n 1 | grep -Ec '^ *IO *= *io_hdf5'`
 if ($HDF5) then
   set procdirs = ()
   set subdirs = ("allprocs" "slices" "averages" "idl")

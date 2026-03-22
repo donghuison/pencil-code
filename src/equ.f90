@@ -7,7 +7,6 @@ module Equ
   use Cdata
   use Messages
   use Boundcond
-  use Mpicomm
   use Grid, only: calc_pencils_grid, get_grid_mn
 
   implicit none
@@ -16,8 +15,11 @@ module Equ
   public :: impose_floors_ceilings, finalize_diagnostics
   public :: write_diagnostics
   public :: perform_diagnostics
-!$ public :: write_diagnostics_wrapper
+  public :: calc_all_module_diagnostic_auxiliaries
 !
+  real, public    :: before_boundary_sum_time=0.
+  real, public    :: time_spent_copying_and_waiting=0.
+  real, public    :: radtransfer_sum_time   =0.
   real, public    :: rhs_sum_time=0.
 
   private
@@ -27,8 +29,6 @@ module Equ
   real, dimension(:,:,:)  , pointer :: p_fnamex, p_fnamey, p_fnamez, p_fnamexy, p_fnamexz
   real, dimension(:,:,:,:), pointer :: p_fnamerz
   integer, dimension(:,:) , pointer :: p_ncountsz
-  integer :: n_iterations=0
-  real, allocatable, dimension(:) :: f_ode_diagnostics
 !
   contains
 !***********************************************************************
@@ -51,14 +51,15 @@ module Equ
       use Chiral
       use Chemistry
       use Density
-      use Diagnostics
+      use Diagnostics, only: save_diagnostic_controls
       use Energy
       use EquationOfState
 !
 ! To check ghost cell consistency, please uncomment the following line:
 !     use Ghost_check, only: check_ghosts_consistency
       use GhostFold, only: fold_df, fold_df_3points
-      use Gpu, only: before_boundary_gpu, rhs_gpu, copy_farray_from_GPU, get_farray_ptr_gpu
+      use Gpu, only: before_boundary_gpu, rhs_gpu, copy_farray_from_GPU, get_farray_ptr_gpu,&
+                     ltest_rhs,it_test_rhs
       use Gravity
       use Hydro
       use Magnetic
@@ -73,7 +74,6 @@ module Equ
       use Radiation
       use Selfgravity
       use Shear
-      use Shock, only: calc_shock_profile_simple
       use Solid_Cells, only: update_solid_cells, dsolid_dt_integrate
       use Sub
       use Testfield
@@ -100,7 +100,7 @@ module Equ
 !  Print statements when they are first executed.
 !
       headtt = headt .and. lfirst .and. lroot
-      lupdate_courant_dt = lfirst .and. ldt .and. lcourant_dt
+      if (.not. lgpu) lupdate_courant_dt = lfirst .and. ldt .and. lcourant_dt
 !
       if (headtt.or.ldebug) print*,'pde: ENTER'
       if (headtt) call svn_id( &
@@ -109,7 +109,8 @@ module Equ
 !  Get the adress of the f-array on the GPU's global memory for use
 !  in offloading, training etc.
 !
-      if (lgpu) call get_farray_ptr_gpu
+      if (lgpu) call get_farray_ptr_gpu   !Why here? should be static
+      call load_variables_to_gpu 
 !
 !  Initialize counter for calculating and communicating print results.
 !  Do diagnostics only in the first of the itorder substeps.
@@ -117,11 +118,12 @@ module Equ
       ldiagnos   =lfirst.and.lout
       l1davgfirst=lfirst.and.l1davg
       l2davgfirst=lfirst.and.l2davg
+
 !
 !  Derived diagnostics switches.
 !
       l1dphiavg=lcylinder_in_a_box.and.l1davgfirst
-      lrhs_diagnostic_output = ldiagnos.or.l1davgfirst.or.l1dphiavg.or.l2davgfirst
+      ldiagnostic_output = ldiagnos.or.l1davgfirst.or.l1dphiavg.or.l2davgfirst.or.(lvideo .and. lfirst)
 !
 !  For chemistry with LSODE
 !
@@ -167,35 +169,39 @@ module Equ
 !  The user must have set crash_file_dtmin_factor>0.0 in &run_pars for
 !  this to be done.
 !
-!      if (.not. lgpu) then
-        if (crash_file_dtmin_factor > 0.0) call output_crash_files(f)
+      if (crash_file_dtmin_factor > 0.0) call output_crash_files(f)
 !
 !  For debugging purposes impose minimum or maximum value on certain variables.
 !
-        call impose_floors_ceilings(f)   !MR: too early, f modifications come below
+      if (.not. lgpu) call impose_floors_ceilings(f)   !MR: too early, f modifications come below
 !
 !  Apply global boundary conditions to particle positions and communicate
 !  migrating particles between the processors.
 !
-        if (lparticles) call particles_boundconds(f)
-        if (lpointmasses) call boundconds_pointmasses
+      if (lparticles) call particles_boundconds(f)
+      if (lpointmasses) call boundconds_pointmasses
 !
 !  Call "before_boundary" hooks (for f array precalculation)
 !
-        call before_boundary_shared(f)
-        !call test_rhs_gpu(f,df,p,mass_per_proc,early_finalize,rhs_cpu)
+      call before_boundary_shared(f)
+      if (lgpu .and. ltest_rhs .and. it == it_test_rhs) then
+        call test_rhs_gpu(f,p,mass_per_proc,early_finalize,rhs_cpu)
+      endif
 
-        if (.not. lgpu) then
-          call before_boundary_cpu(f)
-        else
-          call before_boundary_gpu(f,lrmv,itsub,t)
-        endif
+      if (lgpu) then
+        start_time = mpiwtime()
+        call before_boundary_gpu(f,lrmv,itsub,t)
+        end_time = mpiwtime()
+        before_boundary_sum_time = before_boundary_sum_time + end_time-start_time
+      else
+        call before_boundary_cpu(f)
+      endif
 !
 !  Prepare x-ghost zones; required before f-array communication
 !  AND shock calculation
 !
-        if (.not. lgpu) then
-          call boundconds_x(f)
+      if (.not. lgpu) then
+        call boundconds_x(f)
 !
 !  Initiate (non-blocking) communication and do boundary conditions.
 !  Required order:
@@ -203,30 +209,30 @@ module Equ
 !  2. communication
 !  3. y- and z-boundaries
 !
-          if (nghost>0) then
-            if (ldebug) print*,'pde: before initiate_isendrcv_bdry'
-            call initiate_isendrcv_bdry(f)
-            if (early_finalize) then
-              call finalize_isendrcv_bdry(f)
-              if (lcoarse) call coarsegrid_interp(f)   ! after boundconds_x???
-              call boundconds_y(f)
-              call boundconds_z(f)
-            endif
+        if (nghost>0) then
+          if (ldebug) print*,'pde: before initiate_isendrcv_bdry'
+          call initiate_isendrcv_bdry(f)
+          if (early_finalize) then
+            call finalize_isendrcv_bdry(f)
+            if (lcoarse) call coarsegrid_interp(f)   ! after boundconds_x???
+            call boundconds_y(f)
+            call boundconds_z(f)
           endif
         endif
+      endif
 !
 ! update solid cell "ghost points". This must be done in order to get the
 ! correct boundary layer close to the solid geometry, i.e. no-slip conditions.
 !
-        call update_solid_cells(f)
+      call update_solid_cells(f)
 !
 !  For sixth order momentum-conserving, symmetric hyperviscosity with positive
 !  definite heating rate we need to precalculate the viscosity term. The
 !  restivitity term for sixth order hyperresistivity with positive definite
 !  heating rate must also be precalculated.
 !
-        if (lhyperviscosity_strict)   call hyperviscosity_strict(f)
-        if (lhyperresistivity_strict) call hyperresistivity_strict(f)
+      if (lhyperviscosity_strict)   call hyperviscosity_strict(f)
+      if (lhyperresistivity_strict) call hyperresistivity_strict(f)
 !
 !  Dynamically set the (hyper-)diffusion coefficients
 !
@@ -239,7 +245,6 @@ module Equ
 !        f(2:mx-2,2:my-2,2:mz-2,iFF_char_c)=0.
 !print*,'vor magnetic:', maxval(f(2:mx-2,2:my-2,2:mz-2,iFF_char_c))
 !        call update_char_vel_energy(f)
-!        call update_char_vel_magnetic(f)
 !        call update_char_vel_hydro(f)
         !call update_char_vel_density(f)
         !f(2:mx-2,2:my-2,2:mz-2,iFF_char_c)=sqrt(f(2:mx-2,2:my-2,2:mz-2,iFF_char_c))
@@ -251,35 +256,30 @@ module Equ
 !  derived from the basic thermodynamical variables), we need to fill in the
 !  pressure in the f array.
 !
-        call fill_farray_pressure(f)
+      call fill_farray_pressure(f)
 !
 !  Set inverse timestep to zero before entering loop over m and n.
 !  If we want to have a logarithmic time advance, we want set this here
 !  as the maximum. All other routines can then still make it shorter.
 !
-        if (lupdate_courant_dt) then
-          if (dtmax/=0.0) then
-            if (lfractional_tstep_advance) then
-              dt1_max=1./(dt_incr*t)
-            else
-              dt1_max=1./dtmax
-            endif
+      if (lupdate_courant_dt) then
+        if (dtmax/=0.0) then
+          if (lfractional_tstep_advance) then
+            dt1_max=1./(dt_incr*t)
           else
-            dt1_max=0.0
+            dt1_max=1./dtmax
           endif
+        else
+          dt1_max=0.0
         endif
+      endif
 !
 !  Calculate ionization degree (needed for thermodynamics)
 !  Radiation transport along rays. If lsingle_ray, then this
 !  is only used for visualization and only needed when lvideo
 !  (but this is decided in radtransfer itself)
 !
-        if (leos_ionization.or.leos_temperature_ionization) call ioncalc(f)
-        if (lradiation_ray) call radtransfer(f)     ! -> after_boundary or before_boundary?
-!
-!  Calculate shock profile (simple).
-!
-        if (lshock) call calc_shock_profile_simple(f)
+      if ((leos_ionization.or.leos_temperature_ionization) .and. .not. lgpu) call ioncalc(f)
 !
 !  Call "after" hooks (for f array precalculation). This may imply
 !  calculating averages (some of which may only be required for certain
@@ -292,36 +292,28 @@ module Equ
 !  Use early_finalize in this case.
 !  MR+joern+axel, 8.10.2015
 !
-        call timing('pde','before "after_boundary" calls')
-!
-        if (.not. lgpu) then
-          call after_boundary(f,df)
-        endif
-!      endif
-!
+      call timing('pde','before "after_boundary" calls')
+      call after_boundary_shared(f)
+      if (.not. lgpu) call after_boundary_cpu(f,df)
       call timing('pde','after "after_boundary" calls')
 !
       if (lgpu) then
-        if (lrhs_diagnostic_output) then
+        if (ldiagnostic_output) then
           !wait in case the last diagnostic tasks are not finished
+          start_time = mpiwtime()
           call copy_farray_from_GPU(f)
-          if(lode .and. lgpu) then
-                  if (.not. allocated(f_ode_diagnostics)) then
-                          allocate(f_ode_diagnostics(max_n_odevars))
-                  endif
-                  f_ode_diagnostics = f_ode
-          endif
+          time_spent_copying_and_waiting = time_spent_copying_and_waiting+mpiwtime()-start_time
+          if (lode) f_ode_diagnostics = f_ode
 !$        lmasterflags(PERF_DIAGS) = .true.
         endif
         start_time = mpiwtime()
         call rhs_gpu(f,itsub)
 !TP: should be done after rhs_gpu since if doing testing against cpu want to get the right value of dt
-        if (lrhs_diagnostic_output) then
+        if (ldiagnostic_output) then
 !$        call save_diagnostic_controls
         endif
         end_time = mpiwtime()
         rhs_sum_time = rhs_sum_time + end_time-start_time
-        n_iterations = n_iterations + 1
       else
         if (ldiagnos.or.l1davgfirst.or.l1dphiavg.or.l2davgfirst) then
                 !if (lroot) print*,'Diagnostic time - CPU=', t
@@ -330,10 +322,6 @@ module Equ
         call rhs_cpu(f,df,p,mass_per_proc,early_finalize)
         end_time = mpiwtime()
         rhs_sum_time = rhs_sum_time + end_time-start_time
-        !if (lroot) print*,"rhs_cpu took:",end_time-start_time
-        !if (lroot) flush(6)
-        !sum_time = sum_time + end_time-start_time
-        !n_iterations = n_iterations + 1
 !
 !  Doing df-related work which cannot be finished inside the main mn-loop.
 !  (At the moment relevant for anelastic and Schur flows.)
@@ -447,15 +435,22 @@ module Equ
 !
     endsubroutine pde
 !***********************************************************************
-!$   subroutine write_diagnostics_wrapper(f) bind(C)
-!
-!  7-feb-24/TP: needed since can't use bind(C) in general (only for threadpool)
-!
-!$    real, dimension(mx,my,mz,mfarray) :: f
-!
-!$    call write_diagnostics(f)
-!
-!$   endsubroutine write_diagnostics_wrapper
+    subroutine load_variables_to_gpu
+      use GPU, only: update_on_gpu
+
+      use Special, only: load_variables_to_gpu_special
+      use Hydro, only: load_variables_to_gpu_hydro
+
+      integer, save :: dt_beta_ts_index = -1
+
+      if (lspecial) call load_variables_to_gpu_special
+      if (lhydro)   call load_variables_to_gpu_hydro
+      !TP: need to load it on the first substep where it is wrong!
+      !    and the correct one after dt is calculated to be in sync with the CPU
+      if (lgpu .and. (ldustvelocity .or. ldustdensity) .and. (itsub <= 2)) &
+        call update_on_gpu(dt_beta_ts_index,'AC_dt_beta_ts__mod__cdata')
+
+    endsubroutine
 !***********************************************************************
    subroutine write_diagnostics(f)
 !
@@ -565,14 +560,69 @@ module Equ
 
     endsubroutine diagnostics_reductions
 !***********************************************************************
+    subroutine calc_all_module_diagnostic_auxiliaries(f,p)
+!
+!
+!  Candidate implementation for the new concern of auxiliaries in snapshots.
+!  Subject to change.
+!
+!  Calculates those auxiliaries that are needed only for diagnostic purposes
+!  This subroutine exists because we need to compute the auxiliaries for the snapshot
+!  The intent is that the normal calc_diagnostics_<module> also computes the diagnostic auxiliaries
+!  But by splitting their computation to different subroutines we can recompute then when needed
+!  (as in the case of snapshots)
+!  This subroutine is only used for GPU runs.
+!
+!  15-mar-2026/TP: coded
+!
+      use Magnetic,only: calc_diagnostic_auxiliaries_magnetic
+      use Diagnostics
+!$    use OMP_lib
+!$    use General, only: get_cpu, set_cpu
+
+      real, dimension (mx,my,mz,mfarray),intent(INOUT) :: f
+      type (pencil_case) :: p
+
+      integer :: imn
+!
+!  Parallelization across all helper threads.
+!
+!$omp parallel if (.not. lsuppress_parallel_reductions) private(p) num_threads(num_helper_threads) &
+!$omp copyin(t,dxmax_pencil,fname,fnamex,fnamey,fnamez,fnamer,fnamexy,fnamexz,fnamerz,fname_keep,fname_sound,ncountsz,phiavg_norm)
+!$    call restore_diagnostic_controls
+
+      !$omp do
+      do imn=1,nyz
+        n=nn(imn)
+        m=mm(imn)
+!
+!TP: for the moment calc_all_diagnostic_auxilaries does not support coarse grid
+!
+!  Skip points not belonging to coarse grid.
+!
+        ! lcoarse_mn=lcoarse.and.mexts(1)<=m.and.m<=mexts(2)
+        ! if (lcoarse_mn) then
+        !   lcoarse_mn=lcoarse_mn.and.ninds(0,m,n)>0
+        !   if (ninds(0,m,n)<=0) cycle
+        ! endif
+
+        call calc_all_pencils(f,p)
+        call calc_diagnostic_auxiliaries_magnetic(f,p)
+        lfirstpoint=.false.
+      enddo
+!$omp end parallel   ! all helper threads
+
+      endsubroutine calc_all_module_diagnostic_auxiliaries
+!*****************************************************************************
     subroutine calc_all_module_diagnostics(f,p)
 !
-!  Calculates most module diagnostics (but not those in special modules).
+!  Calculates most module diagnostics.
+!  This subroutine is only used for GPU runs.
 !
 !  10-sep-2019/MR: coded
 !
       use Ascalar, only: calc_diagnostics_ascalar
-      use Chemistry, only: calc_diagnostics_chemistry
+      use Chemistry, only: calc_diagnostics_chemistry, chemistry_allocate_rhs_arrays
       use Chiral, only: calc_diagnostics_chiral
       use Cosmicray, only: calc_diagnostics_cosmicray
       use Density, only: calc_diagnostics_density
@@ -612,7 +662,20 @@ module Equ
 !
       call init_reduc_pointers
 
-!$omp parallel if(.not. lsuppress_parallel_reductions) private(p) num_threads(num_helper_threads) &
+      !TP: if equ had an initialization routine this would fit there better
+      if (idiag_Rmesh /= 0 .or. idiag_Rmesh3 /=0 ) ltimestep_diagnostics = .true.
+!
+!  If doing diagnostics together with the GPU lupdate_courant_dt means to calculate some of the timestep diagnostics
+!
+      if (lgpu) then
+        if (idiag_dtv /= 0 .or. &
+            idiag_dtdiffus /= 0 .or. &
+            idiag_dtdiffus2 /= 0 .or. &
+            idiag_dtdiffus3 /= 0) ltimestep_diagnostics = .true.
+        lupdate_courant_dt = lcourant_dt .and. ltimestep_diagnostics
+      endif
+
+!$omp parallel if (.not. lsuppress_parallel_reductions) private(p) num_threads(num_helper_threads) &
 !$omp copyin(t,dxmax_pencil,fname,fnamex,fnamey,fnamez,fnamer,fnamexy,fnamexz,fnamerz,fname_keep,fname_sound,ncountsz,phiavg_norm)
 !$    call restore_diagnostic_controls
 
@@ -620,6 +683,7 @@ module Equ
 !     TP: on some nvfortan compilers copyin does not seem to be enough to ensure diagnostic arrays are allocated
 !     TP: not sure was the copyin ever sufficient, but not that important since we can always explicitly check
 !$    if (.not. allocated(fname)) call allocate_diagnostic_arrays
+      if (lchemistry) call chemistry_allocate_rhs_arrays
       lfirstpoint=.true.
       !TP: example code to explicitly set and get cores the thread are running on
       !TP: the flexible way to set this is with OMP_PROC_BIND=close,spread, but in case that fails one can be sure by using the code
@@ -629,7 +693,14 @@ module Equ
 
       !$omp do
       do imn=1,nyz
-
+        !Done since with multithreading RHS is not evaluated
+        if (lmultithread .and. lupdate_courant_dt) then
+                if (idiag_dtdiffus/=0 .or. idiag_Rmesh /= 0)  maxdiffus    = 0.0
+                maxadvec     = 0.0
+                advec2       = 0.0
+                advec_cs2    = 0.0
+                advec2_hypermesh  = 0.0
+        endif
         n=nn(imn)
         m=mm(imn)
 !
@@ -673,6 +744,8 @@ module Equ
         call calc_diagnostics_training(f)
         call calc_diagnostics_viscosity(p)
         call calc_diagnostics_special(f,p)
+        call calc_maxadvec
+        call timestep_diagnostics
 
         lfirstpoint=.false.
       enddo
@@ -695,24 +768,30 @@ module Equ
       endsubroutine calc_all_module_diagnostics
 !*****************************************************************************
       subroutine calc_all_before_boundary_diagnostics(f)
+
         use Density, only: density_before_boundary_diagnostics
+
         real, dimension (mx,my,mz,mfarray),intent(INOUT) :: f
-        !$omp parallel if(.not. lsuppress_parallel_reductions) num_threads(num_helper_threads)
+
+        !$omp parallel if (.not. lsuppress_parallel_reductions) num_threads(num_helper_threads)
                 call density_before_boundary_diagnostics(f)
         !$omp end parallel
+
       endsubroutine calc_all_before_boundary_diagnostics
 !*****************************************************************************
       subroutine perform_diagnostics(f,p)
 
 !$    use General, only: signal_send
       use Special, only: calc_ode_diagnostics_special
+      use EquationofState, only: ioncalc
 
       real, dimension (mx,my,mz,mfarray),intent(INOUT) :: f
       type (pencil_case) :: p
 
+        if (lmultithread .and. (leos_ionization.or.leos_temperature_ionization)) call ioncalc(f)
         call calc_all_before_boundary_diagnostics(f)
         call calc_all_module_diagnostics(f,p)     ! by all helper threads
-        call calc_ode_diagnostics_special(f_ode_diagnostics)
+        if (lode) call calc_ode_diagnostics_special(f_ode_diagnostics)
         call finalize_diagnostics                 ! by diagmaster (MPI comm.)
         call write_diagnostics(f)                 !       ~
 
@@ -886,16 +965,21 @@ module Equ
     endsubroutine calc_all_pencils
 !***********************************************************************
     subroutine check_if_necessary(f,lcommunicate)
-        real, dimension(mx,my,mz,mfarray) :: f
-        logical :: lcommunicate
-        if (lcommunicate) then
-          if (necessary(imn)) then
-            call finalize_isendrcv_bdry(f)
-            call boundconds_y(f)
-            call boundconds_z(f)
-            lcommunicate=.false.
-          endif
+
+      use Mpicomm, only: finalize_isendrcv_bdry
+
+      real, dimension(mx,my,mz,mfarray) :: f
+      logical :: lcommunicate
+
+      if (lcommunicate) then
+        if (necessary(imn)) then
+          call finalize_isendrcv_bdry(f)
+          call boundconds_y(f)
+          call boundconds_z(f)
+          lcommunicate=.false.
         endif
+      endif
+
     endsubroutine check_if_necessary
 !***********************************************************************
     subroutine before_boundary_shared(f)
@@ -938,8 +1022,8 @@ module Equ
 !  communication in order to be able to take the gradient of the potential
 !  later.
 !
-        
-      call calc_selfpotential(f)
+      if (lselfgravity)  call calc_selfpotential(f)
+!
       if (ldustdensity)  call dustdensity_before_boundary(f)
       if (ldensity .and. ldiagnos) call density_before_boundary_diagnostics(f)
       if (ldensity.or.lboussinesq) call density_before_boundary(f)
@@ -959,7 +1043,30 @@ module Equ
 
     endsubroutine before_boundary_cpu
 !***********************************************************************
-    subroutine after_boundary(f,df)
+    subroutine after_boundary_shared(f)
+
+      use Training, only: training_after_boundary
+      use Mpicomm, only: mpiwtime
+      use Radiation, only: radtransfer
+
+      real, intent(INOUT), dimension(mx,my,mz,mfarray) :: f
+      real :: start_time,end_time
+
+      if (ltraining) call training_after_boundary(f)
+!
+!Radiation rays have to come in after boundary since ioncalc has to be in after boundary
+!and radiation rays depend on them
+!
+      if (lradiation_ray) then
+        start_time = mpiwtime()
+        call radtransfer(f)
+        end_time = mpiwtime()
+        radtransfer_sum_time = radtransfer_sum_time + end_time-start_time
+      endif
+
+    endsubroutine after_boundary_shared
+!***********************************************************************
+    subroutine after_boundary_cpu(f,df)
 
       use Hydro, only: hydro_after_boundary
       use Viscosity, only: viscosity_after_boundary
@@ -968,6 +1075,7 @@ module Equ
       use Energy, only: energy_after_boundary
       use Gravity, only: gravity_after_boundary
       use Forcing, only: forcing_after_boundary
+      use Shock, only: calc_shock_profile_simple
       use Polymer, only: calc_polymer_after_boundary
       use TestScalar, only: testscalar_after_boundary
       use TestField,  only: testfield_after_boundary
@@ -976,11 +1084,15 @@ module Equ
       use TestFlow, only: calc_ltestflow_nonlin_terms
       use Magnetic_meanfield, only: meanfield_after_boundary
       use Special, only: special_after_boundary
-      use Training, only: training_after_boundary
       use Chemistry, only: calc_for_chem_mixture
 
       real, intent(INOUT), dimension(mx,my,mz,mfarray) :: f
       real, intent(INOUT), dimension(mx,my,mz,mvar)    :: df
+
+!
+!  Calculate shock profile (simple).
+!
+      if (lshock) call calc_shock_profile_simple(f)
 
       if (lhydro)          call hydro_after_boundary(f)
       if (lviscosity)      call viscosity_after_boundary(f)
@@ -992,30 +1104,55 @@ module Equ
       if (lpolymer)        call calc_polymer_after_boundary(f)
       if (ltestscalar)     call testscalar_after_boundary(f)
       if (ltestfield)      call testfield_after_boundary(f)
-!AB: quick fix
-      !if (ltestfield)      call testfield_after_boundary(f,p)
       if (ldensity)        call density_after_boundary(f)
       if (lneutraldensity) call neutraldensity_after_boundary(f)
       if (ltestflow)       call calc_ltestflow_nonlin_terms(f,df)  ! should not use df!
       if (lmagn_mf)        call meanfield_after_boundary(f)
       if (lspecial)        call special_after_boundary(f)
-      if (ltraining)       call training_after_boundary(f)
 !
 !  Calculate quantities for a chemical mixture. This is done after
 !  communication has finalized since many of the arrays set up here
 !  are not communicated, and in this subroutine also ghost zones are calculated.
 !
       if (lchemistry .and. ldensity) call calc_for_chem_mixture(f)
-    endsubroutine after_boundary
+
+    endsubroutine after_boundary_cpu
 !***********************************************************************
     subroutine prep_rhs
+
       use Special, only: prep_rhs_special
 !
-!  Calculation of changing parameters that could happen in e.g. in after_boundary calls 
-!  that we want to happen both on the CPU and GPU should happen here
+!  Calculation of changing parameters that could happen, e.g. in after_boundary calls 
+!  that we want to happen both on the CPU and GPU should happen here.
 !
     if (lspecial) call prep_rhs_special
+
     endsubroutine prep_rhs
+!***********************************************************************
+    subroutine timestep_diagnostics
+
+      use Diagnostics
+!
+!  Diagnostics showing how close to advective and diffusive time steps we are
+!
+        if (lupdate_courant_dt.and.(.not.ldt_paronly).and.ldiagnos) then
+          if (idiag_dtv/=0) call max_mn_name(maxadvec/cdt,idiag_dtv,l_dt=.true.)
+          if (idiag_dtdiffus/=0) call max_mn_name(maxdiffus/cdtv,idiag_dtdiffus,l_dt=.true.)
+          if (idiag_dtdiffus2/=0) call max_mn_name(maxdiffus2/cdtv2,idiag_dtdiffus2,l_dt=.true.)
+          if (idiag_dtdiffus3/=0) call max_mn_name(maxdiffus3/cdtv3,idiag_dtdiffus3,l_dt=.true.)
+!
+!  Regular and hyperdiffusive mesh Reynolds numbers
+!
+          if (idiag_Rmesh/=0) call max_mn_name(pi_1*maxadvec/(maxdiffus+tini),idiag_Rmesh)
+          if (idiag_Rmesh3/=0) call max_mn_name(pi5_1*maxadvec/(maxdiffus3+tini),idiag_Rmesh3)
+          call max_mn_name(maxadvec,idiag_maxadvec)
+!
+!  z-dependent timestep constraints
+!
+          call xymax_mn_name_z(maxadvec/cdt,idiag_dtvmaxz,l_dt=.true.)
+        endif
+
+    endsubroutine timestep_diagnostics
 !***********************************************************************
     subroutine rhs_cpu(f,df,p,mass_per_proc,early_finalize)
 !
@@ -1057,7 +1194,7 @@ module Equ
       use Testfield
       use Testflow
       use Testscalar
-      use Training, only: calc_diagnostics_training
+      use Training, only: calc_diagnostics_training, div_sgs_stresses
 
       real, dimension (mx,my,mz,mfarray),intent(INOUT) :: f
       real, dimension (mx,my,mz,mvar)   ,intent(OUT  ) :: df
@@ -1071,6 +1208,9 @@ module Equ
       lfirstpoint=.true.
       lcommunicate=.not.early_finalize
 
+!
+!  This call is included in the GPU kernels by transpilation
+!
       call prep_rhs
 
       mn_loop: do imn=1,nyz
@@ -1234,6 +1374,8 @@ module Equ
 !
         if (lpointmasses) call pointmasses_pde_pencil(f,df,p)
 
+        if(ltraining) call div_sgs_stresses(f,df)
+
         if (ltraining) call calc_diagnostics_training(f)
 !
 !  Call diagnostics that involves the full right hand side
@@ -1262,21 +1404,7 @@ module Equ
         endif
 
         call set_dt1_max(p)
-!
-!  Diagnostics showing how close to advective and diffusive time steps we are
-!
-        if (lupdate_courant_dt.and.(.not.ldt_paronly).and.ldiagnos) then
-          if (idiag_dtv/=0) call max_mn_name(maxadvec/cdt,idiag_dtv,l_dt=.true.)
-          if (idiag_dtdiffus/=0) call max_mn_name(maxdiffus/cdtv,idiag_dtdiffus,l_dt=.true.)
-          if (idiag_dtdiffus2/=0) call max_mn_name(maxdiffus2/cdtv2,idiag_dtdiffus2,l_dt=.true.)
-          if (idiag_dtdiffus3/=0) call max_mn_name(maxdiffus3/cdtv3,idiag_dtdiffus3,l_dt=.true.)
-!
-!  Regular and hyperdiffusive mesh Reynolds numbers
-!
-          if (idiag_Rmesh/=0) call max_mn_name(pi_1*maxadvec/(maxdiffus+tini),idiag_Rmesh)
-          if (idiag_Rmesh3/=0) call max_mn_name(pi5_1*maxadvec/(maxdiffus3+tini),idiag_Rmesh3)
-          call max_mn_name(maxadvec,idiag_maxadvec)
-        endif
+        call timestep_diagnostics
 !
 !  Display derivative info
 !
@@ -1615,6 +1743,19 @@ module Equ
 !
     endsubroutine freeze
 !***********************************************************************
+    subroutine calc_maxadvec
+!
+!  sum or maximum of the advection terms?
+!  (lmaxadvec_sum=.false. by default)
+!
+      advec2=advec2+advec_cs2
+      if (lenergy.or.ldensity.or.lmagnetic.or.lradiation.or.lneutralvelocity.or.lcosmicray.or. &
+          (ltestfield_z.and.iuutest>0)) maxadvec=maxadvec+sqrt(advec2)
+
+      if (ldensity.or.lviscosity.or.lmagnetic.or.lenergy.or.ldustvelocity.or.ldustdensity) &
+          maxadvec=maxadvec+sqrt(advec2_hypermesh)
+    endsubroutine calc_maxadvec
+!***********************************************************************
     subroutine set_dt1_max(p)
 !
 !  In max_mn maximum values of u^2 (etc) are determined sucessively
@@ -1633,19 +1774,9 @@ module Equ
       type (pencil_case), intent(IN) :: p
 
       real, dimension(nx) :: dt1_max_loc, dt1_advec, dt1_diffus, dt1_src
-      real :: dt1_preac
 
       if (lupdate_courant_dt.and.(.not.ldt_paronly)) then
-!
-!  sum or maximum of the advection terms?
-!  (lmaxadvec_sum=.false. by default)
-!
-        advec2=advec2+advec_cs2
-        if (lenergy.or.ldensity.or.lmagnetic.or.lradiation.or.lneutralvelocity.or.lcosmicray.or. &
-            (ltestfield_z.and.iuutest>0)) maxadvec=maxadvec+sqrt(advec2)
-
-        if (ldensity.or.lviscosity.or.lmagnetic.or.lenergy.or.ldustvelocity.or.ldustdensity) &
-            maxadvec=maxadvec+sqrt(advec2_hypermesh)
+        call calc_maxadvec
 !
 !  Time step constraints from each module. (At the moment, magnetic and testfield use the same variable.)
 !  cdt, cdtv, and cdtc are empirical non-dimensional coefficients.
@@ -1726,28 +1857,34 @@ module Equ
 
     endsubroutine set_dt1_max
 !***********************************************************************
- subroutine test_rhs_gpu(f,df,p,mass_per_proc,early_finalize,cpu_version)
+    subroutine test_rhs_gpu(f,p,mass_per_proc,early_finalize,cpu_version)
 !
 !  Used to test the CPU rhs vs the DSL code
 !
 !  13-nov-23/TP: Written
 !
-      use MPIcomm
+      use Mpicomm
       use Boundcond
-      use Gpu, only: before_boundary_gpu, rhs_gpu, copy_farray_from_GPU, get_farray_ptr_gpu
+      use Gpu, only: before_boundary_gpu, rhs_gpu, copy_farray_from_GPU, get_farray_ptr_gpu,&
+                     update_after_substep_gpu,test_gpu_bcs
       use Deriv, only: der
+      use Special, only: special_after_timestep
 !$    use ISO_fortran_env, only: stdout => output_unit
 !$    use, intrinsic :: iso_c_binding
+      use FarrayManager, only: farray_get_name
 
+      character(len=30) :: name
       real, dimension (mx,my,mz,mfarray) :: f
-      real, dimension (mx,my,mz,mvar) :: df
-      type (pencil_case) :: p,p_copy
+      type (pencil_case) :: p
       real, dimension(1), intent(inout) :: mass_per_proc
       logical ,intent(in) :: early_finalize
+      integer :: ncomponents
 
-      real, dimension (:,:,:,:), allocatable :: f_copy,f_diff,df_copy,f_beta
-      real, dimension (nx) :: gss_x
+      real, dimension (:,:,:,:), allocatable :: f_copy,f_diff,df_tmp,df_copy,f_beta,f_abs_diff
+      real, dimension(5) :: beta_ts,alpha_ts
+
       integer :: i
+
       interface
         subroutine cpu_version(f,df,p,mass_per_proc,early_finalize)
           import mx
@@ -1768,43 +1905,62 @@ module Equ
         endsubroutine cpu_version
       endinterface
 
-      allocate(f_copy(mx,my,mz,mfarray),f_diff(mx,my,mz,mfarray),df_copy(mx,my,mz,mvar),f_beta(mx,my,mz,mfarray))
+      allocate(f_copy(mx,my,mz,mfarray),f_diff(mx,my,mz,mfarray),df_tmp(mx,my,mz,mvar), &
+               df_copy(mx,my,mz,mvar),f_beta(mx,my,mz,mfarray))
 
-      if(itorder /= 1) then
-          call fatal_error('test_rhs_gpu','Need itorder to be 1!')
-      endif
+      beta_ts =(/ 1/3.0, 15/16.0,    8/15.0 , 0.0, 0.0 /)
+      alpha_ts=(/   0.0, -5/9.0 , -153/128.0, 0.0, 0.0 /)
+
       call copy_farray_from_GPU(f,.true.)
       f_copy = f
       ldiagnos = .false.
-      do itsub = 1,1
+      df_copy = 0.0
+      
+
+      do itsub = 1,num_substeps
+        lfirst=(itsub==1)
+        llast=(itsub==itorder)
+        !df_tmp = 0.0
+        lfirst = (itsub == 1)
+        if (.not. lfirst) df_copy = alpha_ts(itsub)*df_copy
         call before_boundary_gpu(f,lrmv,itsub,t)
         call rhs_gpu(f,itsub)
 
-        df_copy = 0.0
-        dt_beta_ts = dt*beta_ts
+        !    This is here since Astaroth is more careful in always applying bcs
+        !    that update the comp domain so to emulate the behaviour (which I think is generally better)
+        !    we call update_ghosts here
+        call update_ghosts(f_copy)
         call before_boundary_cpu(f_copy)
-        call after_boundary(f_copy,df_copy)
-        !if(itsub == 1) then
+        call update_ghosts(f_copy)
+        call after_boundary_cpu(f_copy,df_copy)
+        !if (itsub == 1) then
         !        f_beta = f_copy
         !endif
-        call boundconds_x(f_copy)
-        call initiate_isendrcv_bdry(f_copy)
-        call finalize_isendrcv_bdry(f_copy)
-        call boundconds_y(f_copy)
-        call boundconds_z(f_copy)
         call cpu_version(f_copy,df_copy,p,mass_per_proc,early_finalize)
-        f_copy(l1:l2,m1:m2,n1:n2,1:mvar) = f_copy(l1:l2,m1:m2,n1:n2,1:mvar) + df_copy(l1:l2,m1:m2,n1:n2,:)*dt
+        !df_copy = df_copy + df_tmp
+        call freeze(df_copy,p)
+        if (itorder == 1) then
+          f_copy(l1:l2,m1:m2,n1:n2,1:mvar) = f_copy(l1:l2,m1:m2,n1:n2,1:mvar) + df_copy(l1:l2,m1:m2,n1:n2,:)*dt
+        else
+          f_copy(l1:l2,m1:m2,n1:n2,1:mvar) = f_copy(l1:l2,m1:m2,n1:n2,1:mvar) + dt*beta_ts(itsub)*df_copy(l1:l2,m1:m2,n1:n2,:)
+        !    On the GPU we impose the floors and ceilings after integration which should be equivalent
+        !    but for testing have to be careful that we do the same ordering on the CPU
+          call impose_floors_ceilings(f_copy) 
+        endif
 
-        !f_beta(l1:l2,m1:m2,n1:n2,1:mvar) = f_beta(l1:l2,m1:m2,n1:n2,1:mvar) + df_copy(l1:l2,m1:m2,n1:n2,:)*dt*beta_ts(itsub)
         call copy_farray_from_GPU(f,.true.)
         !if (itsub == 5) f_copy(l1:l2,m1:m2,n1:n2,1:mvar) = f_beta(l1:l2,m1:m2,n1:n2,1:mvar)
       enddo
-
+      if (lspecial) call special_after_timestep(f_copy, df_copy, dt, .true.)
+      call update_after_substep_gpu
       call copy_farray_from_GPU(f,.true.)
+
       f_diff = abs((f_copy-f)/(f_copy+tini))
+      f_abs_diff = abs((f_copy-f))
 
       if (nxgrid == 1 .and. nygrid == 1) then
-        print*,"Max diff: ",maxval(f_diff(l1,m1,:,1:mvar))
+        print*,"Max diff all: ",maxval(f_diff(l1,m1,n1:n2,1:mfarray))
+        print*,"Max diff farray: ",maxval(f_diff(l1,m1,:,1:mvar))
         print*,"Max diff loc: ",maxloc(f_diff(l1,m1,:,1:mvar))
 
         print*,"Max comp diff: ",maxval(f_diff(l1,m1,n1:n2,1:mvar))
@@ -1814,7 +1970,30 @@ module Equ
           print*,"Max comp diff for ",i,": ",maxval(f_diff(l1,m1,n1:n2,i))
           print*,"Max comp loc  for ",i,": ",maxloc(f_diff(l1,m1,n1:n2,i))
         enddo
+        do i = 1,mfarray
+          print*,"Max comp diff for ",i,": ",maxval(f_diff(l1,m1,n1:n2,i))
+          print*,"Avg comp diff for ",i,": ",sum(f_diff(l1,m1,n1:n2,i))/(nz)
+          print*,"Max comp loc  for ",i,": ",maxloc(f_diff(l1,m1,n1:n2,i))
+        enddo
+      else if (nygrid == 1 .and. nzgrid == 1) then
+        print*,"Max diff all: ",maxval(f_diff(l1:l2,m1,n1,1:mfarray))
+        print*,"Max diff: ",maxval(f_diff(:,m1,n1,1:mvar))
+        print*,"Max diff loc: ",maxloc(f_diff(:,m1,n1,1:mvar))
+
+        print*,"Max comp diff: ",maxval(f_diff(l1:l2,m1,n1,1:mvar))
+        print*,"Max comp diff loc: ",maxloc(f_diff(l1:l2,m1,n1,1:mvar))
+
+        do i = 1,mvar
+          print*,"Max comp diff for ",i,": ",maxval(f_diff(l1:l2,m1,n1,i))
+          print*,"Max comp loc  for ",i,": ",maxloc(f_diff(l1:l2,m1,n1,i))
+        enddo
+        do i = 1,mfarray
+          print*,"Max comp diff for ",i,": ",maxval(f_diff(l1:l2,m1,n1,i))
+          print*,"Avg comp diff for ",i,": ",sum(f_diff(l1:l2,m1,n1,i))/(nx)
+          print*,"Max comp loc  for ",i,": ",maxloc(f_diff(l1:l2,m1,n1,i))
+        enddo
       else
+        print*,"Max diff all: ",maxval(f_diff(:,:,:,1:mfarray))
         print*,"Max diff: ",maxval(f_diff(:,:,:,1:mvar))
         print*,"Max diff x: ",maxval(f_diff(:,m1:m2,n1:n2,1:mvar))
         print*,"Max diff y: ",maxval(f_diff(l1:l2,:,n1:n2,1:mvar))
@@ -1830,15 +2009,18 @@ module Equ
         print*,"Max comp diff: ",maxval(f_diff(l1:l2,m1:m2,n1:n2,1:mvar))
         print*,"Max comp diff loc: ",maxloc(f_diff(l1:l2,m1:m2,n1:n2,1:mvar))
 
-        do i = 1,mvar
-          print*,"Max comp diff for ",i,": ",maxval(f_diff(l1:l2,m1:m2,n1:n2,i))
-          print*,"Avg comp diff for ",i,": ",sum(f_diff(l1:l2,m1:m2,n1:n2,i))/(nx*ny*nz)
-          print*,"Max comp loc  for ",i,": ",maxloc(f_diff(l1:l2,m1:m2,n1:n2,i))
+        do i = 1,mfarray
+          ncomponents = farray_get_name(i,name)
+          print*,"Max comp diff for ",name,i,": ",maxval(f_diff(l1:l2,m1:m2,n1:n2,i))
+          print*,"Avg comp diff for ",name,i,": ",sum(f_diff(l1:l2,m1:m2,n1:n2,i))/(nx*ny*nz)
+          print*,"Max comp loc  for ",name,i,": ",maxloc(f_diff(l1:l2,m1:m2,n1:n2,i))
         enddo
       endif
+      print*,"Max comp loc abs diff: ",maxloc(f_abs_diff(l1:l2,m1:m2,n1:n2,1:mvar)), &
+                                       maxval(f_abs_diff(l1:l2,m1:m2,n1:n2,1:mvar))
+      call test_gpu_bcs
+      call die_gracefully
 
-    call die_gracefully
-
-  endsubroutine test_rhs_gpu
+    endsubroutine test_rhs_gpu
 !***********************************************************************
 endmodule Equ

@@ -17,12 +17,18 @@ include Makefile.module_info
 ifeq ($(PRECISION),DOUBLE)
   ENVIRON = -DDOUBLE_PRECISION=1
   PREC=dbl
-#  OPTFLAGS += -fsingle-PRECision-constant
   CMAKE_PREC = ON
 else
+ifeq ($(PRECISION),double)
+  ENVIRON = -DDOUBLE_PRECISION=1
+  PREC=dbl
+  CMAKE_PREC = ON
+else
+  CMAKE_PREC = ON
   ENVIRON = -DDOUBLE_PRECISION=0
   PREC=sgl
   CMAKE_PREC = OFF
+endif
 endif
 
 ifeq ($(MPICOMM),nompicomm)
@@ -68,7 +74,7 @@ endif
 AC_HEADERS=submodule/include/astaroth.h submodule/acc-runtime/api/math_utils.h
 
 # C headers in pencil-code/src 
-CHEADERS = ../cparam_c.h ../cdata_c.h ../boundcond_c.h ../defines_cdata.h ../forcing_c.h ../sub_c.h #../mpicomm_c.h
+CHEADERS = ../cparam_c.h ../boundcond_c.h ../forcing_c.h ../sub_c.h #../mpicomm_c.h
 
 # Pencil Code related C headers in . (pencil-code/src/astaroth)
 PCHEADER_DIR = .
@@ -78,11 +84,32 @@ RUNTIME_COMPILATION      ?= off
 TRAINING                 ?= notraining
 CMAKE_TRAINING_VALUE     ?= off
 TRANSPILATION            ?= off
+GENERATE_DSL_CODE        ?= off
+MODIFY_SOURCE_CODE       ?= off
 INLINING                 ?= off
 READ_OVERRIDES           ?= off
+USE_HEFFTE               ?= off
+USE_HEFFTE               ?= off
+GPU_FFT                  ?= VENDOR
+GPU_FFT_ENABLED              ?= ON
+
+ifeq ($(GPU_FFT),HEFFTE)
+	USE_HEFFTE = on
+endif
+
+FULL_DSL_OPTIMIZATIONS = off
+ifeq ($(TRANSPILATION),on)
+  FULL_DSL_OPTIMIZATIONS = on
+endif
+
+ifeq ($(READ_OVERRIDES),on)
+  FULL_DSL_OPTIMIZATIONS = on
+endif
+
 ELIMINATE_CONDITIONALS   ?= $(TRANSPILATION)
 CPU_BUILD                ?= off
 OPTIMIZE_INPUT_PARAMS    ?= on
+USE_ONLY_OPTIMIZED_KERNELS ?= on
 
 ifeq ($(RUNTIME_COMPILATION),on) 
 	CMAKE_BUILD_TYPE ?= RelWithDebInfo
@@ -100,6 +127,15 @@ endif
 CMAKE_BUILD_TYPE          ?= Debug
 SUPPRESS_COMPILER_WARNINGS ?= off
 
+#TP: mpicc does not work nicely with CMake.
+#    Better to let CMake choose the compiler itself
+ifeq ($(CC),mpicc)
+  override CC = 
+endif
+ifeq ($(CXX),mpicc)
+  override CXX = 
+endif
+
 astaroth_$(PREC).so: $(SOURCES) forcing.h $(AC_HEADERS) $(PC_HEADERS) $(CHEADERS) astaroth_libs
 	mkdir -p build && \
 	echo PRECISION=$(CMAKE_PREC) && \
@@ -110,16 +146,29 @@ astaroth_$(PREC).so: $(SOURCES) forcing.h $(AC_HEADERS) $(PC_HEADERS) $(CHEADERS
 	mv ./build/libastaroth_$(PREC).so libastaroth_$(PREC).so
 
 
-CMAKE_OPTIONS = -DCPU_BUILD=$(CPU_BUILD) -DFFT_ENABLED=ON -DMULTIGPU_ENABLED=OFF -DMPI_ENABLED=$(CMAKE_MPI) -DBUILD_SHARED_LIBS=ON -DSINGLEPASS_INTEGRATION=$(CMAKE_SINGLEPASS) -DMAX_THREADS_PER_BLOCK=512 \
+CMAKE_OPTIONS = -DCPU_BUILD=$(CPU_BUILD) -DUSE_HEFFTE=$(USE_HEFFTE) -DFFT_ENABLED=$(GPU_FFT_ENABLED) -DMULTIGPU_ENABLED=OFF -DMPI_ENABLED=$(CMAKE_MPI) -DBUILD_SHARED_LIBS=ON -DSINGLEPASS_INTEGRATION=$(CMAKE_SINGLEPASS) -DMAX_THREADS_PER_BLOCK=512 \
                 -DPACKED_DATA_TRANSFERS=$(CMAKE_PACKED) -DDOUBLE_PRECISION=$(CMAKE_PREC) -DBUILD_SAMPLES=OFF -DSUPPRESS_COMPILER_WARNINGS=$(SUPPRESS_COMPILER_WARNINGS) \
-		-DVERBOSE=off -DOPTIMIZE_INPUT_PARAMS=$(OPTIMIZE_INPUT_PARAMS) -DOPTIMIZE_MEM_ACCESSES=ON -DOPTIMIZE_ARRAYS=$(RUNTIME_COMPILATION) -DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) \
-	        -DBUILD_STANDALONE=OFF -DOPTIMIZE_FIELDS=$(TRANSPILATION) -DALLOW_DEAD_VARIABLES=$(RUNTIME_COMPILATION) -DBUILD_UTILS=OFF \
+		-DVERBOSE=off -DUSE_ONLY_OPTIMIZED_KERNELS=$(USE_ONLY_OPTIMIZED_KERNELS) -DOPTIMIZE_INPUT_PARAMS=$(OPTIMIZE_INPUT_PARAMS) -DOPTIMIZE_MEM_ACCESSES=ON -DOPTIMIZE_ARRAYS=$(FULL_DSL_OPTIMIZATIONS) -DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) \
+	        -DBUILD_STANDALONE=OFF -DOPTIMIZE_FIELDS=$(TRANSPILATION) -DALLOW_DEAD_VARIABLES=$(FULL_DSL_OPTIMIZATIONS) -DBUILD_UTILS=OFF \
 		-DCMAKE_POSITION_INDEPENDENT_CODE=ON -DELIMINATE_CONDITIONALS=$(ELIMINATE_CONDITIONALS) -DDSL_MODULE_FILE=$(DSL_MODULE_FILE) -DINLINING=$(INLINING) -DBUILD_ACM=OFF -DPROFILING_ENABLED=OFF
 endif
 #
 # External sources are provided with absolute pathnames to avoid any trouble with symbolic links.
 #
-astaroth_libs: $(PC_HEADERS)
+astaroth_libs: $(PC_HEADERS) DSL/local/mhdsolver.ac
+ifeq ($(TRANSPILATION),on)
+	@if ! cmp -s DSL/solve_two.ac DSL/local/solve_two.ac; then \
+		cp DSL/solve_two.ac DSL/local/; \
+	fi
+endif
+ifeq ($(READ_OVERRIDES),on)
+	cp submodule/build/runtime_build/overrides.h submodule/build
+endif
+	#TP: if PC_nghost.h is found to be missing we turn to the default of Astaroth i.e. STENCIL_ORDER = 6
+	@if [ ! -f DSL/local/PC_nghost.h ]; then \
+		echo "hostdefine STENCIL_ORDER (6)" > DSL/local/PC_nghost.h; \
+	fi
+
 	@ext_srcs="`ls -m $$PENCIL_HOME/src/astaroth/DSL/*/*.h \
                           $$PENCIL_HOME/src/astaroth/DSL/*.h \
 		          $$PENCIL_HOME/src/astaroth/submodule/acc-runtime/stdlib/*.h \
@@ -129,14 +178,14 @@ astaroth_libs: $(PC_HEADERS)
 	echo "const char* cmake_options = \" -DDSL_EXT_SOURCES=\\\"$$ext_srcs\\\" -DDSL_MODULE_DIR=../$(DSL_MODULE_DIR) $(CMAKE_OPTIONS)\";" > cmake_options.h && \
 	mkdir -p submodule/build  && cd submodule/build && export LDFLAGS=""  &&  \
 	cmake  $(CMAKE_OPTIONS) -DDSL_MODULE_DIR=../acc-runtime/$(DSL_MODULE_DIR) -DRUNTIME_COMPILATION=$(RUNTIME_COMPILATION) -DREAD_OVERRIDES=$(READ_OVERRIDES) ..
-	cd submodule/build && make -j -I../../.. VERBOSE=0 # Build the core Astaroth library
+	cd submodule/build && sed -i -e's/SHELL *= *\/bin\/sh/SHELL = \/bin\/bash/' Makefile && make -j -I../../.. VERBOSE=0 # Build the core Astaroth library
 	@echo PRECISION=$(CMAKE_PREC)
 
 #        CMAKE_PREFIX_PATH="/opt/nvidia/hpc_sdk/Linux_x86_64/24.1/comm_libs/mpi/lib /opt/nvidia/hpc_sdk/Linux_x86_64/24.1/comm_libs/mpi/include" \
 update_astaroth_libs:
-	cd submodule/build && export LDFLAGS="" && \
-	make -I../../.. VERBOSE=0 # Build the core Astaroth library with existing Makefile.
-	@echo PRECISION=$(CMAKE_PREC)
+#	cd submodule/build && export LDFLAGS="" && \
+#	make -I../../.. VERBOSE=0 # Build the core Astaroth library with existing Makefile.
+#	@echo PRECISION=$(CMAKE_PREC)
 
 include Makefile.extern
 
@@ -151,15 +200,29 @@ ifeq ($(TRANSPILATION),on)
         for file in $(MODULESOURCES); do echo processing $$file ...; if [[ $$file =~ eos[_.] ]]; \
 	then ../scripts/phys_modules2c_transpilation par $$file equationofstate; \
         else ../scripts/phys_modules2c_transpilation par $$file; fi; done
-	@touch .sentinel
 else
 	@export DSL_MODULE_DIR=$(DSL_MODULE_DIR); \
         for file in $(MODULESOURCES); do echo processing $$file ...; if [[ $$file =~ eos[_.] ]]; \
 	then ../scripts/phys_modules2c par $$file equationofstate; \
         else ../scripts/phys_modules2c par $$file; fi; done
-	@touch .sentinel
 endif
+	@touch .sentinel
 #
+DSL/local/mhdsolver.ac: .sentinel
+ifeq ($(TRANSPILATION),on)
+        ifeq ($(GENERATE_DSL_CODE),on)
+	  rm -f PC_modulesources_old.h
+        endif
+        ifeq ($(MODIFY_SOURCE_CODE),on)
+	  python3 transpile.py --modify_source_code
+        else
+	  python3 transpile.py
+        endif
+	cp PC_modulesources.h PC_modulesources_old.h
+else
+	@touch DSL/local/mhdsolver.ac
+endif
+
 clean:
 	@rm -f $(OBJECTS)
 	@rm -f *.so .sentinel cmake_options.h

@@ -1,10 +1,15 @@
 ! $Id$
 !
+!
 !  Timestepping routine corresponding to the use of LSODE to solve chemistry.
 !  The transport equations are solved as usual using RK methods but the
 !  chemistry ODEs are separated and solved implicitly using LSODE either
 !  following a sequential (1 chemistry step) or symmetric (2 chemistry steps)
 !  splitting scheme.
+!
+!** AUTOMATIC CPARAM.INC GENERATION ****************************
+! CPARAM logical, parameter :: lcourant_dt = .true.
+!***************************************************************
 !
 module Timestep
 !
@@ -44,7 +49,6 @@ module Timestep
 
       if (dt0 < 0.) dt = 0
       ldt = (dt==0.)
-      lcourant_dt = .true.
 
       num_substeps = itorder
 
@@ -60,7 +64,7 @@ module Timestep
 !
       use BorderProfiles, only: border_quenching
       use Equ
-      use Mpicomm, only: mpiallreduce_max, MPI_COMM_WORLD
+      use Mpicomm, only: mpiallreduce_max, MPI_COMM_PENCIL
       use Particles_main
       use Shear, only: advance_shear
       use Special, only: special_after_timestep
@@ -126,7 +130,7 @@ module Timestep
           dt1_local=maxval(dt1_max(1:nx))
           !Timestep growth limiter
           if (real(ddt) > 0.) dt1_local=max(dt1_local,dt1_last)
-          call mpiallreduce_max(dt1_local,dt1,MPI_COMM_WORLD)
+          call mpiallreduce_max(dt1_local,dt1,MPI_COMM_PENCIL)
           dt=1.0/dt1
           !Timestep growth limiter
           if (ddt/=0.) dt1_last=dt1_local/ddt

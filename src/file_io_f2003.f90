@@ -42,10 +42,10 @@ module File_io
 !                  (seems to be necessary)
 !   6-oct-15/MR: parameter lbinary added for reading data as a byte stream
 !
-      use Mpicomm, only: lroot, mpibcast_int, mpibcast_char, MPI_COMM_WORLD
+      use Mpicomm, only: mpibcast_int, mpibcast_char, MPI_COMM_PENCIL
       use General, only: loptest, parser
       use Messages, only: fatal_error
-      use Cdata, only: comment_char
+      use Cdata, only: lroot, comment_char
 
       character (len=*), intent(in)            :: file
       logical,           intent(in),  optional :: remove_comments
@@ -143,14 +143,14 @@ module File_io
 
         ! broadcast number of valid records and maximum record length
         if (lroot) nitems=ni
-        call mpibcast_int(nitems,comm=MPI_COMM_WORLD)
+        call mpibcast_int(nitems,comm=MPI_COMM_PENCIL)
         if (nitems==0) return
         !call mpibcast_int(indmax)
         allocate(parallel_unit_vec(nitems))
 
       else
       ! Broadcast the size of parallel_unit.
-        call mpibcast_int(lenbuf,comm=MPI_COMM_WORLD)
+        call mpibcast_int(lenbuf,comm=MPI_COMM_PENCIL)
       endif
 
       ! prepare broadcasting of parallel_unit.
@@ -177,9 +177,9 @@ module File_io
 !
       ! broadcast parallel_unit
       if (present(nitems)) then
-        call mpibcast_char(parallel_unit_vec, nitems, comm=MPI_COMM_WORLD)
+        call mpibcast_char(parallel_unit_vec, nitems, comm=MPI_COMM_PENCIL)
       else  
-        call mpibcast_char(parallel_unit(1:lenbuf), comm=MPI_COMM_WORLD)
+        call mpibcast_char(parallel_unit(1:lenbuf), comm=MPI_COMM_PENCIL)
       endif
 !
     endsubroutine parallel_read
@@ -218,7 +218,7 @@ module File_io
     endsubroutine parallel_close
 !***********************************************************************
     !function find_namelist(name) result(lfound)
-    subroutine find_namelist(name,lfound)
+    subroutine find_namelist(name,lfound,lno_warning)
 !
 !  Tests if the namelist is present and reports a missing namelist.
 !
@@ -227,14 +227,18 @@ module File_io
 !                  easily revertable by shifting comment char at beginning and end.
 
       use Cdata, only: comment_char
-      use General, only: lower_case, operator(.in.)
+      use General, only: lower_case, operator(.in.), loptest
       use Messages, only: warning
-      use Mpicomm, only: lroot, mpibcast,MPI_COMM_WORLD
+      use Mpicomm, only: lroot, mpibcast,MPI_COMM_PENCIL
 !
       character(len=*), intent(in) :: name
       logical :: lfound
+      logical, optional :: lno_warning
 !
       integer :: pos, len, max_len
+      logical :: lwarn
+!
+      lwarn = .not. loptest (lno_warning)
 !
       if (lroot) then
 !print*, 'name=', name
@@ -258,10 +262,10 @@ module File_io
             endif
           endif
         enddo
-        if (.not. lfound) call warning ('find_namelist', 'namelist "'//trim(name)//'" is missing!')
+        if (.not. lfound .and. lwarn) call warning ('find_namelist', 'namelist "'//trim(name)//'" is missing!')
       endif
 !
-      call mpibcast (lfound,comm=MPI_COMM_WORLD)
+      call mpibcast (lfound,comm=MPI_COMM_PENCIL)
 !
     !endfunction find_namelist
     endsubroutine find_namelist

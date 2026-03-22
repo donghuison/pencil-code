@@ -23,56 +23,74 @@ function make_ac_bound_cond()
 {
     #echo $1 $2 $3 $4
     sed -e'/case *( *[^ ]'$1'[^ ] *) *$/,/case/ ! d' -e'/case/ d' -e's/^ *if *( *j *== *i'$2' *)//I' -e'/^ *if/ d' -e's/^.* *\(bc_[a-zA-Z_0-9]*\) *( *f *,/\1(/' -e's/,j/,'$2'/' -e's/topbot/BOUNDARY_'$3_$4','$4'/g' -e's/\.\([a-zA-Z]*\)\./\1/' tmp | \
-    sed -e's/\(fbc[xyz][a-zA-Z_0-9]*\) *( *j *,\([^)]*\))/\1['$2']['$4']/' -e's/[A-Za-z0-9_]*=//g'>> astaroth/DSL/local/boundconds.h
+    sed -e's/\(fbc[xyz][a-zA-Z_0-9]*\) *( *j *,\([^)]*\))/\1['$2']['$4']/' -e's/[A-Za-z0-9_]*=//g' |
+    sed -e's/(f,/(/'
 }
 #
 bc_file=../run.in
 if [ ! -f ../start.in ]; then
   if [ ! -f ../run.in ]; then
-    echo "Neither start.in nor run.in found ->  Boundary conditions cannot be encoded for Astaroth!!!"
+    echo "Neither start.in nor run.in found ->  Boundary conditions cannot be encoded for Astaroth!!!" 1>&2
     exit
   fi
 else
   if [ -f ../run.in ]; then
     grep_peri=`grep '^[^!]*lperi' $bc_file | sed -e's/^.*lperi *= *//' -e's/,/ /g'`
     if [[ $grep_peri == '' ]]; then
-      bc_file=../start.in
+      grep_peri=`grep '^[^!]*bcx' $bc_file | sed -e's/^.*bcx *= *//' -e's/,/ /g'`
+      if [[ $grep_peri == '' ]]; then
+        bc_file=../start.in
+      fi
     else
-      echo "Both start.in and run.in found ->  Boundary conditions encoded for Astaroth from run.in!"
+      echo "Both start.in and run.in found ->  Boundary conditions encoded for Astaroth from run.in!" 1>&2
     fi
   else
     bc_file=../start.in
   fi
 fi
-if [[ $bc_file==../start.in ]]; then
-    echo "Boundary conditions encoded for Astaroth from start.in -> later change of them in run.in renders build invalid!"
+if [[ $bc_file == ../start.in ]]; then
+    echo "Boundary conditions encoded for Astaroth from start.in -> later change of them in run.in renders build invalid!" 1>&2
 fi
 #
 declare -a lperi
 grep_peri=`tac $bc_file | grep -m 1 '^[^!]*lperi' | sed -e's/^.*lperi *= *//' -e's/,/ /g'`
 if [[ $grep_peri == '' ]]; then
   lperi=(T T T)
+  grep_peri=`tac $bc_file | grep -m 1 '^[^!]*bcx' | sed -e's/^.*bcx *= *//' -e's/,/ /g'`
+  [[ $grep_peri == *"'p'"* ]] && grep_peri=''
+  if [[ $grep_peri != '' ]]; then
+	  lperi[0]=F
+  fi
+  grep_peri=`tac $bc_file | grep -m 1 '^[^!]*bcy' | sed -e's/^.*bcy *= *//' -e's/,/ /g'`
+  [[ $grep_peri == *"'p'"* ]] && grep_peri=''
+  if [[ $grep_peri != '' ]]; then
+	  lperi[1]=F
+  fi
+  grep_peri=`tac $bc_file | grep -m 1 '^[^!]*bcz' | sed -e's/^.*bcz *= *//' -e's/,/ /g'`
+  [[ $grep_peri == *"'p'"* ]] && grep_peri=''
+  if [[ $grep_peri != '' ]]; then
+	  lperi[2]=F
+  fi
+
 else
   lperi=($grep_peri)
 fi
 #echo lperi = ${lperi[0]} ${lperi[1]} ${lperi[2]}
 
-declare -a fields
-#fields=(`grep 'typedef  *enum.* Field;' ./astaroth/submodule/build/acc-runtime/api/fields_info.h | sed -e's/^.*typedef enum *{\([^}]*\) *} *Field;/\1/' -e' s/,/ /g' -e's/NUM_[A-Z_]*FIELDS *=//g'`)
-fields=(`grep '^ *Field' ./astaroth/DSL/local/fieldecs.h | sed -e's/Field //g' -e's/ *\/\/.*$/ /' -e's/,/ /g' | tr -d '\n'`)
 
-nfields=${#fields[@]}
+#nfields=${#fields[@]}
 #echo FIELDS=${fields[0]}, ${fields[5]}
 #echo FIELDS=$nfields
 
-rm -f astaroth/DSL/local/boundconds.h
-touch astaroth/DSL/local/boundconds.h
+mvar=(`grep 'mvar' cparam.inc | sed -e's/.*mvar *= *\([0-9][0-9]*\).*$/\1/'`)
+maux_com=(`grep 'maux_com' cparam.inc | sed -e's/.*maux_com *= *\([0-9][0-9]*\).*$/\1/'`)
+mcom=$(($mvar + $maux_com))
+
 if [[ ${lperi[0]} == 'T' ]]; then
-  echo 'periodic(BOUNDARY_X)' >> astaroth/DSL/local/boundconds.h
+  echo 'periodic(BOUNDARY_X)'
 else
   boundcond_sed x
-  for (( i=0; i<$nfields ; i++ )); do 
-    #echo ${bot[$i]} ${top[$i]} ${fields[$i]};
+  for (( i=0; i<$mcom; i++ )); do 
     make_ac_bound_cond ${bot[$i]} Field\(${i}\) X BOT
     make_ac_bound_cond ${top[$i]} Field\(${i}\) X TOP
   done
@@ -80,10 +98,10 @@ else
 fi
 
 if [[ ${lperi[1]} == 'T' ]]; then
-  echo 'periodic(BOUNDARY_Y)' >> astaroth/DSL/local/boundconds.h
+  echo 'periodic(BOUNDARY_Y)'
 else
   boundcond_sed y
-  for (( i=0; i<$nfields ; i++ )); do 
+  for (( i=0; i<$mcom; i++ )); do 
     make_ac_bound_cond ${bot[$i]} Field\(${i}\) Y BOT
     make_ac_bound_cond ${top[$i]} Field\(${i}\) Y TOP
   done
@@ -91,10 +109,10 @@ else
 fi
 
 if [[ ${lperi[2]} == 'T' ]]; then
-  echo 'periodic(BOUNDARY_Z)' >> astaroth/DSL/local/boundconds.h
+  echo 'periodic(BOUNDARY_Z)'
 else
   boundcond_sed z
-  for (( i=0; i<$nfields ; i++ )); do 
+  for (( i=0; i<$mcom; i++ )); do 
     make_ac_bound_cond ${bot[$i]} Field\(${i}\) Z BOT
     make_ac_bound_cond ${top[$i]} Field\(${i}\) Z TOP
   done

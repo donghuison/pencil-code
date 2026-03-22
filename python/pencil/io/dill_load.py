@@ -43,33 +43,14 @@ def dill_load(name, folder=False, sim=False, quiet=True):
     filepath = join(folder, name)
     if not quiet:
         print(filepath)
-    # from pc.io import debug_breakpoint; debug_breakpoint()
     try:  # check on existance
         if not exists(filepath) or not exists(join(sim_path, filepath)):
             print("!! ERROR: dill_load couldnt load " + filepath)
             return False
-        # try:                                               # open file and return it
         with open(filepath, "rb") as f:
             obj = dill.load(f)
         return obj
-        # except:
-        # with open(join(sim_path, filepath), 'rb') as f:
-        # obj = dill.load(f)
-        # return obj
 
-    except:  # if anything goes wrong, try dry importing, i.e. if python2 and python3 usage was mixed
-        print("? Something went wrong with the dill importer, trying backup solution..")
-        try:
-            import pickle
-
-            with open(filepath, "rb") as f:
-                u = pickle._Unpickler(f)
-                u.encoding = "latin1"
-                data = u.load()
-                print("? Success!")
-                return data
-        except:
-            print(
-                "!! ERROR: Something went wrong while importing dill-file: " + filepath
-            )
-            return False
+    except Exception as e:
+        print(f"? Error in dill importer ({e})")
+        return False

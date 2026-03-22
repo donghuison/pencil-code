@@ -75,6 +75,8 @@ module Snapshot
 !
         lsnap_down=.false.
       endif
+! Keeping compiler quiet
+      if (present(flist)) then; endif;
 !
     endsubroutine wsnap_down
 !***********************************************************************
@@ -288,10 +290,10 @@ module Snapshot
       logical, intent(in), optional :: enum, noghost
       integer, intent(in), optional :: nv1
 !
+      real :: t_trigger
       real, save :: tsnap
       integer, save :: nsnap
       logical, save :: lfirst_call=.true.
-      real, dimension(:), allocatable, save :: snaptimes
       character (len=fnlen) :: file
       character (len=intlen) :: ch
       integer :: nv1_capitalvar
@@ -325,10 +327,23 @@ module Snapshot
           nv1_capitalvar=1
         endif
 !
+!  This routine sets lvideo=T whenever its time to write a slice
 !  Check whether we want to output snapshot. If so, then
 !  update ghost zones for var.dat (cheap, since done infrequently).
 !
-        call update_snaptime(file,tsnap,nsnap,dsnap,t,lsnap,ch)
+        select case (trigger_snap)
+          case ('ascale')
+            t_trigger=ascale
+          case ('redshift')
+            t_trigger=1./ascale-1.
+          case ('tphys')
+            t_trigger=tphys
+          case ('code_time')
+            t_trigger=t
+          case default
+            call fatal_error('wsnap','no such trigger_snap='//trim(trigger_snap))
+        end select
+        call update_snaptime(file,tsnap,nsnap,dsnap,dble(t_trigger),lsnap,ch)
 !
 !        if (itsnap/=impossible_int) then
 !          call update_snaptime(file,tsnap,nsnap,dsnap,t,lsnap,ch,itout=itsnap)
@@ -367,7 +382,7 @@ module Snapshot
         call safe_character_assign(file,trim(chsnap))
         if (lbackup_snap .and. .not.lstart .and. .not.(chsnap=='crash.dat' .or. chsnap(1:1)=='d' )) &
             call system_cmd('mv -f '//trim(directory_snap)//'/'//trim(file)//' '// &
-                            trim(directory_snap)//'/'//trim(file)//'.bck '//' >& /dev/null')
+                            trim(directory_snap)//'/'//trim(file)//'.bck '//' > /dev/null 2>&1')
         if (lmultithread.and.nt>0) then
           extpars%ind1=1; extpars%ind2=msnap; extpars%file=file
 !$        lmasterflags(PERF_WSNAP) = .true.
@@ -421,8 +436,6 @@ module Snapshot
 !
       use General, only: keep_compiler_quiet
 
-      use General, only: keep_compiler_quiet
-
       character(LEN=fnlen) :: file
       real, dimension(:), intent(OUT) :: snaptimes   ! allocatable
       
@@ -442,7 +455,8 @@ module Snapshot
       use IO, only: input_snap, input_snap_finalize
       use Persist, only: input_persistent
       use SharedVariables, only: get_shared_variable
-      use File_io, only: file_exists
+      use File_io, only: file_exists, delete_file
+      use General, only: touch_file
       use Syscalls, only: memusage
 !
 !  The dimension msnap can either be mfarray (for f-array in run.f90)
@@ -471,6 +485,7 @@ module Snapshot
       endif
       file = chsnap
       if (lbackup_snap.and..not. file_exists(trim(directory_snap)//'/'//trim(chsnap))) file = trim(chsnap)//'.bck'
+      if (lroot) call touch_file(trim(workdir)//'/READING')
 !
 !  No need to read maux variables as they will be calculated
 !  at the first time step -- even if lwrite_aux is set.
@@ -693,6 +708,7 @@ module Snapshot
         if (lpersist) call input_persistent(file)
         call input_snap_finalize
       endif
+      if (lroot) call delete_file(trim(workdir)//'/READING')
 !
 !  Read data using lnrho, and now convert to rho.
 !  This assumes that one is now using ldensity_nolog=T.
@@ -734,7 +750,8 @@ module Snapshot
       logical, save :: lfirst_call=.true.
       character (len=fnlen) :: file
       integer, save :: nspec
-      real, save :: tspec
+      real, save :: tspec_next
+      real :: t_trigger
 !
 !  Output snapshot in 'tpower' time intervals.
 !  File keeps the information about time of last snapshot.
@@ -745,7 +762,7 @@ module Snapshot
 !  tspec calculated in read_snaptime, but only available to root processor.
 !
       if (lfirst_call) then
-        call read_snaptime(file,tspec,nspec,dspec,t)
+        call read_snaptime(file,tspec_next,nspec,dspec,t)
         lfirst_call=.false.
       endif
 !
@@ -755,10 +772,23 @@ module Snapshot
 !  make this the default.
 !
       if (lspec_at_tplusdt) then
-        call update_snaptime(file,tspec,nspec,dspec,t+dt,lspec)
+        call update_snaptime(file,tspec_next,nspec,dspec,t+dt,lspec)
       else
-        call update_snaptime(file,tspec,nspec,dspec,t,lspec)
+        select case (trigger_spec)
+          case ('ascale')
+            t_trigger=ascale
+          case ('redshift')
+            t_trigger=1./ascale-1.
+          case ('tphys')
+            t_trigger=tphys
+          case ('code_time')
+            t_trigger=t
+          case default
+            call fatal_error('powersnap_prepare','no such trigger_spec='//trim(trigger_spec))
+        end select
+        call update_snaptime(file,tspec_next,nspec,dspec,dble(t_trigger),lspec)
       endif
+      if (lspec) tspec=t_trigger
 !
     endsubroutine powersnap_prepare
 !***********************************************************************
@@ -789,14 +819,17 @@ module Snapshot
 
       !TP: unfortunately spectrum needs a different t than timeseries since they are in general different
       if(.not. lmultithread) then
-        tspec=t
+!AB: tspec=t is what Touko did before, and it works for unclear reasons.
+!AB: But now, we also have the possibility of other triggers, and then t is not ok.
+!AB: We still don't understand why this tspec=t is even needed...
+        if (trigger_spec=='code_time') tspec=t
       else 
 
         !TP: if farray was already copied from the gpu during this iteration for rhs diagnostic purposes
         !    it is not copied again for spectra. Instead we correct the timestamp to match with the data
         !    which comes before time advancement.
         !    When testing for agreement between CPU and GPU one can suppress all other output than spectra.
-        if(lrhs_diagnostic_output) then
+        if(ldiagnostic_output) then
                 tspec_save=t-dt
         else
                 tspec_save=t
@@ -834,19 +867,24 @@ module Snapshot
 
       use Particles_main, only: particles_powersnap
       use Power_spectrum
+      use EquationOfState, only: lnrho0
       use Pscalar, only: cc2m, gcc2m, rhoccm
       use Struct_func, only: structure
       use Sub, only: curli
       use Chemistry, only: make_flame_index, make_mixture_fraction
+      use General, only: parser
 !$    use OMP_lib
 
       real, dimension (mx,my,mz,mfarray) :: f
 
       real, dimension (:,:,:), allocatable :: b_vec
-      integer :: ivec,stat,ipos,ispec,nloc,mloc
+      integer :: ivec,stat,ipos,ispec,nloc,mloc,n_pdfs,i,n_cs
       real, dimension (2) :: sumspec=0.
       character (LEN=40) :: str,sp1,sp2
       logical :: lfirstcall, lfirstcall_powerhel, lsqrt
+      character (LEN=labellen), dimension(n_pdfs_max) :: pdfs_parsed=''
+      character (LEN=labellen), dimension(n_cspec_max) :: cspecs_parsed=''
+      character (LEN=labellen), dimension(2) :: cspec_parsed=''
 
         lsqrt=.true.
         lfirstcall_powerhel=.true.
@@ -1002,6 +1040,16 @@ module Snapshot
 !
         if (lparticles) call particles_powersnap(f)
 !
+!  Cross-spectra
+!
+        n_cs = parser(cross_spec, cspecs_parsed, ',')
+        do i=1,n_cs
+          nloc = parser(cspecs_parsed(i), cspec_parsed, '.')
+          if (nloc/=2) call fatal_error('perform_powersnap', &
+            'could not parse '//trim(cspecs_parsed(i)))
+          call crossspec(f,cspec_parsed(1),cspec_parsed(2),lvec=.true.)
+        enddo
+!
 !  Structure functions.
 !
         if (lsfb .or. lsfz1 .or. lsfz2 .or. lsfflux .or. lpdfb .or. lpdfz1 .or. lpdfz2) then
@@ -1051,9 +1099,22 @@ module Snapshot
         if (lncc_pdf)      call pdf(f,'lncc' ,rhoccm,sqrt(cc2m))
         if (gcc_pdf)       call pdf(f,'gcc'  ,0.    ,sqrt(gcc2m))
         if (lngcc_pdf)     call pdf(f,'lngcc',0.    ,sqrt(gcc2m))
+!
+!  PDFs of other quantities
+!
         if (cosEB_pdf)     call pdf(f,'cosEB',0.    ,1.)
         if (lnspecial_pdf) call pdf(f,'lnspecial',0.,1.)
         if (special_pdf)   call pdf(f,'special',0.,1.)
+!       NOTE: the variance of lnrho should be of the order of Ma^2, but
+!       calculating that here just to scale the variable seems overkill.
+        if (lnrho_pdf)     call pdf(f,'lnrho',lnrho0,1.)
+!
+!  Allow user to request PDF of any variable in the f-array
+!
+        n_pdfs = parser(pdfs, pdfs_parsed, ',')
+        do i=1,n_pdfs
+          call pdf(f, pdfs_parsed(i))
+        enddo
 !
 !  Do k-dependent pdf
 !
@@ -1100,12 +1161,15 @@ module Snapshot
         if (ouout_spec) call power_cor_scl(f,'ouout')
         if (ouout2_spec)call power_cor_scl(f,'ouout2')
 !
-        if (saffman_ub)    call quadratic_invariants(f,'saffman_ub')
-        if (saffman_mag)   call quadratic_invariants(f,'saffman_mag')
-        if (saffman_mag_c) call quadratic_invariants(f,'saffman_mag_c')
-        if (saffman_aa)    call quadratic_invariants(f,'saffman_aa')
-        if (saffman_aa_c)  call quadratic_invariants(f,'saffman_aa_c')
-        if (saffman_bb)    call quadratic_invariants(f,'saffman_bb')
+        if (saffman_ub)     call quadratic_invariants(f,'saffman_ub')
+        if (saffman_mag)    call quadratic_invariants(f,'saffman_mag')
+        if (saffman_mag_uc) call quadratic_invariants(f,'saffman_mag_uc')
+        if (saffman_EEM)    call quadratic_invariants(f,'saffman_EEM')
+        if (saffman_EEM_uc) call quadratic_invariants(f,'saffman_EEM_uc')
+        if (saffman_mag_c)  call quadratic_invariants(f,'saffman_mag_c')
+        if (saffman_aa)     call quadratic_invariants(f,'saffman_aa')
+        if (saffman_aa_c)   call quadratic_invariants(f,'saffman_aa_c')
+        if (saffman_bb)     call quadratic_invariants(f,'saffman_bb')
 !
 !  output Fourier modes
 !

@@ -5,7 +5,7 @@
 !  routine is used instead which absorbs all the calls to the
 !  testfield relevant subroutines listed in here.
 !
-!  Derived from testfield_xz by P. Käpylä, A. Brandenburg and 
+!  Derived from testfield_xz by P. Kapyla, A. Brandenburg and 
 !  M. Rheinhardt
 !   27-aug-13/pete: adapted from testfield_xz.f90
 !
@@ -17,6 +17,12 @@
 ! CPARAM logical, parameter :: ltestfield_xy = .true.
 ! CPARAM logical, parameter :: ltestfield_z = .false.
 ! CPARAM logical, parameter :: ltestfield_xz  = .false.
+!
+!** AUTOMATIC REFERENCE-LINK.TEX GENERATION ********************
+! Declare relevant citations from pencil-code/doc/citations/ref.bib for this module.
+! The entries are taken from pencil-code/doc/citations/notes.tex
+!
+! 2008A&A...482..739B,% Brandenburg, Rädler & Schrinner "Scale dependence of alpha effect and turbulent diffusivity" 
 !
 !***************************************************************
 !

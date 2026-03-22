@@ -75,9 +75,6 @@ module Magnetic
 !
     endsubroutine initialize_magnetic
 !***********************************************************************
-    subroutine initialize_magnetic_after_special
-    endsubroutine initialize_magnetic_after_special
-!***********************************************************************
     subroutine init_aa(f)
 !
 !  Dummy routine
@@ -168,18 +165,6 @@ module Magnetic
 !
     endsubroutine calc_pencils_magnetic_pencpar
 !***********************************************************************
-    subroutine update_char_vel_magnetic(f)
-!
-! Dummy
-!
-!  25-sep-15/MR+joern: coded
-!
-      real, dimension(mx,my,mz,mfarray), intent(INOUT) :: f
-!
-      call keep_compiler_quiet(f)
-!
-    endsubroutine update_char_vel_magnetic
-!***********************************************************************
     subroutine daa_dt(f,df,p)
 !
 !  Dummy routine
@@ -194,6 +179,20 @@ module Magnetic
       call keep_compiler_quiet(p)
 !
     endsubroutine daa_dt
+!***********************************************************************
+    subroutine calc_diagnostic_auxiliaries_magnetic(f,p)
+!
+!  Dummy routine
+!
+      real, dimension (mx,my,mz,mfarray) :: f
+      type (pencil_case) :: p
+!
+      intent(in) :: f, p
+!
+      call keep_compiler_quiet(f)
+      call keep_compiler_quiet(p)
+!
+    endsubroutine calc_diagnostic_auxiliaries_magnetic
 !***********************************************************************
     subroutine calc_diagnostics_magnetic(f,p)
 !

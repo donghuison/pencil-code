@@ -35,6 +35,14 @@ module Mpicomm
 !
   contains
 !***********************************************************************
+    subroutine mpicomm_init_min
+!
+!  22-Sep-25/MR: coded
+!
+      call mpicomm_init
+
+    endsubroutine mpicomm_init_min
+!***********************************************************************
     subroutine mpicomm_init
 !
 !  29-jul-2010/anders: dummy
@@ -1340,6 +1348,17 @@ module Mpicomm
 !
     endsubroutine mpireduce_max_arr
 !***********************************************************************
+    subroutine mpireduce_max_arr2(fmax_tmp,fmax,nreduce,comm)
+!
+      integer, dimension(2) :: nreduce
+      real, dimension(nreduce(1),nreduce(2)) :: fmax_tmp, fmax
+      integer, optional :: comm
+!
+      fmax=fmax_tmp
+      if (ALWAYS_FALSE) print*, present(comm)
+!
+    endsubroutine mpireduce_max_arr2
+!***********************************************************************
     subroutine mpireduce_min_scl(fmin_tmp,fmin,comm)
 !
       real :: fmin_tmp, fmin
@@ -1446,11 +1465,12 @@ module Mpicomm
 !
     endsubroutine mpireduce_sum_arr2
 !***********************************************************************
-    subroutine mpireduce_sum_arr3(fsum_tmp,fsum,nreduce,idir)
+    subroutine mpireduce_sum_arr3(fsum_tmp,fsum,nreduce,idir,inplace)
 !
       integer, dimension(3) :: nreduce
       real, dimension(nreduce(1),nreduce(2),nreduce(3)) :: fsum_tmp,fsum
       integer, optional :: idir
+      logical, optional :: inplace
 !
       fsum=fsum_tmp
       if (ALWAYS_FALSE) print*, present(idir)
@@ -1573,6 +1593,10 @@ module Mpicomm
     subroutine mpifinalize
 !
     endsubroutine mpifinalize
+!***********************************************************************
+    subroutine mpifinalize_min
+!
+    endsubroutine mpifinalize_min
 !***********************************************************************
     subroutine mpiabort
 !
@@ -2878,6 +2902,20 @@ module Mpicomm
       if (ALWAYS_FALSE) print*,n1,present(lproc)
 !
     endsubroutine mpigather_z
+!***********************************************************************
+    subroutine mpigather(sendbuf,recvbuf,comm)
+!
+!  29-Sep-2025/Kishore: coded by adapting mpigather_z_1D
+!
+      real, dimension(:,:,:), intent(in)  :: sendbuf
+      real, dimension(:,:,:), intent(out) :: recvbuf
+      integer, optional, intent(in) :: comm
+!
+      call keep_compiler_quiet(comm)
+!
+      recvbuf = sendbuf
+!
+    endsubroutine mpigather
 !***********************************************************************
     subroutine mpigather_and_out_real( sendbuf, unit, ltransp, kxrange, kyrange, zrange )
 !

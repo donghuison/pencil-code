@@ -13,10 +13,16 @@
 ! MVAR CONTRIBUTION 2
 ! MAUX CONTRIBUTION 0
 !
+!** AUTOMATIC REFERENCE-LINK.TEX GENERATION ********************
+! Declare relevant citations from pencil-code/doc/citations/ref.bib for this module.
+! The entries are taken from pencil-code/doc/citations/notes.tex
+!
+! 2025PhRvD.111d3541V,%Vachaspati+Brandenburg "Spectra of magnetic fields from electroweak symmetry breaking"
+! 2004IJAsB...3..209B,% Brandenburg & Multamaki "How long can left and right handed life forms coexist?"
+!
 !***************************************************************
 module Chiral
 !
-  use Cparam
   use Cdata
   use General, only: keep_compiler_quiet
   use Messages
@@ -384,6 +390,7 @@ module Chiral
 !
       call grad(f,iXX_chiral,gXX_chiral)
       call grad(f,iYY_chiral,gYY_chiral)
+      if (lZZ_chiral .and. lhydro) call grad(f,iZZ_chiral,gZZ_chiral)
 !
 !  Add diffusion of imposed spatially constant gradient of X or Y.
 !  This makes sense mainly for periodic boundary conditions.
@@ -616,7 +623,6 @@ module Chiral
 !
 !   4-jul-09/axel: coded
 !
-      use Cdata
       use Sub
 !
       real, dimension (mx,my,mz,mfarray) :: f

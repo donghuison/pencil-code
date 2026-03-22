@@ -24,8 +24,7 @@ class Averages(object):
         self.t = np.array([])
 
     def keys(self):
-        for i in self.__dict__.keys():
-            print(i)
+        return list(self.__dict__.keys())
 
     def read(
         self,
@@ -227,6 +226,9 @@ class Averages(object):
 
 @copy_docstring(Averages.read)
 def phiaver(*args, **kwargs):
+    """
+    Wrapper for :py:meth:`Averages.read`
+    """
     averages_tmp = Averages()
     averages_tmp.read(*args, **kwargs)
     return averages_tmp

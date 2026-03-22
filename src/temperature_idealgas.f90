@@ -37,7 +37,7 @@ module Energy
   include 'energy.h'
 !
   real :: radius_lnTT=0.1, widthlnTT=2*epsi
-  real, dimension (ninit) :: ampl_lnTT=0.0
+  real, dimension (ninit) :: ampl_lnTT=0.0, ampl_TT=0.0
   real :: lnTT_const=0.0, TT_const=1.0
   real :: Kgperp=0.0, Kgpara=0.0
   real :: chi=impossible, chi_jump=1., chi_z0=0.0, chi_zwidth=0.0, chi_r_reduce=0.0
@@ -68,8 +68,8 @@ module Energy
   real, target :: hcond0_kramers=0.0, nkramers=0.0
   logical :: lviscosity_heat=.true.
   logical :: lcalc_TTmean=.false.
-  integer :: iglobal_hcond=0
-  integer :: iglobal_glhc=0
+!  integer :: iglobal_hcond=0
+!  integer :: iglobal_glhc=0
   logical :: lenergy_slope_limited=.false.
   logical :: linitial_log=.false.
   logical, pointer :: lreduced_sound_speed   !=>.false.
@@ -97,7 +97,7 @@ module Energy
       center1_x, center1_y, center1_z, mpoly0, mpoly1, mpoly2, r_bcz, Fbot, &
       Tbump, Kmin, Kmax, hole_slope, hole_width, ltemperature_nolog, &
       linitial_log, hcond0, luminosity, wheat, coef_lnTT, kx_lnTT, ky_lnTT, kz_lnTT, &
-      temp_zaver_range
+      temp_zaver_range, ampl_TT
 !
 !  Run parameters.
 !
@@ -255,6 +255,8 @@ module Energy
   real, dimension(nx) :: diffus_chi,diffus_chi3,hcond,cooling
   real :: gamma, gamma1, gamma_m1, cp1
 !
+  integer :: enum_borderss = 0
+!
   contains
 !***********************************************************************
     subroutine register_energy
@@ -289,7 +291,7 @@ module Energy
         if (dimensionality<3)lisotropic_advection=.true.
         lslope_limit_diff = .true.
         if (isld_char == 0) then
-          call farray_register_auxiliary('sld_char',isld_char,communicated=.true.,on_gpu=lgpu)
+          call farray_register_auxiliary('sld_char',isld_char,communicated=.true.,rhs=.true.)
           if (lroot) write(15,*) 'sld_char = fltarr(mx,my,mz)*one'
           aux_var(aux_count)=',sld_char'
           if (naux+naux_com <  maux+maux_com) aux_var(aux_count)=trim(aux_var(aux_count))//' $'
@@ -625,7 +627,8 @@ module Energy
       use InitialCondition, only: initial_condition_ss
       use EquationOfState, only: cs2bot, cs2top, cs20, lnrho0, rho0
       use Gravity, only: gravz
-      use Initcond, only: modes
+      !use Initcond, only: modes
+      use Initcond
 !
       real, dimension (mx,my,mz,mfarray), intent (inout) :: f
       real, dimension (mz) :: TTz
@@ -658,6 +661,13 @@ module Energy
             cs2bot=gamma_m1*TT_const
             cs2top=gamma_m1*TT_const
 !
+! NS: added option for gaussian noise
+          case ('gaussian-noise')
+                  if (ltemperature_nolog) then
+                          call gaunoise(ampl_TT(j),f,iTT,iTT)
+                  else
+                          call gaunoise(ampl_TT(j),f,ilnTT,ilnTT)
+                  endif
           case ('const_dTTdz')
             TTz=TT_const+z
             if (ltemperature_nolog) then
@@ -1742,7 +1752,6 @@ module Energy
 
       case ('nothing')
       endselect
-!
 !
     endsubroutine set_border_entropy
 !***********************************************************************
@@ -3120,8 +3129,9 @@ module Energy
     subroutine pushpars2c(p_par)
 
     use Syscalls, only: copy_addr
+    use General, only: string_to_enum
 
-    integer, parameter :: n_pars=60
+    integer, parameter :: n_pars=100
     integer(KIND=ikind8), dimension(n_pars) :: p_par
 
     call copy_addr(chi,p_par(1))
@@ -3173,9 +3183,15 @@ module Energy
     call copy_addr(hcond0_kramers,p_par(47))
     call copy_addr(nkramers,p_par(48))
     call copy_addr(lviscosity_heat,p_par(49)) ! bool
-    call copy_addr(iglobal_hcond,p_par(50)) ! int
-    call copy_addr(iglobal_glhc,p_par(51)) ! int
-
+    call copy_addr(lenergy_slope_limited,p_par(52)) ! bool
+    call copy_addr(ladi_mixed,p_par(53)) ! bool
+    call copy_addr(gamma,p_par(54))
+    call copy_addr(gamma1,p_par(55))
+    call copy_addr(gamma_m1,p_par(56))
+    call copy_addr(gradtt0,p_par(57)) ! real3
+    call string_to_enum(enum_borderss,borderss)
+    call copy_addr(enum_borderss,p_par(58)) ! int
+ 
     endsubroutine pushpars2c
 !***********************************************************************
 !********************************************************************

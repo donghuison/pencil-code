@@ -38,11 +38,12 @@ class Averages(object):
             warnings.warn("Mismatch between the times of different kinds of averages (usually happens when 1D and 2D averages are stored at different times). Please use the t attributes of the respective planes (e.g. av.xy.t, rather than av.t).")
         self._t = arr
 
+    @property
     def keys(self):
-        for i in self.__dict__.keys():
-            if i == "_t":
-               i = "t"
-            print(i)
+        ks = list(self.__dict__.keys())
+        ks.remove("_t")
+        ks.append("t")
+        return ks
 
     def read(
         self,
@@ -61,7 +62,8 @@ class Averages(object):
         proc=-1,
         precision="f",
         comp_time=False,
-        quiet=True
+        quiet=True,
+        sim=None,
     ):
         """
         read(plane_list=None, datadir='data', proc=-1, var_index=-1, proc=-1):
@@ -98,8 +100,10 @@ class Averages(object):
 
         iter_list : list of int, or index range
             Iteration indices for which to sample the slices.
-            Single value only that index is sampled. Two indices indicate first and last index.
+            Single value only that index is sampled.
+            Two indices indicate first and last index (last value excluded).
             More than two indicies specifies the precise list of indices to be sampled.
+            Note that the indices specified here start from 0.
 
         niter : int
             if iter_list is not used for fortran format a default index list will be used of size niter.
@@ -120,6 +124,9 @@ class Averages(object):
             Whether to suppress diagnostic output.
             Default: True
 
+        sim : Simulation obejct.
+            If specified, get simdir and datadir from this.
+
         Returns
         -------
         Class containing the averages.
@@ -132,11 +139,10 @@ class Averages(object):
 
         Notes
         -----
-        Due to unfortunate historical decisions, the axis ordering of the 2D
-        averages (yaver and zaver) depends on the IO module used. For yaver
-        with io_dist the ordering is [t,x,z], while with io_hdf5 it is [t,z,x].
+        The axis ordering of the 2D averages (yaver and zaver) is [t,x,z] or [t,x,y]
         """
 
+        from os.path import join, abspath
 
         #check iter_list type is integer(s) if present
         if iter_list is not None:
@@ -154,9 +160,12 @@ class Averages(object):
             else:
                 time_range = [0, time_range]
 
-        from os.path import join, abspath
-
-        simdir = abspath(simdir)
+        if sim is None:
+            simdir = abspath(simdir)
+        else:
+            simdir = sim.path
+            datadir = sim.datadir
+            param = sim.param
 
         if param is None:
             param = read.param(datadir=datadir, quiet=True)
@@ -306,15 +315,11 @@ class Averages(object):
             #Reading averages from hdf5 files
                 # Get the averaged quantities.
             dim = read.dim(datadir=datadir)
-            av_files = glob.glob(join(datadir,"averages","*"))
-            if len(av_files) > 0:
-                for av_file in av_files:
-                    if not ".h5" in av_file[-3:]:
-                        av_files.remove(av_file)
-                if len(av_files) == 0:
-                    raise RuntimeError(f"read.aver error: no averages files in {join(datadir,'averages')}")
-            else:
+
+            av_files = glob.glob(join(datadir,"averages","*.h5"))
+            if len(av_files) == 0:
                 raise RuntimeError(f"read.aver error: no averages files in {join(datadir,'averages')}")
+
             av_files_in = list()
             # Initialize the av_files_list of planes.
             if avfile_list:
@@ -381,13 +386,6 @@ class Averages(object):
                 self.t = t
                 setattr(self, plane, ext_object)
 
-    def __equal_newline(self, line):
-        """
-        Determine if string is equal new line.
-        """
-        #Kishore (2025-06-09): this no longer seems to be used (TODO)
-        return line == "\n"
-
     def _read_h5_aver(
         self,
         plane,
@@ -417,15 +415,14 @@ class Averages(object):
             v.strip() for v in variables if v[0] != "#" and not v.isspace()
         ]  # Ignore commented variables and blank lines in the .in file.
         with h5py.File(av_file, "r") as tmp:
-            n_times = len(tmp.keys()) - 1
-            n_times = min(n_times,tmp['last'][()].item() + 1)
-            start_time, end_time = 0, tmp[str(n_times-1)]['time'][()].item()
-            if time_range is not None:
-                start_time, end_time = time_range
-            if iter_list:
+            n_times = min(
+                len(tmp.keys()) - 1,
+                tmp['last'][()].item() + 1,
+                )
+
+            if iter_list is not None:
                 if len(iter_list) == 1:
-                    n_times = min(n_times-1, iter_list[0])
-                    itlist = range(n_times,n_times+1,iter_step)
+                    itlist = iter_list
                 elif len(iter_list) == 2:
                     if iter_list[0] >= iter_list[1]:
                         warnings.warn("read.aver: iter_list pair must be list of integer - reading full series instead")
@@ -433,7 +430,7 @@ class Averages(object):
                 else:
                     itlist = iter_list
                 for it in itlist:
-                    if not str(it) in tmp.keys():
+                    if str(it) not in tmp.keys():
                         itlist.remove(it)
                 if not len(itlist) > 0:
                     warnings.warn("read.aver: iter_list has no match in {} keys - reading only {} instead".format(av_file,tmp['last'][0]))
@@ -441,16 +438,19 @@ class Averages(object):
             else:
                 itlist = natural_sort(tmp.keys())[:n_times]
 
-            if time_range:
+            if time_range is not None:
+                start_time, end_time = time_range
+
                 tmplist = list()
                 for t_idx in itlist:
-                    if tmp[str(t_idx) + "/time"][()].item() >= start_time:
-                        if tmp[str(t_idx) + "/time"][()].item() <= end_time:
-                            tmplist.append(t_idx)
+                    t = tmp[str(t_idx) + "/time"][()].item()
+                    if start_time <= t <= end_time:
+                        tmplist.append(t_idx)
                 if len(tmplist) == 0:
                     raise RuntimeError(f"read.aver error: no data in {av_file} within time range {time_range}.")
                 else:
                     itlist = tmplist
+
             # Determine the structure of the xy/xz/yz/y/z averages.
             if var_names is not None:
                 var_names = [v.strip() for v in var_names]
@@ -519,6 +519,23 @@ class Averages(object):
         end_time = time.time()-start_time
         if not quiet:
             print("{} object reading time {:.0f} seconds".format(plane,end_time))
+
+        for k in ext_object.__dict__.keys():
+            if k != "t":
+                val = getattr(ext_object, k)
+                if val.ndim == 3:
+                    """
+                    To be consistent with what happens with io_dist.
+                    Axis ordering is now [t,x,z] for yaver, or [t,x,y] for zaver.
+                    """
+                    setattr(ext_object, k, val.swapaxes(1,2))
+
+                    # 2025-Nov-28/Kishore: I suppose we can remove this warning
+                    # after a year or so.
+                    warnings.warn(
+                        "Axis ordering for yaver and zaver has recently been changed;"
+                        "it is now [t,x,z] for yaver, or [t,x,y] for zaver."
+                        )
 
         return t, ext_object
 
@@ -774,6 +791,9 @@ class Averages(object):
 
 @copy_docstring(Averages.read)
 def aver(*args, **kwargs):
+    """
+    Wrapper for :py:meth:`Averages.read`
+    """
     averages_tmp = Averages()
     averages_tmp.read(*args, **kwargs)
     return averages_tmp
@@ -782,7 +802,9 @@ class _Plane():
     """
     Used to store the averages in a particular plane
     """
+    @property
     def keys(self):
-        for i in self.__dict__.keys():
-            if not i == "keys":
-               print(i)
+        ks = list(self.__dict__.keys())
+        if "keys" in ks:
+            ks.remove("ks")
+        return ks

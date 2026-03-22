@@ -53,7 +53,6 @@
 !
 module Special
 !
-  use Cparam
   use Cdata
   use General, only: keep_compiler_quiet
   use Messages
@@ -192,9 +191,6 @@ module Special
 !
 !  18-07-06/tony: coded
 !
-!
-!
-!
    if (lnstar_entropy) then
          lpenc_requested(i_TT)=.true.
           lpenc_requested(i_lnTT)=.true.
@@ -212,9 +208,6 @@ module Special
         lpenc_requested(i_del2ss)=.true.
         lpenc_requested(i_rho)=.true.
       endif
-!
-!
-!
 !
     endsubroutine pencil_criteria_special
 !***********************************************************************
@@ -320,7 +313,6 @@ module Special
       lwr = .false.
       if (present(lwrite)) lwr=lwrite
 !
-!
 !  reset everything in case of reset
 !  (this needs to be consistent with what is defined above!)
 !
@@ -364,7 +356,6 @@ module Special
 !
 !  mass sources and sinks for the boundary layer on NS in 1D approximation
 !
-!
       if (lsurface_zone) then
 !
 !
@@ -374,13 +365,8 @@ module Special
           !  df(l_sz:l2,m,n,ilnrho)=df(l_sz:l2,m,n,ilnrho)&
           !       -1./(5.*dt)*(1.-rho_surf/exp(f(l_sz:l2,m,n,ilnrho)))
 !
-!
-!
-!
          endif
       endif
-!
-!
 !
 ! Keep compiler quiet by ensuring every parameter is used
 !
@@ -492,9 +478,6 @@ module Special
          bc%done=.true.
       endselect
 !
-      call keep_compiler_quiet(f)
-      call keep_compiler_quiet(bc%bcname)
-!
     endsubroutine special_boundconds
 !***********************************************************************
 !
@@ -523,7 +506,6 @@ module Special
       intent(in) :: f,p
       intent(out) :: df
 !
-!
 !  Heat conduction
 !
       chix = p%rho1*p%rho1*p%TT**3*16./3.*sigmaSB/kappa_es!hcond
@@ -538,7 +520,6 @@ module Special
 !
    !  add heat conduction to entropy equation
     !
-!
 !
          df(l1:l2,m,n,iss) = df(l1:l2,m,n,iss) + thdiff
          if (headtt) print*,'calc_heatcond_diffusion: added thdiff'
@@ -573,6 +554,7 @@ module Special
       !              real(sigmaSB*kappa_es*p%TT**3*4.*p%cp1tilde))
      !   diffus_chi=max(diffus_chi,diffus_chi1)
       endif
+!
     endsubroutine raddif_local
 !*************************************************************************
     subroutine density_init(f)
@@ -604,15 +586,10 @@ module Special
       real, dimension (nx) ::  lnrho, lnTT,ss
       integer ::  mi,ni
 !
-!
-!
-!
  !     lnTT=log(T_bot)!  log(T0)
 ! if (T_disk.EQ.0) then
  !    T_disk=cs0**2/gamma_m1
  !  endif
-!
-!
 !
       do ni=n1,n2;
        do mi=m1,m2;
@@ -624,13 +601,10 @@ module Special
 !
       ! f(l1:l2,mi,ni,iss)=ss
 !
-!
         f(l1:l2,mi,ni,iss)=-f(l1:l2,mi,ni,ilnrho)*gamma_m1/gamma
-!
 !
        end do
      end do
-!
 !
     endsubroutine entropy_init
 !**********************************************************************
@@ -640,16 +614,12 @@ module Special
 !
       real, dimension (mx,my,mz,mvar+maux) :: f
 !
-!
         f(:,:,:,iuz)=uu_left
         f(:,:,:,iuy)=uu_left
         f(:,:,:,iux)=uu_left
 !
-!
-!
     endsubroutine  velocity_init
 !***********************************************************************
-!
     subroutine bc_BL_x(f,sgn,bc)
 !
 ! Natalia
@@ -706,25 +676,6 @@ module Special
       endif
 !
     endsubroutine bc_BL_x
- !***********************************************************************
-!
-!***********************************************************************
-    subroutine special_before_boundary(f)
-!
-!   Possibility to modify the f array before the boundaries are
-!   communicated.
-!
-!   Some precalculated pencils of data are passed in for efficiency
-!   others may be calculated directly from the f array
-!
-!   06-jul-06/tony: coded
-!
-      real, dimension (mx,my,mz,mvar+maux), intent(in) :: f
-!
-      call keep_compiler_quiet(f)
-!
-    endsubroutine special_before_boundary
-!
 !********************************************************************
 !************        DO NOT DELETE THE FOLLOWING       **************
 !********************************************************************

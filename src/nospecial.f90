@@ -73,7 +73,6 @@
 !
 module Special
 !
-  use Cparam
   use Cdata
   use General, only: keep_compiler_quiet
   use Messages, only: svn_id, fatal_error
@@ -257,8 +256,11 @@ module Special
 !!        endif
 !!      endif
 !
-      call keep_compiler_quiet(f,df)
-      call keep_compiler_quiet(p)
+      call keep_compiler_quiet(df)
+!
+!  calc_diagnostics_special must be explicitly called if necessary.
+!
+!       call calc_diagnostics_special(f,p)
 !
     endsubroutine dspecial_dt
 !***********************************************************************
@@ -609,10 +611,10 @@ module Special
 !  06-oct-03/tony: coded
 !
       real, dimension (mx,my,mz,mfarray), intent(in) :: f
-      type (boundary_condition), intent(in) :: bc
+      type (boundary_condition), intent(inout) :: bc
 !
       call keep_compiler_quiet(f)
-      call keep_compiler_quiet(bc)
+      bc%done=.true.
 !
     endsubroutine special_boundconds
 !***********************************************************************
@@ -691,15 +693,25 @@ module Special
     endfunction output_persistent_special
 !***********************************************************************
     subroutine calc_diagnostics_special(f,p)
-      real, dimension(mx,my,mz,mvar) :: f
+
+      real, dimension(mx,my,mz,mfarray) :: f
       type (pencil_case) :: p
+
+      call keep_compiler_quiet(f)
       call keep_compiler_quiet(p)
+
     endsubroutine calc_diagnostics_special
 !***********************************************************************
-    subroutine     calc_ode_diagnostics_special(f_ode)
+    subroutine calc_ode_diagnostics_special(f_ode)
+
       real, dimension(:) :: f_ode
+
       call keep_compiler_quiet(f_ode)
+
     endsubroutine     calc_ode_diagnostics_special 
+!***********************************************************************
+    subroutine load_variables_to_gpu_special
+    endsubroutine load_variables_to_gpu_special
 !***********************************************************************
     subroutine pushpars2c(p_par)
 

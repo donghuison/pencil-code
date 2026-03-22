@@ -43,8 +43,7 @@ class Dim(object):
         self.mxgrid = self.mygrid = self.mzgrid = 0
 
     def keys(self):
-        for i in self.__dict__.keys():
-            print(i)
+        return list(self.__dict__.keys())
 
     def read(self, datadir="data", proc=-1, ogrid=False, down=False, param=None):
         """
@@ -163,16 +162,24 @@ class Dim(object):
 
             self.precision = lines[1].strip("\n")
             self.nghostx, self.nghosty, self.nghostz = tuple(map(int, lines[2].split()))
+
+            line3=tuple(map(int, lines[3].split()))
             if proc < 0:
                 # Set global parameters.
-                self.nprocx, self.nprocy, self.nprocz, self.iprocz_slowest = tuple(
-                    map(int, lines[3].split())
-                )
+                if len(line3) == 3:
+                    self.nprocx, self.nprocy, self.nprocz = line3
+                    self.iprocz_slowest = -1
+                else:
+                    self.nprocx, self.nprocy, self.nprocz, self.iprocz_slowest = line3
                 self.ipx = self.ipy = self.ipz = -1
             else:
                 # Set local parameters to this proc.
-                self.ipx, self.ipy, self.ipz = tuple(map(int, lines[3].split()))
-                self.nprocx = self.nprocy = self.nprocz = self.iprocz_slowest = -1
+                if len(line3) == 3:
+                    self.ipx, self.ipy, self.ipz = line3
+                    self.iprocz_slowest = -1
+                else:
+                    self.ipx, self.ipy, self.ipz, self.iprocz_slowest = line3
+                self.nprocx = self.nprocy = self.nprocz = -1
 
             # Add derived quantities to the dim object.
             self.nx = self.mx - (2 * self.nghostx)
@@ -202,6 +209,9 @@ class Dim(object):
 
 @copy_docstring(Dim.read)
 def dim(*args, **kwargs):
+    """
+    Wrapper for :py:meth:`Dim.read`
+    """
     dim_tmp = Dim()
     dim_tmp.read(*args, **kwargs)
     return dim_tmp

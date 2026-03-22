@@ -1,346 +1,231 @@
-.. tutpython:
+.. _tutpython:
 
 ***********************
 Pencil Python Tutorials
 ***********************
 
-Here you can find some tutorials on how to modify/contribute to the Python Code 
-using the Coding style :ref:`pythonstyle` and how to use the code for post-processing :ref:`pythongeneral`.
+Installation
+==============
 
 
+For modern operating systems, Python is generally installed together
+with the system. If not, it can be installed via your preferred package
+manager or downloaded from the website https://www.python.org/. For
+convenience, I strongly recommend to also install
+`IPython <http://ipython.org/>`__, which is a more convenient console
+for python. You will also need the `NumPy <http://www.numpy.org/>`__,
+`matplotlib <http://matplotlib.org/>`__,
+`h5py <https://www.h5py.org/>`__ and `Tk <http://www.tcl.tk/>`__
+library.
 
-.. _pythonstyle: 
+Perhaps the easiest way to obtain all the required software mentioned
+above is install either Continuum’s
+`Anaconda <https://store.continuum.io/cshop/anaconda/>`__ or Enthought’s
+`Canopy <https://www.enthought.com/products/canopy/>`__. These Python
+distributions also provide (or indeed are) integrated graphical
+development environments.
 
-Python Coding Style
-===================
+Another way of installing libraries, particularly on a cluster without
+root privileges you can use pip or pip3:
 
-Good coding style greatly improves the readability of the code. Similar
-to the guidelines for the Fortran routines, it is strongly recommended
-to follow some basic style rules for the python routines. These are some
-recommendations extracted from `PEP 008 <https://www.python.org/dev/peps/pep-0008/>`_ and 
-`Google Python Style Guide
-<https://google-styleguide.googlecode.com/svn/trunk/pyguide.html>`_.
+.. code:: sh
 
+   pip install h5py
+   pip3 install h5py
 
-General Style Guide for Python
-------------------------------
+In order for python to find the Pencil Code commands you will have to
+add to your .bashrc:
 
-Indentation and Spaces
-~~~~~~~~~~~~~~~~~~~~~~
+.. code:: sh
 
--  Use 4 spaces per indentation level.
--  Use hanging indent for function calls over multiple lines:
-
-   .. code:: python
-
-
-        # Aligned with opening delimiter.
-        foo = long_function_name(var_one, var_two,
-                                 var_three, var_four)
-
-
--  Wildcard imports ( from import \* ) should be avoided, as they make
-   it unclear which names are present in the namespace, confusing both
-   readers and many automated tools.
--  More than one space around an assignment (or other) operator to align
-   it with another should be avoided. **No**:
-
-   .. code:: python
-
-      x             = 1
-      y             = 2
-      long_variable = 3
-
-   **Yes**:
-
-   .. code:: python
-
-      x = 1
-      y = 2
-      long_variable = 3
-
--  Always surround these binary operators with a single space on either
-   side: assignment ( = ), augmented assignment ( += , -= etc.),
-   comparisons ( == , < , > , != , <> , <= , >= , in , not in , is , is
-   not ), Booleans ( and , or , not ).
--  If operators with different priorities are used, consider adding
-   whitespace around the operators with the lowest priority(ies).
-   
-   **Yes**:
-
-   .. code:: python
-
-      i = i + 1
-      submitted += 1
-      x = x*2 - 1
-
-   **No**:
-
-   .. code:: python
-
-      
-      i=i+1
-      submitted +=1
-      x = x * 2 - 1
-      
--  Don’t use spaces around the = sign when used to indicate a keyword
-   argument or a default parameter value. 
-   
-   **Yes**:
-
-   .. code:: python
-
-      def complex(real, imag=0.0):
-            return magic(r=real, i=imag)
-      
-
-   **No**:
-
-   .. code:: python
-
-      def complex(real, imag = 0.0):
-            return magic(r = real, i = imag)
-     
-Comments
-~~~~~~~~
-
--  Comments should be complete sentences.
--  Block comments generally apply to some (or all) code that follows
-   them, and are indented to the same level as that code. Each line of a
-   block comment starts with a # and a single space (unless it is
-   indented text inside the comment). Paragraphs inside a block comment
-   are separated by a line containing a single # .
-
-Docstrings
-~~~~~~~~~~
-
-Always use docstrings for classes and functions which can be accessed by
-the user. 
-
-We are now working with read the docs and sphinx to create automatic documentation for the code, hence we have updated the style guide for creating docstrings.
-
-We are using Numpy docstring style, and require the following fields in the docstring:
-
-- General description of the Class/function
-- Signature: how the function can be called
-- Parameters: list of parameters of the class/function
-- Returns: type of variable the function returns
-- Examples: at least one example of usage
-- Notes (ptional): any further comments to the function
+   export PYTHONPATH=$PENCIL_HOME/python
 
 
-.. code:: python
+Setting Up a Local Python Environment (Recommended)
+----------------------------------------------------
 
-   def complex(real=0.0, imag=0.0):
-        """
-        Form a complex number.
+For development and to avoid conflicts with system packages, it is strongly
+recommended to use a virtual environment. This allows you to install packages
+locally without requiring root privileges and keeps your Pencil Code environment
+isolated from other Python projects.
 
-        Signature
-        ---------
-        complex(real, imag)
+Using venv (Python 3.3+)
+~~~~~~~~~~~~~~~~~~~~~~~~
 
-        Parameters
-        ----------
-         *real*: float
-             the real part (default 0.0)
-         *imag*: float
-             the imaginary part (default 0.0)
+Python 3 includes the ``venv`` module by default. To create and activate a
+virtual environment:
 
-        Returns
-        -------
-        complex number with real and imaginary part
+.. code:: sh
 
-        Examples 
-        --------
-        Define two complex numbers:
-        >>> a = complex(3, 5)
-        >>> b = complex(4, 7)
-        >>> print(a)
-        (3+5j)
-        >>> a + b
-        (7+12j)
-        """
-  
-Naming Convention
-~~~~~~~~~~~~~~~~~
+   # Create a virtual environment in a directory called 'venv'
+   python3 -m venv ~/pencil-venv
 
-module_name, package_name, ClassName, method_name, ExceptionName,
-function_name, GLOBAL_CONSTANT_NAME, global_var_name, instance_var_name,
-function_parameter_name, local_var_name
+   # Activate the virtual environment
+   source ~/pencil-venv/bin/activate
 
-Exceptions for >our< code: datadir, varfile, varfiles, …
+   # Your prompt should now show (pencil-venv) indicating the environment is active
 
-pylint
-~~~~~~
+Once activated, you can install required packages using pip:
 
-Run pylint over your code. pylint is a tool for finding bugs and style
-problems in Python source code. It finds problems that are typically
-caught by a compiler for less dynamic languages like C and C++.
+.. code:: sh
 
-black
-~~~~~~
+   pip install numpy matplotlib h5py ipython
 
-Run black over your code for automatic formatting.
-This makes sure that all the above criteria (apart from the doc string)
-are fullfilled.
+To deactivate the virtual environment when you're done:
 
-Default Function Arguments
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. code:: sh
 
-Do not use mutable objects as default values in the function or method
-definition. 
+   deactivate
 
-**Yes**:
+To use this environment in the future, simply activate it again with:
+
+.. code:: sh
+
+   source ~/pencil-venv/bin/activate
+
+..
+   comment/Kishore/2025-01-17: it may make sense to mention what to do in case
+   the system Python version has changed: <https://stackoverflow.com/a/42405607>.
+   I am not sure if this handles upgrades of other stuff like openmpi or hdf5,
+   though.
+
+Using conda (Anaconda/Miniconda)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If you're using Anaconda or Miniconda, you can create a conda environment:
+
+.. code:: sh
+
+   # Create a new conda environment named 'pencil'
+   conda create -n pencil python=3.10 numpy matplotlib h5py ipython
+
+   # Activate the environment
+   conda activate pencil
+
+   # Deactivate when done
+   conda deactivate
+
+Installing Additional Libraries
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Once your virtual environment is activated, you can install additional Python
+packages as needed:
+
+.. code:: sh
+
+   # Install individual packages
+   pip install scipy pandas
+
+   # Install from a requirements file (if provided)
+   pip install -r requirements.txt
+
+   # Upgrade a package
+   pip install --upgrade numpy
+
+For clusters without internet access, you can download packages on a machine
+with internet and transfer them:
+
+.. code:: sh
+
+   # On a machine with internet, download packages
+   pip download numpy matplotlib h5py -d ~/packages/
+
+   # Transfer the ~/packages/ directory to the cluster, then install
+   pip install --no-index --find-links ~/packages/ numpy matplotlib h5py
+
+Making the Virtual Environment Persistent
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+To automatically activate your virtual environment when you start a new terminal
+session, you can add the activation command to your ``.bashrc`` or ``.bash_profile``:
+
+.. code:: sh
+
+   # Add to ~/.bashrc
+   source ~/pencil-venv/bin/activate
+   export PYTHONPATH=$PENCIL_HOME/python
+
+.. note::
+
+   If using a virtual environment, make sure to activate it **before** setting
+   the ``PYTHONPATH`` variable. This ensures that the Pencil Code Python modules
+   are found alongside your installed packages.
+
+
+`ipythonrc`
+-----------
+
+
+If you use IPython, for convenience, you should modify your
+``~/.ipython/ipythonrc`` (create it if it doesn’t exist) and add:
 
 .. code:: python
 
-   def foo(a, b=None):
-       if b is None:
-           b = []
+   import_all pencil
 
-**No**: 
-
-.. code:: python
-
-    def foo(a, b=[]):
-
-
-Private Methods
-~~~~~~~~~~~~~~~
-
-Python does not know any private methods or class member. In order to
-somewhat hide such methods use two underscores in the function
-definition: ``def __magicAttributes(self, param):``.
-
-Others
-~~~~~~
-
--  Use ``''.startswith()`` and ``''.endswith()`` instead of string
-   slicing to check for prefixes or suffixes. startswith() and
-   endswith() are cleaner and less error prone. For example: **Yes**:
-   ``if foo.startswith('bar'):`` **No**: ``if foo[:3] == 'bar':``
--  For sequences, (strings, lists, tuples), use the fact that empty
-   sequences are false. 
-
-   **Yes**:
-
-   .. code:: python
-     
-      if not seq:
-      if seq:
-      
-
-   **No**:
-
-   .. code:: python
-      
-      if len(seq)
-      if not len(seq)
-      
-
--  Don’t compare boolean values to True or False using == . 
-
-   **Yes**:
-
-   .. code:: python
-
-      if greeting:
-
-   **No**:
-
-   .. code:: python
-
-      if greeting == True:
-
--  Check if a variable has a particular type by using ``isinstance``,
-   e.g.: ``isinstance(my_variable, list)``.
-
-
-Pencil Code Specific Style
---------------------------
-
-Classes/Objects
-~~~~~~~~~~~~~~~
-
-Use classes as much as possible. When you write a function try to embed
-it into a class as **init** function which should return the desired
-result. This has the advantage of adding methods to the returned object
-which can modify the data. Read-methods always give back objects
-containing the whole information (container philosophy). Therefore we
-use classes if possible.
-
-Data Directory
-~~~~~~~~~~~~~~
-
-The default data directory is always ‘./data’ and not ‘data’.
-
-File Headers
-~~~~~~~~~~~~
-
-Start each file with the file ID and  a short
-description of the routines.
-(The authors' list is no longer required since it can be easily accesed through git history.)
+Additional, add to your ``~/.ipython/profile_default/startup/init.py``
+the following lines:
 
 .. code:: python
 
-   
-   # varfile.py
-   #
-   # Read VAR files. Based on the read_var.pro IDL script.
-   #
-   # NB: the f array returned is C-ordered: f[nvar,nz,ny,nx]
-   #     NOT Fortran as in Pencil (& IDL):  f[nx,ny,nz,nvar]
-   
-  
+   import numpy as np
+   import pylab as plt
+   import pencil as pc
 
-Import Libraries
-~~~~~~~~~~~~~~~~
+   import matplotlib
+   from matplotlib import rc
 
--  Import numpy as *np* instead of *N*.
--  Import pylab as *plt* instead of *P*.
+   plt.ion()
 
-If you need to access libraries in some routines in your module, import
-them in the routine, rather than the head of the module. That way they
-are not visible by the user.
+   matplotlib.rcParams['savefig.directory'] = ''
 
-**Yes**:
+
+`.pythonrc`
+------------
+
+In case you are on a cluster and don’t have access to IPython you can
+edit you ``~/.pythonrc``:
 
 .. code:: python
 
-   # my_module.py
+   #!/usr/bin/python
+   import numpy as np
+   import pylab as plt
+   import pencil as pc
 
-   class MyClass(object):
-       """
-       Some documentation.
-       """
+   import atexit
+   #import readline
+   import rlcompleter
 
-       def __init__(self):
-           import numpy as np
+   # Enable search with CTR+r in the history.
+   try:
+       import readline
+   except ImportError:
+       print "Module readline not available."
+   else:
+       import rlcompleter
+       readline.parse_and_bind("tab: complete")
 
-           self.pi = np.pi
+   # Enables command history.
+   historyPath = os.path.expanduser("~/.pyhistory")
 
-**No**:
+   def save_history(historyPath=historyPath):
+       import readline
+       readline.write_history_file(historyPath)
 
-.. code:: python
+   if os.path.exists(historyPath):
+       readline.read_history_file(historyPath)
 
-        # my_module.py
-        import numpy as np
+   atexit.register(save_history)
+   del os, atexit, readline, rlcompleter, save_history, historyPath
 
-        class MyClass(object):
-        """
-        Some documentation.
-        """
+   plt.ion()
 
-        def __init__(self):
-                self.pi = np.pi</pre>
+create the file ``~/.pythonhistory`` and add to your ``~/.bashrc``:
 
+.. code:: sh
 
-Further Reading
----------------
-
-`<https://www.python.org/dev/peps/pep-0008/#tabs-or-spaces>`_
-
-`<https://google-styleguide.googlecode.com/svn/trunk/pyguide.html>`_
+   export PYTHONSTARTUP=~/.pythonrc
 
 
 
@@ -399,7 +284,7 @@ and python stores the data in the variable ``ts``.
 The physical quantities are members of the object ``ts`` and can be accessed accordingly, e.g. ``ts.t, ts.emag``. 
 To check which other variables are stored simply do the tab auto completion ``ts. <TAB>``.
 
- Plot the data with the matplotlib commands:
+Plot the data with the matplotlib commands:
 
 .. code:: python
 
@@ -413,16 +298,33 @@ You can save the plot into a file using the GUI or with
 
         plt.savefig('plot.eps')
 
+
+
+
+
 Reading and Plotting VAR files and slice files
 ==============================================
 
-Read var files:
+* Read var files:
 
 .. code:: python
 
         var = pc.read.var()
 
-Read slice files:
+
+* Read slices: before reading slices, you need to assemle gloabl slice files from the different processors with:
+
+.. code:: bash
+
+     $ make read_videofiles
+
+     $ ./src/read_videofiles.x 
+     enter variable (lnrho, uu1, ..., bb3) and stride (e.g. 10): uu1
+
+
+
+
+Now you can read assembled slice files:
 
 .. code:: python
 
@@ -499,10 +401,171 @@ Putting it all together our python routine would look something like this:
         pc.io.write_snapshot(var.aa, file_name='var.dat', nprocx=1, nprocy=1, nprocz=1)
 
 
+Working with Simulation Objects
+================================
+
+The Pencil Code Python interface provides a convenient way to work with simulations
+as Python objects. The ``pc.sim.simulation()`` function creates a simulation object
+that encapsulates all the information about a simulation directory, including its
+parameters, grid, dimensions, and data. This is particularly useful for managing
+multiple simulation runs, parameter scans, and automated analysis.
+
+Basic Simulation Object Usage
+------------------------------
+
+To create a simulation object for a simulation directory:
+
+.. code:: python
+
+        import pencil as pc
+
+        # Create a simulation object for the current directory
+        sim = pc.sim.simulation('.')
+
+        # Or specify a path to a simulation directory
+        sim = pc.sim.simulation('/path/to/simulation')
+
+The simulation object provides convenient access to simulation properties:
+
+.. code:: python
+
+        # Access simulation metadata
+        print(sim.name)      # Name of the simulation
+        print(sim.path)      # Path to simulation directory
+        print(sim.datadir)   # Path to data directory
+
+        # Access simulation data objects
+        param = sim.param    # Parameter object
+        grid = sim.grid      # Grid object
+        dim = sim.dim        # Dimension object
+        index = sim.index    # Index object
+
+        # Read time series data
+        ts = pc.read.ts(sim=sim)
+
+Example: Parameter Scan for Dynamo Growth Rates
+------------------------------------------------
+
+A common task in dynamo simulations is to determine how the growth rate depends
+on the magnetic diffusivity. Here we demonstrate how to use simulation objects
+to analyze the kinematic dynamo in ``samples/kin-dynamo`` and extract the
+exponential growth rate as a function of magnetic diffusivity.
+
+The Roberts flow dynamo has a critical magnetic Reynolds number above which the
+dynamo is active. We can measure the growth rate by fitting an exponential to the
+time evolution of the magnetic energy.
+
+.. code:: python
+
+        import pencil as pc
+        import numpy as np
+        import matplotlib.pyplot as plt
+
+        # Create simulation object
+        sim = pc.sim.simulation('samples/kin-dynamo')
+
+        # Read time series
+        ts = pc.read.ts(sim=sim)
+
+        # Read magnetic diffusivity from parameters
+        param = sim.param
+        eta = param.eta
+
+        # Calculate the magnetic Reynolds number
+        # For Roberts flow, the characteristic velocity is 1
+        Rm = 1.0 / eta
+
+        # Fit exponential growth to magnetic energy: E_mag = E_0 * exp(2*lambda*t)
+        # We use the logarithm: log(E_mag) = log(E_0) + 2*lambda*t
+        # Fit over the linear growth phase (before saturation)
+
+        # Select time range for fitting (adjust based on your simulation)
+        fit_start = 10
+        fit_end = 100
+        mask = (ts.t >= fit_start) & (ts.t <= fit_end)
+
+        # Perform linear fit to log(E_mag)
+        t_fit = ts.t[mask]
+        log_emag = np.log(ts.emag[mask])
+
+        # Fit: log_emag = a + b*t, where b = 2*lambda
+        coeffs = np.polyfit(t_fit, log_emag, 1)
+        growth_rate = coeffs[0] / 2.0  # lambda = b/2
+
+        print(f"Magnetic diffusivity eta = {eta}")
+        print(f"Magnetic Reynolds number Rm = {Rm:.2f}")
+        print(f"Dynamo growth rate lambda = {growth_rate:.6f}")
+
+        # Visualize the fit
+        plt.semilogy(ts.t, ts.emag, 'b-', label='Simulation')
+        plt.semilogy(t_fit, np.exp(np.polyval(coeffs, t_fit)), 'r--',
+                     label=f'Fit: λ = {growth_rate:.4f}')
+        plt.xlabel('Time')
+        plt.ylabel('Magnetic Energy')
+        plt.legend()
+        plt.title(f'Dynamo Growth (η = {eta}, Rm = {Rm:.1f})')
+        plt.grid(True)
+        plt.show()
+
+For a parameter scan, you would run multiple simulations with different values of
+``eta`` and collect the growth rates:
+
+.. code:: python
+
+        import pencil as pc
+        import numpy as np
+
+        # List of simulation directories (each with different eta)
+        sim_dirs = ['kin-dynamo-eta0.08', 'kin-dynamo-eta0.10',
+                    'kin-dynamo-eta0.12', 'kin-dynamo-eta0.15']
+
+        eta_values = []
+        growth_rates = []
+
+        for sim_dir in sim_dirs:
+            # Create simulation object
+            sim = pc.sim.simulation(sim_dir)
+
+            # Read parameters and time series
+            eta = sim.param.eta
+            ts = pc.read.ts(sim=sim)
+
+            # Fit growth rate (same procedure as above)
+            fit_start = 10
+            fit_end = 100
+            mask = (ts.t >= fit_start) & (ts.t <= fit_end)
+            t_fit = ts.t[mask]
+            log_emag = np.log(ts.emag[mask])
+            coeffs = np.polyfit(t_fit, log_emag, 1)
+            lambda_growth = coeffs[0] / 2.0
+
+            eta_values.append(eta)
+            growth_rates.append(lambda_growth)
+
+            print(f"eta = {eta:.3f}, lambda = {lambda_growth:.6f}")
+
+        # Plot growth rate vs magnetic Reynolds number
+        Rm_values = 1.0 / np.array(eta_values)
+        plt.plot(Rm_values, growth_rates, 'o-')
+        plt.axhline(y=0, color='k', linestyle='--', alpha=0.3)
+        plt.xlabel('Magnetic Reynolds number Rm')
+        plt.ylabel('Growth rate λ')
+        plt.title('Dynamo Growth Rate vs Rm')
+        plt.grid(True)
+        plt.show()
+
+.. note::
+
+        The critical magnetic Reynolds number for the Roberts flow dynamo is
+        approximately Rm_crit ≈ 5.52 (corresponding to η_crit ≈ 0.181 for 32³
+        resolution with 6th order derivatives). Below this value, the growth
+        rate becomes negative and the dynamo is suppressed.
+
+
 Examples
 ========
 
-Standard plots with any plotting library are not the prettiest ones. The same is true for matplotlib. Here are a few pretty examples of plots where the default style is changed. You can add your commands into a script e.g. ``plot_results.py`` and execute it from your terminal with ``python plot_results.py`` or in IPython with ``exec(open('plot_results.py').read())``.
+Standard plots with any plotting library are not the prettiest ones. The same is true for matplotlib. Here are a few pretty examples of plots where the default style is changed. You can add your commands into a script e.g. ``plot_results.py`` and execute it from your terminal with ``python plot_results.py`` or in IPython with ``%run plot_results.py``.
 
 The sample we use here is ``samples/interlocked-fluxrings``.
 
@@ -630,22 +693,66 @@ The result is this plot:
         :width: 400
         :alt: Simple 2d plot.
 
-IDL to Python guide
-===================
 
-A large array of idl scripts have been developed over the years, and many of them served their purpose at the time, but there are many others
-of general purpose. Below is a small selection of examples of idl call sequences along with their python counterparts.
+Troubleshooting
+================
 
-Here are the links to a few potentially useful sites:
 
-1. `IDL to Python bridge <https://www.l3harrisgeospatial.com/docs/IDLToPython.html>`_
+I’m an a cluster and the library LIBNAME could not be loaded.
+--------------------------------------------------------------
 
-2. `IDL commands in numerical Python <http://mathesaurus.sourceforge.net/idl-python-xref.pdf>`_
+Typically system administrators don’t install all the software you need.
+Just contact the person in charge and ask for installing it.
 
-===============================   ======
-IDL                               Python
-===============================   ======
-pc_read_var,obj=var,/trimall      var = pc.read.var(var_file = 'var.dat', trimall = True, sim = SIM)    
-help,var                          help(var)       
-pc_read_param,obj=param           pc.read.param()
-===============================   ======
+I’m getting complaints about a ‘tk’ library.
+---------------------------------------------
+
+Try launchin python with
+
+.. code:: sh
+
+   ipython --pylab='qt'
+
+If this doesn’t work or you have only access to the python console try
+in Python:
+
+.. code:: python
+
+   plt.switch_backend('qt')
+
+or any other backend like ``qtk``. If you are still out of luck you can
+still save the plot into a file with
+
+.. code:: python
+
+   plt.savefig('plot.eps')
+
+There is nothing displayed when I try plotting.
+------------------------------------------------
+
+Try:
+
+.. code:: python
+
+   plt.show()
+   plt.draw()
+
+
+Further Reading (strongly recommended)
+=======================================
+
+* Boris’ short introduction about post-processing of Pencil Code runs: https://old.nordita.org/~brandenb/teach/PencilCode/python.html
+
+* Python tutorial: https://docs.python.org/3/tutorial/index.html
+
+* IPython reference: https://ipython.org/ipython-doc/stable/interactive/reference.html
+
+* NumPy tutorial: https://numpy.org/learn/
+
+* SciPy tutorial: https://docs.scipy.org/doc/scipy/tutorial/index.html
+
+
+* Matplotlib gallery: https://matplotlib.org/stable/gallery/
+
+
+* MayaVi: https://docs.enthought.com/mayavi/mayavi/examples.html

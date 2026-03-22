@@ -3,6 +3,10 @@
 ! MODULE_DOC: Runge-Kutta time advance, accurate to order itorder.
 ! MODULE_DOC: At the moment, itorder can be 1, 2, or 3.
 !
+!** AUTOMATIC CPARAM.INC GENERATION ****************************
+! CPARAM logical, parameter :: lcourant_dt = .true.
+!***************************************************************
+!
 module Timestep
 !
   use Cdata
@@ -57,12 +61,17 @@ module Timestep
       else
         call not_implemented('initialize_timestep','itorder= '//trim(itoa(itorder)))
       endif
-
+!
+!  Invoke automatic timestep calulation when dt=0 (initially).
+!
       ldt = (dt==0.)
-      lcourant_dt = .true.
-
+!
+!  If timestep is given, we reset dtmin to dt (which could be shorter than the default)
+!
+      if (dt/=0.) dtmin=dt
+!
       num_substeps = itorder
-
+!
     endsubroutine initialize_timestep
 !***********************************************************************
     subroutine time_step(f,df,p)
@@ -81,10 +90,12 @@ module Timestep
           solid_cells_timestep_second
       use Shear, only: advance_shear
       use Sub, only: set_dt, shift_dt
-      use GPU, only: after_timestep_gpu
+      use GPU, only: update_after_substep_gpu, split_update_gpu
+      use Mpicomm, only: mpiwtime
 !
       real, dimension (mx,my,mz,mfarray) :: f
       real, dimension (mx,my,mz,mvar) :: df
+      real :: start_time
       type (pencil_case) :: p
       real :: ds, dtsub
 !
@@ -187,14 +198,19 @@ module Timestep
 !  Advance deltay of the shear (and, optionally, perform shear advection
 !  by shifting all variables and their derivatives).
 !
-        if (lshear .and. .not. lgpu) then
-          call impose_floors_ceilings(f)
-          call update_ghosts(f)  ! Necessary for non-FFT advection but unnecessarily overloading FFT advection
+        if (lshear) then
+          if (.not. lgpu) call impose_floors_ceilings(f)
+          if (.not. lgpu) call update_ghosts(f)  ! Necessary for non-FFT advection but unnecessarily overloading FFT advection
           call advance_shear(f, df, dtsub)
         endif
 !
-      if (.not. lgpu) call update_after_substep(f,df,dtsub,llast)
-      if (lgpu) call after_timestep_gpu
+        start_time = mpiwtime()
+        if (lgpu) then
+          call update_after_substep_gpu
+        else
+          call update_after_substep(f,df,dtsub,llast)
+        endif
+        after_substep_sum_time = after_substep_sum_time + mpiwtime()-start_time
 !
         ! [PAB] according to MR this breaks the autotest.
         ! @Piyali: there must be a reason to add an additional global communication,
@@ -210,6 +226,7 @@ module Timestep
 !  Integrate operator split terms.
 !
     if (.not. lgpu)  call split_update(f)
+    if (lgpu)  call split_update_gpu(f)
 !
     endsubroutine time_step
 !***********************************************************************
@@ -283,12 +300,10 @@ module Timestep
 !***********************************************************************
     subroutine ode_timestep_first
 
-     if (lroot) then
-        if (itsub==1) then
-          df_ode = 0.0
-        else
-          df_ode=alpha_ts(itsub)*df_ode
-        endif
+      if (itsub==1) then
+        df_ode = 0.0
+      else
+        df_ode=alpha_ts(itsub)*df_ode
       endif
 
     endsubroutine ode_timestep_first
@@ -297,18 +312,13 @@ module Timestep
 
       use Special, only: dspecial_dt_ode
 
-      if (lroot) then
-        call dspecial_dt_ode
-      endif
+      call dspecial_dt_ode
 
     endsubroutine ode
 !***********************************************************************
     subroutine ode_timestep_second
 
-      use Mpicomm, only: mpibcast
-
-      if (lroot) f_ode(1:n_odevars) = f_ode(1:n_odevars) + dt_beta_ts(itsub)*df_ode
-      call mpibcast(f_ode,n_odevars)
+      f_ode(1:n_odevars) = f_ode(1:n_odevars) + dt_beta_ts(itsub)*df_ode
 
     endsubroutine ode_timestep_second
 !***********************************************************************

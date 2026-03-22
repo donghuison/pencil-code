@@ -537,6 +537,8 @@ module Particles_main
 !
       call particles_discrete_collisions
 !
+      call particles_diffusion(fp)
+!
 !  Adapt the number of particles in each grid cell to a desired number
 !
       if (lparticles_adaptation .and. llast) then
@@ -661,6 +663,9 @@ module Particles_main
       real, dimension (mx,my,mz,mfarray) :: f
       real, dimension (nx,ny,nz) :: rhs_poisson
       logical :: lcontinued
+!
+!  Call to set selfpotential for particles with lcontinued=T
+!  if it adds to rhs_poisson.
 !
       call calc_selfpotential_particles(f,rhs_poisson,lcontinued)
       call calc_selfpot_sinkparticles(f,rhs_poisson,fp,ineargrid)

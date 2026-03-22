@@ -1,1 +1,8 @@
 .tox
+
+htmlcov
+.coverage
+.coverage.*
+
+report.html
+report.json

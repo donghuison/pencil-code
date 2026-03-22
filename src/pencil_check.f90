@@ -42,7 +42,8 @@ module Pencil_check
 !
       use Equ, only: initialize_pencils, pde
       use General, only: random_number_wrapper, random_seed_wrapper, notanumber
-      use Mpicomm, only: mpireduce_and, mpireduce_or, mpibcast_logical, stop_it_if_any, MPI_COMM_WORLD
+      use Mpicomm, only: mpireduce_and, mpireduce_max, mpireduce_or, &
+                         mpibcast_logical, stop_it_if_any, MPI_COMM_PENCIL
 !
       real, dimension(mx,my,mz,mfarray) :: f
       real, dimension(mx,my,mz,mvar) :: df
@@ -50,7 +51,7 @@ module Pencil_check
       real, allocatable, dimension(:,:,:,:) :: df_ref, f_other
       real, allocatable, dimension(:) :: fname_ref
       real, dimension (nx) :: dt1_max_ref
-      integer :: i,j,k,penc,iv,nite
+      integer :: i,j,k,penc,iv,nite,k_fail,k_fail_allproc
       integer, dimension (mseed) :: iseed_org
       logical, dimension (mfarray) :: lfound_nan=.false.
       logical, dimension (mfarray) :: lfound_nan_loc=.false.
@@ -115,8 +116,8 @@ module Pencil_check
       do iv=1,mvar; do n=n1,n2; do m=m1,m2
         if (notanumber(df_ref(:,m,n,iv))) lfound_nan_loc(iv)=.true.
       enddo; enddo; enddo
-      call mpireduce_or(lfound_nan_loc,lfound_nan,mfarray,MPI_COMM_WORLD)
-      call mpibcast_logical(lfound_nan,mfarray,comm=MPI_COMM_WORLD)
+      call mpireduce_or(lfound_nan_loc,lfound_nan,mfarray,MPI_COMM_PENCIL)
+      call mpibcast_logical(lfound_nan,mfarray,comm=MPI_COMM_PENCIL)
       if (lroot) then
         do iv=1,mvar
           if (lfound_nan(iv)) then
@@ -209,7 +210,7 @@ f_loop:   do iv=1,mvar
           enddo f_loop
         endif
 !
-        call mpireduce_and(lconsistent,lconsistent_allproc,MPI_COMM_WORLD)
+        call mpireduce_and(lconsistent,lconsistent_allproc,MPI_COMM_PENCIL)
 !
         if (lroot) then
           if (penc>0) then
@@ -305,7 +306,7 @@ f_lop:  do iv=1,mvar
         enddo f_lop
       endif
 !
-      call mpireduce_and(lconsistent,lconsistent_allproc,MPI_COMM_WORLD)
+      call mpireduce_and(lconsistent,lconsistent_allproc,MPI_COMM_PENCIL)
       if (lroot) then
         if (.not. lconsistent_allproc) then
           print*, 'pencil_consistency_check: '// &
@@ -396,7 +397,7 @@ f_lop:  do iv=1,mvar
           if (.not.lconsistent) exit
         enddo
 !
-        call mpireduce_and(lconsistent,lconsistent_allproc,MPI_COMM_WORLD)
+        call mpireduce_and(lconsistent,lconsistent_allproc,MPI_COMM_PENCIL)
 !
 !  ref = result same as "correct" reference result
 !    d = swapped pencil set as diagnostic
@@ -491,18 +492,21 @@ f_lop:  do iv=1,mvar
 !
       lconsistent=.true.
       lconsistent_allproc=.false.
+      k_fail = 0
       do k=1,nname
         if (fname(k)/=fname_ref(k)) then
           lconsistent=.false.
+          k_fail=k
           exit
         endif
       enddo
 !
-      call mpireduce_and(lconsistent,lconsistent_allproc,MPI_COMM_WORLD)
+      call mpireduce_and(lconsistent,lconsistent_allproc,MPI_COMM_PENCIL)
+      call mpireduce_max(k_fail,k_fail_allproc,MPI_COMM_PENCIL)
       if (lroot) then
         if (.not. lconsistent_allproc) then
-          print*, 'pencil_consistency_check: '// &
-              'diagnostics depend on pencil initialization'
+          print*, 'pencil_consistency_check: diagnostic '//trim(cname(k_fail_allproc))// &
+                                             ' depends on pencil initialization'
           print*, '                          This is a serious problem '// &
               'that may show the use of'
           print*, '                          uninitialized pencils. Check '// &

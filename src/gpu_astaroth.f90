@@ -29,8 +29,8 @@ module GPU
   external get_farray_ptr_gpu_c
   external rhs_gpu_c
   external before_boundary_gpu_c
-  external after_timestep_gpu_c 
-  external source_function_and_opacity_gpu_c
+  external update_after_substep_gpu_c 
+  external radtransfer_gpu_c
   external load_farray_c
   external reload_gpu_config_c
   external test_rhs_c
@@ -41,24 +41,67 @@ module GPU
   external gpu_set_dt_c
   external torchtrain_c 
   external torchinfer_c
-  external calcq_gpu_c
   external get_gpu_reduced_vars_c
+  external test_bcs_c
+  external split_update_gpu_c
 
   integer, external :: update_on_gpu_arr_by_name_c
   integer, external :: update_on_gpu_scal_by_name_c
 
   !integer(KIND=ikind8) :: pFarr_GPU_in, pFarr_GPU_out
   type(C_PTR) :: pFarr_GPU_in, pFarr_GPU_out
+  ! Since on the GPU calculation of df and update of f happen without synchronization
+  ! of the decomposed portions of the subdomains (or different processes) we can't compute
+  ! dt 'on the fly' but take it from the previous timestep (calculated at the moment on
+  ! the first substep but the last would make more sense). This means to calculate rhs an extra time
+  ! on the first substep to compute dt as is done normally on the CPUs
+  logical :: lcpu_timestep_on_gpu=.false.
+  ! Whether we compute the timestep in single precision regardless of the precision of real or not.
+  ! We are a bit brave and do it by default in single since the exact value of the timestep
+  ! Should never be that important: your safety factors and other controls are surely more important
+  ! Then the neglibeble amount of round-off.
+  ! Anyways one is supposed to be able to turn it off for testing
+  logical :: lsingle_precision_timestep =.true.
+  ! Astaroth empirically finds the best kernel configuration parameters by running them with different 
+  ! options and picking the best one. Sparser autotuning means prune the parameter space more than 
+  ! usual by picking only the most likely ones (empirically gives for large grids the same as the 
+  ! larger search, but is considerably faster).
+  logical :: lac_sparse_autotuning=.true.
+  ! Whether df is 0 or the accumulated value at the start of the kernel.
+  ! For simplicity df is zero and then accumulated to the buffer, but sometimes you need to be careful like with
+  ! short stopping time approximation in dustvelocity (the only case we are aware at the moment where the difference matter
+  logical :: lcumulative_df_on_gpu=.false.
+  ! Placeholder
+  logical :: lskip_rtime_compilation=.false.
+  ! By default only pde variables and those aux variables that are registered to be always read are read from the device.
+  ! If this is true all variables are always read
+  logical :: lread_all_vars_from_device = .false.
+  ! Whether to use CUDA-aware MPI. If you have it you should always want to use it, but sometimes you do not have it or using
+  ! it is more unstable than routing the communication via the host yourself.
+  logical :: lcuda_aware_mpi=.true.
+  ! Whether to test the agreement of bcs on GPU and CPU
+  logical :: ltest_bcs =.false.
+  ! Whether to test the agreement of RHS on GPU and CPU
+  ! Will run both versions and compare the differences
+  logical :: ltest_rhs =.false.
+  ! At which timestep to perform the comparison
+  ! It is useful to be able to vary this in case some samples need some
+  ! integration time for some of the fields to have meaningful values
+  integer :: it_test_rhs = 1
 
   namelist /gpu_run_pars/ &
-        ltest_bcs,lac_sparse_autotuning,lcpu_timestep_on_gpu,lread_all_vars_from_device,lcuda_aware_mpi
+     ltest_bcs,lac_sparse_autotuning,lcpu_timestep_on_gpu,lsingle_precision_timestep,lcumulative_df_on_gpu,&
+     lread_all_vars_from_device,lcuda_aware_mpi,ltest_rhs,it_test_rhs
 
 contains
 !***********************************************************************
-  subroutine train_gpu(loss)
+  subroutine train_gpu(loss, itsub, t)
 
     real :: loss
-    call torchtrain_c(loss)
+    integer :: itsub 
+    real(KIND=rkind8), intent(IN) :: t
+
+    call torchtrain_c(loss, itsub, t)
 
   endsubroutine train_gpu 
 !***********************************************************************
@@ -74,9 +117,13 @@ contains
       use Mpicomm, only: MPI_COMM_PENCIL
 
       real, dimension(:,:,:,:), intent(IN) :: f
+      integer :: lread_all_vars_from_device_int
+      integer :: lcpu_timestep_on_gpu_int
 
       character(LEN=512) :: str
 !
+      if(ltest_rhs) lread_all_vars_from_device = .true.
+
       str=''
       if (lanelastic) str=trim(str)//', '//'anelastic'
       if (lboussinesq) str=trim(str)//', '//'boussinesq'
@@ -90,8 +137,6 @@ contains
       if (ldetonate) str=trim(str)//', '//'detonate'
       if (lopacity) str=trim(str)//', '//'opacity'
       if (lpointmasses) str=trim(str)//', '//'pointmasses'
-      if (lpoisson) str=trim(str)//', '//'poisson'
-      if (lselfgravity) str=trim(str)//', '//'selfgravity'
       if (lsolid_cells) str=trim(str)//', '//'solid_cells'
       if (lparticles) str=trim(str)//', '//'particles'
 
@@ -99,13 +144,18 @@ contains
                                     trim(str(3:))//'"')
 !
       if (dt<=0.) dt = dtmin
-      call initialize_gpu_c(f,MPI_COMM_PENCIL,t)
+
+      lread_all_vars_from_device_int = merge(1,0,lread_all_vars_from_device)
+      lcpu_timestep_on_gpu_int       = merge(1,0,lcpu_timestep_on_gpu)
+      call initialize_gpu_c(f,MPI_COMM_PENCIL,t,nt,lread_all_vars_from_device_int,&
+                            lcpu_timestep_on_gpu_int)
 !
 ! Load farray to gpu
 !
       if (nt>0) call load_farray_to_GPU(f)
 
   !print'(a,1x,Z0,1x,Z0)', 'pFarr_GPU_in,pFarr_GPU_out=', pFarr_GPU_in,pFarr_GPU_out
+      lverbose_performance_log = .true.
     endsubroutine initialize_GPU
 !**************************************************************************
     subroutine read_gpu_run_pars(iostat)
@@ -165,9 +215,8 @@ contains
       logical :: lrmv
       integer :: lrmv_int
 !
-      
       !TP: pass int since integers are more compatible with C than logical to booleans
-      if(lrmv) then
+      if (lrmv) then
         lrmv_int = 1
       else
         lrmv_int = 0
@@ -176,9 +225,9 @@ contains
 !
     endsubroutine before_boundary_gpu
 !**************************************************************************
-    subroutine after_timestep_gpu
-            call after_timestep_gpu_c
-    endsubroutine after_timestep_gpu
+    subroutine update_after_substep_gpu
+      call update_after_substep_gpu_c
+    endsubroutine update_after_substep_gpu
 !**************************************************************************
     subroutine gpu_set_dt
 !
@@ -255,7 +304,6 @@ contains
       real, dimension (mx,my,mz,mfarray), intent(OUT) :: f
       logical, optional :: nowait_
       logical :: nowait
-      integer :: i
 
       nowait = loptest(nowait_)
       if (nowait) then
@@ -312,25 +360,38 @@ contains
 
     endsubroutine update_on_gpu
 !**************************************************************************
-    subroutine calcQ_gpu(idir, dir, stop, unit_vec, lperiodic)
-
-      integer :: idir
-      integer, dimension(3) :: dir, stop
-      real, dimension(3) :: unit_vec
-      logical :: lperiodic
-
-      call calcQ_gpu_c(idir, dir, stop, unit_vec, lperiodic)
- 
-    endsubroutine calcQ_gpu
-!**************************************************************************
-    subroutine source_function_and_opacity_gpu(inu)
-            integer :: inu
-            call source_function_and_opacity_gpu_c(inu)
+    subroutine radtransfer_gpu
+      call radtransfer_gpu_c
     endsubroutine
 !**************************************************************************
     subroutine get_gpu_reduced_vars(dst)
       real, dimension(10) :: dst
       call get_gpu_reduced_vars_c(dst)
     endsubroutine get_gpu_reduced_vars
+!**************************************************************************
+    subroutine test_gpu_bcs
+            call test_bcs_c
+    endsubroutine test_gpu_bcs
+!**************************************************************************
+    subroutine split_update_gpu(f)
+      real, dimension (mx,my,mz,mfarray), intent(INOUT) :: f
+      call split_update_gpu_c(f)
+    endsubroutine split_update_gpu
+!**************************************************************************
+    subroutine pushpars2c(p_par)
+
+    use Syscalls, only: copy_addr
+    use General , only: pos_in_array, string_to_enum
+
+    integer, parameter :: n_pars=50
+    integer(KIND=ikind8), dimension(n_pars) :: p_par
+
+    call copy_addr(lac_sparse_autotuning,p_par(2)) ! bool
+    call copy_addr(lskip_rtime_compilation,p_par(3)) ! bool
+    call copy_addr(lcumulative_df_on_gpu,p_par(4)) ! bool
+    call copy_addr(lcuda_aware_mpi,p_par(6)) ! bool
+    call copy_addr(ltest_bcs,p_par(7)) ! bool
+    call copy_addr(lsingle_precision_timestep,p_par(8)) ! bool
+    endsubroutine pushpars2c
 !**************************************************************************
 endmodule GPU

@@ -1,0 +1,99 @@
+Sample layout for a simulation with a grid of [nx,ny,nz] grid points per processor.
+There are (px,py,pz) processors along the x, y, and z direction.
+The number of ghost layers is set here to NG and is of course variable in reality.
+This results in a global grid size of mxgrid=nx*px+2*NG in a monolithic layout.
+Likewise, the global grid size without grid cells is defined as nxgrid=nx*px.
+The chunk dimensions are denoted in square brackets.
+The group and dataset structure and dimensions would be as follows:
+
+data/
+	ax	[nx,ny,nz],(px,py,pz)
+	ay	[nx,ny,nz],(px,py,pz)
+	az	[nx,ny,nz],(px,py,pz)
+	lnTT	[nx,ny,nz],(px,py,pz)
+	lnrho	[nx,ny,nz],(px,py,pz)
+	ux	[nx,ny,nz],(px,py,pz)
+	uy	[nx,ny,nz],(px,py,pz)
+	uz	[nx,ny,nz],(px,py,pz)
+ghost/
+	ax/
+		x_lower		[ 3,ny,nz],(py,pz)
+		x_upper		[ 3,ny,nz],(py,pz)
+		y_lower		[nx, 3,nz],(px,pz)
+		y_upper		[nx, 3,nz],(px,pz)
+		z_lower		[nx,ny, 3],(px,py)
+		z_upper		[nx,ny, 3],(px,py)
+		x_lower_y_lower	[ 3, 3,nz],(pz)
+		x_upper_y_lower	[ 3, 3,nz],(pz)
+		x_lower_y_upper	[ 3, 3,nz],(pz)
+		x_upper_y_upper	[ 3, 3,nz],(pz)
+		x_lower_z_lower	[ 3,ny, 3],(py)
+		x_upper_z_lower	[ 3,ny, 3],(py)
+		x_lower_z_upper	[ 3,ny, 3],(py)
+		x_upper_z_upper	[ 3,ny, 3],(py)
+		y_lower_z_lower	[nx, 3, 3],(px)
+		y_upper_z_lower	[nx, 3, 3],(px)
+		y_lower_z_upper	[nx, 3, 3],(px)
+		y_upper_z_upper	[nx, 3, 3],(px)
+		x_lower_y_lower_z_lower	[3,3,3]
+		x_upper_y_lower_z_lower	[3,3,3]
+		x_lower_y_upper_z_lower	[3,3,3]
+		x_upper_y_upper_z_lower	[3,3,3]
+		x_lower_y_lower_z_upper	[3,3,3]
+		x_upper_y_lower_z_upper	[3,3,3]
+		x_lower_y_upper_z_upper	[3,3,3]
+		x_upper_y_upper_z_upper	[3,3,3]
+	ay/
+		...
+	.../
+
+
+Alternatively, some of these shapes are geometrically the same and can be combined.
+The chunk size would be the size of the first three dimensions, only.
+Each chunk is a separate write operation, usually issued from a different processor.
+(L=lower, U=upper)
+
+ghost/
+	ax/
+		x	[ 3,ny,nz],(py,pz),2
+		y	[nx, 3,nz],(px,pz),2
+		z	[nx,ny, 3],(px,py),2
+					=> 1=L, 2=U
+		xy	[ 3, 3,nz],(pz),4
+		xz	[ 3,ny, 3],(py),4
+		yz	[nx, 3, 3],(px),4
+					=> 1=LL, 2=UL, 3=LU, 4=UU
+		xyz	[3,3,3],8
+					=> 1=LLL, 2=ULL, 3=LUL, 4=UUL, 5=LLU, 6=ULU, 7=LUU, 8=UUU
+	.../
+
+
+One more alternative is to store the ghost layers collectively for each direction,
+because the amount of data is relatively small. Note that x means the yz-boundary layer.
+Note also that x contains all the y- and z-edges and all 8 corners, while y contains only
+the x-edges without any corners. The z (xy-boundary) layer contains only the inner xy-grid:
+
+ghost/
+	ax/
+		x	(     3,mygrid,mzgrid),2
+		y	(nxgrid,     3,mzgrid),2
+		z	[    nx,    ny,     3],(px,py),2
+					=> 1=L, 2=U
+	.../
+
+The advantage is here that the reading of the ghosts will be faster.
+As a trade-off, x and y have to be non-chunky datasets because the data portion
+per processor is not the same between outer and inner processors.
+The z layer could be chunky, but the resulting speed-up is probably negligible.
+
+
+PS: It seems beneficial to do an independent multi-chucked IO to write the f-array.
+See discussion at page 81-86: https://www.alcf.anl.gov/files/Parallel_HDF5_1.pdf
+This means setting H5Pset_dxpl_mpio() to H5FD_MPIO_COLLECTIVE and
+setting H5Pset_dxpl_mpio_collective_opt() to H5FD_MPIO_INDIVIDUAL_IO.
+The reason is that all processors would of course take part in writing the f-array,
+but in fact only one processor writes to each chunk, hence this is individual MPI-IO.
+
+The respective call to activate the chunking should be:
+CALL h5pcreate_f(H5P_DATASET_CREATE_F, param_list_id, h5_error)
+CALL h5pset_chunk_f(param_list_id, dimensionality, chunk_dims, h5_error)

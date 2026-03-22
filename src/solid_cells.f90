@@ -13,7 +13,6 @@
 !***************************************************************
 module Solid_Cells
 !
-  use Cparam
   use Cdata
   use General, only: keep_compiler_quiet
   use Messages
@@ -1275,7 +1274,7 @@ module Solid_Cells
 !  Set the boundary values of the solid area such that we get a
 !  correct fluid-solid interface.
 !
-!  30-mar-15/Jørgen+nils: coded
+!  30-mar-15/Joergen+nils: coded
 !
       real, dimension(mx,my,mz,mfarray) :: f
       logical :: bax, bay, baz

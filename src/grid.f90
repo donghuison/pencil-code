@@ -49,6 +49,7 @@ module Grid
     module procedure calc_pencils_grid_std
   endinterface calc_pencils_grid
 !
+
   contains
 !***********************************************************************
     !subroutine construct_grid(x,y,z,dx,dy,dz,x00,y00,z00)
@@ -121,6 +122,7 @@ module Grid
       dx = Lx / merge(nxgrid, max(nxgrid-1,1), lperi(1))
       dy = Ly / merge(nygrid, max(nygrid-1,1), (lperi(2).or.lpole(2)))
       dz = Lz / merge(nzgrid, max(nzgrid-1,1), lperi(3))
+
 !
 !  Shift the lower boundary if requested, but only for periodic directions.
 !
@@ -432,7 +434,29 @@ module Grid
             enddo
           endif
 !
-        case default
+       case ('band','sus')
+          a = 1.0
+          if (lsymmgrid(1)) then
+            xi1star=nxgrid/2
+          else
+            xi1star=find_star_bisection(a*xi1lo,a*xi1up,x00,x00+Lx,xyz_star(1),grid_func(1),&
+                 param2=(/dxi_fact(1), trans_width(1), trans_delta(1)/))/a
+          endif
+          call grid_profile(a*(xi1    -xi1star),grid_func(1),    g1,g1der1,g1der2,&
+               param2=(/dxi_fact(1), trans_width(1), trans_delta(1)/))
+          call grid_profile(a*(xi1lo  -xi1star),grid_func(1),  g1lo,              &
+               param2=(/dxi_fact(1), trans_width(1), trans_delta(1)/))
+          call grid_profile(a*(xi1up  -xi1star),grid_func(1),  g1up,              &
+               param2=(/dxi_fact(1), trans_width(1), trans_delta(1)/))
+          call grid_profile(a*(xi1proc-xi1star),grid_func(1),g1proc,              &
+               param2=(/dxi_fact(1), trans_width(1), trans_delta(1)/))
+!
+          x      = x00+Lx*(g1  -  g1lo)/(g1up-g1lo)
+          xprim  =     Lx*(g1der1*a   )/(g1up-g1lo)
+          xprim2 =     Lx*(g1der2*a**2)/(g1up-g1lo)
+          g1proc = x00 + Lx * (g1proc - g1lo) / (g1up - g1lo)
+          
+       case default
           call fatal_error('construct_grid', &
                            'No such x grid function: '//trim(grid_func(1)))
         endselect
@@ -628,7 +652,29 @@ module Grid
           yprim2=    Ly*g2der2/(g2up-g2lo)
           g2proc = y00 + Ly * (g2proc - g2lo) / (g2up - g2lo)
 !
-        case default
+       case ('band','sus')
+          a = 1.0
+          if (lsymmgrid(2)) then 
+            xi2star=nygrid/2
+          else
+             xi2star=find_star_bisection(a*xi2lo,a*xi2up,y00,y00+Ly,xyz_star(2),grid_func(2),&
+                  param2=(/dxi_fact(2), trans_width(2), trans_delta(2)/))/a
+          endif
+          call grid_profile(a*(xi2    -xi2star),grid_func(2),    g2,g2der1,g2der2,&
+               param2=(/dxi_fact(2), trans_width(2), trans_delta(2)/))
+          call grid_profile(a*(xi2lo  -xi2star),grid_func(2),  g2lo,              &
+               param2=(/dxi_fact(2), trans_width(2), trans_delta(2)/))
+          call grid_profile(a*(xi2up  -xi2star),grid_func(2),  g2up,              &
+               param2=(/dxi_fact(2), trans_width(2), trans_delta(2)/))
+          call grid_profile(a*(xi2proc-xi2star),grid_func(2),g2proc,              &
+               param2=(/dxi_fact(2), trans_width(2), trans_delta(2)/))
+!
+          y      = y00+Ly*(g2  -  g2lo)/(g2up-g2lo)
+          yprim  =     Ly*(g2der1*a   )/(g2up-g2lo)
+          yprim2 =     Ly*(g2der2*a**2)/(g2up-g2lo)
+          g2proc = y00 + Ly * (g2proc - g2lo) / (g2up - g2lo)
+
+       case default
           call fatal_error('construct_grid', &
                            'No such y grid function: '//trim(grid_func(2)))
 !
@@ -985,7 +1031,7 @@ module Grid
       dxmin=dxmin_x
 !
       if (dxmin == 0) &
-        call fatal_error ("initialize_grid", "check Lx,Ly,Lz: is one of them 0?", .true.)
+        call fatal_error ("initialize_grid", "dxmin==0; check Lx,Ly,Lz: is one of them 0?", .true.)
 !
       dxmax = maxval( (/dxmax_x, dxmax_y, dxmax_z, epsilon(dx)/), &
                 MASK=((/nxgrid, nygrid, nzgrid, 2/) > 1) )
@@ -1451,10 +1497,27 @@ module Grid
       if (lroot.or..not.lcollective_IO) call remove_prof('z')
       lwrite_prof=.true.
 
-      if (lslope_limit_diff) then
-        if (lroot) print*,'initialize_grid: Set up half grid x12, y12, z12'
-        call generate_halfgrid(x12,y12,z12)
-      endif
+      if (lslope_limit_diff) call generate_halfgrid
+!
+!  Scalar versions of the inverse of dx
+!  Not strictly needed but give a slightly
+!  performance boost on equidistant cartesian
+!
+      dx1_scalar = dx_1(nghost)
+      dy1_scalar = dy_1(nghost)
+      dz1_scalar = dz_1(nghost)
+
+      dx2_scalar = dx1_scalar*dx1_scalar
+      dy2_scalar = dy1_scalar*dy1_scalar
+      dz2_scalar = dz1_scalar*dz1_scalar
+
+      dx4_scalar = dx2_scalar*dx2_scalar
+      dy4_scalar = dy2_scalar*dy2_scalar
+      dz4_scalar = dz2_scalar*dz2_scalar
+
+      dx6_scalar = dx4_scalar*dx2_scalar
+      dy6_scalar = dy4_scalar*dy2_scalar
+      dz6_scalar = dz4_scalar*dz2_scalar
 !
     endsubroutine initialize_grid
 !***********************************************************************
@@ -1859,7 +1922,13 @@ if (abs(sum(ws)-1.)>1e-7) write(iproc+40,'(6(e12.5,1x), e12.5)') ws, sum(ws)
 !cylindrical distance (pomega)
         if (lpenc_loc(i_rcyl_mn))  p%rcyl_mn = sqrt(x(l1:l2)**2+y(m)**2)
 !azimuthal angle (phi)
-        if (lpenc_loc(i_phi_mn))   p%phi_mn  = atan2(y(m),x(l1:l2))
+        if (lpenc_loc(i_phi_mn)) then
+          if (y(m)==0) then
+            p%phi_mn  = 0.
+          else
+            p%phi_mn  = atan2(y(m),x(l1:l2))
+          endif
+        endif
 !inverse cylindrical distance 1/pomega
         if (lpenc_loc(i_rcyl_mn1)) p%rcyl_mn1=1./max(p%rcyl_mn,tini)
 !inverse spherical distance 1/r
@@ -1940,7 +2009,7 @@ if (abs(sum(ws)-1.)>1e-7) write(iproc+40,'(6(e12.5,1x), e12.5)') ws, sum(ws)
 !
     endsubroutine calc_pencils_grid_pencpar
 !***********************************************************************
-    subroutine grid_profile_0D(xi,grid_func,g,gder1,gder2,param,dxyz,xistep,delta)
+    subroutine grid_profile_0D(xi,grid_func,g,gder1,gder2,param,dxyz,xistep,delta,param2)
 !
 !  Scalar wrapper for the "elemental" subroutine 'grid_profile_1D'.
 !
@@ -1953,13 +2022,14 @@ if (abs(sum(ws)-1.)>1e-7) write(iproc+40,'(6(e12.5,1x), e12.5)') ws, sum(ws)
       real, optional    :: param
       real, optional, dimension(3) :: dxyz
       real, optional, dimension(2) :: xistep, delta
+      real, optional, dimension(3) :: param2
 !
-      intent(in)  :: xi, grid_func, param, dxyz, xistep, delta
+      intent(in)  :: xi, grid_func, param, dxyz, xistep, delta, param2
       intent(out) :: g, gder1, gder2
 !
       real, dimension(1) :: tmp_g, tmp_gder1, tmp_gder2
 !
-      call grid_profile ((/xi/), grid_func, tmp_g, tmp_gder1, tmp_gder2, param, dxyz, xistep, delta)
+      call grid_profile ((/xi/), grid_func, tmp_g, tmp_gder1, tmp_gder2, param, dxyz, xistep, delta, param2)
 !
       g = tmp_g(1)
       if (present (gder1)) gder1 = tmp_gder1(1)
@@ -1967,7 +2037,7 @@ if (abs(sum(ws)-1.)>1e-7) write(iproc+40,'(6(e12.5,1x), e12.5)') ws, sum(ws)
 !
     endsubroutine grid_profile_0D
 !***********************************************************************
-    subroutine grid_profile_1D(xi,grid_func,g,gder1,gder2,param,dxyz,xistep,delta)
+    subroutine grid_profile_1D(xi,grid_func,g,gder1,gder2,param,dxyz,xistep,delta,param2)
 !
 !  Specify the functional form of the grid profile function g
 !  and calculate g,g',g''.
@@ -1982,9 +2052,19 @@ if (abs(sum(ws)-1.)>1e-7) write(iproc+40,'(6(e12.5,1x), e12.5)') ws, sum(ws)
       real, optional                        :: param
       real, optional, dimension(3) :: dxyz
       real, optional, dimension(2) :: xistep,delta
+      real, optional, dimension(3) :: param2
       real :: m
+      real :: ampl,width,deltai,width_cells,delta_cells
+      real, dimension(size(xi,1))           :: arg1,arg2,band,dx_ratio
+      integer :: i
 !
-      intent(in)  :: xi,grid_func,param,dxyz,xistep,delta
+      real :: alpha, w
+      real :: xc        ! center of refined region (from find_star)
+      real :: xa         ! local shifted coordinate
+      real :: sa, sb, sc  ! SUS cubic transition variables
+      real :: g_mw, g_pw, g_wd ! mapping values at boundaries for continuity
+!
+      intent(in)  :: xi,grid_func,param,dxyz,xistep,delta,param2
       intent(out) :: g,gder1,gder2
 !
       select case (grid_func)
@@ -2191,6 +2271,31 @@ if (abs(sum(ws)-1.)>1e-7) write(iproc+40,'(6(e12.5,1x), e12.5)') ws, sum(ws)
           endif
         endif
 !
+     case ('band')
+
+        ampl   = param2(1) ! refinement amplitude 
+        width  = param2(2) ! band width (in cells)
+        deltai = param2(3) ! edge smoothness (in cells)
+
+        arg1 = (xi + width*0.5) / deltai
+        arg2 = (xi - width*0.5) / deltai
+        
+        g = xi - (1./ampl - 1.) * 0.5 * deltai * ( log(cosh(arg2)) - log(cosh(arg1)) )
+        
+        if (present(gder1)) then
+           gder1 = 1. - (1./ampl-1.) * 0.5 * (tanh(arg2) - tanh(arg1))
+        endif
+        if (present(gder2)) then
+           gder2 = (1./ampl - 1.) * 0.5 * ((1./cosh(arg1))**2 / deltai - (1./cosh(arg2))**2 / deltai)
+        endif
+!
+     case ('sus')
+        if (size(xi)>1) then
+          call sus_map_1D(xi,param2,g,gder1,gder2)
+        else
+          call sus_map_0D(xi(1),param2,g(1),gder1(1),gder2(1))
+        endif
+!
       case default
         call not_implemented('grid_profile_1D',"grid function: '"//trim(grid_func)//"'")
 !
@@ -2198,7 +2303,217 @@ if (abs(sum(ws)-1.)>1e-7) write(iproc+40,'(6(e12.5,1x), e12.5)') ws, sum(ws)
 !
     endsubroutine grid_profile_1D
 !***********************************************************************
-    function find_star(xi_lo,xi_up,x_lo,x_up,x_star,grid_func) result (xi_star)
+    subroutine sus_map_1D(xi,param2,g,gder1,gder2)
+
+      real, dimension(:)                    :: xi
+      real, dimension(size(xi,1))           :: g
+      real, dimension(size(xi,1)), optional :: gder1,gder2
+      real, dimension(3) :: param2
+      
+      real :: ampl,width_cells,delta_cells
+      real, dimension(size(xi,1)) :: arg1,arg2
+      integer :: i
+!      
+      real :: alpha, w
+      real :: xa          ! local shifted coordinate      
+      real :: sa, sb, sc  ! SUS cubic transition variables 
+      real :: g_mw, g_pw, g_wd ! mapping values at boundaries for continuity
+!
+      intent(in)  :: xi,param2
+      intent(out) :: g,gder1,gder2
+      
+      ampl         = param2(1) ! refinement amplitude
+      width_cells  = param2(2) ! band width (in cells)  
+      delta_cells  = param2(3) ! edge smoothness (in cells)
+
+      w     = 0.5 * width_cells
+      alpha = 1.0 - 1.0 / ampl
+
+      ! initialize outputs
+
+      g = xi
+      if (present(gder1)) gder1 = 1.0
+      if (present(gder2)) gder2 = 0.0
+
+      ! Precompute constants
+      g_mw = (-w) - alpha*delta_cells*(1.0 - 0.5)
+      g_pw = g_mw + (1.0/ampl)*(2.0*w)
+      g_wd = g_pw + (1.0/ampl)*delta_cells + alpha*delta_cells*0.5
+      
+      ! loop over xi
+      do i = 1, size(xi)
+         xa = xi(i)
+         ! ---- LEFT OUTER ----
+         if (xa < -w - delta_cells) then
+            g(i) = xa
+            if (present(gder1)) gder1(i) = 1.0
+            if (present(gder2)) gder2(i) = 0.0
+
+         ! ---- LEFT TRANSITION ----
+         else if (xa < -w) then
+            sa = (xa + w + delta_cells)/delta_cells
+            g(i) = xa - alpha*delta_cells*(sa**3 - 0.5*sa**4)
+            if (present(gder1)) then
+               sb  = 3.0*sa**2 - 2.0*sa**3
+               gder1(i) = 1.0 - alpha*sb
+            endif
+            if (present(gder2)) then
+               sc = 6.0*sa - 6.0*sa**2
+               gder2(i) = -alpha*sc/delta_cells
+            endif
+
+         ! ---- CORE ----
+         else if (xa <= w) then
+            g(i) = g_mw + (1.0/ampl)*(xa + w)
+            if (present(gder1)) gder1(i) = 1.0/ampl
+            if (present(gder2)) gder2(i) = 0.0
+            
+         ! ---- RIGHT TRANSITION ----
+         else if (xa <= w + delta_cells) then
+            sa = (xa - w)/delta_cells
+            g(i) = g_pw + (1.0/ampl)*(xa - w) + alpha*delta_cells*(sa**3 - 0.5*sa**4)
+            if (present(gder1)) then
+               sb  = 3.0*sa**2 - 2.0*sa**3
+               gder1(i) = 1.0/ampl + alpha*sb
+            endif
+            if (present(gder2)) then
+               sc = 6.0*sa - 6.0*sa**2
+               gder2(i) = alpha*sc/delta_cells
+            endif
+
+         ! ---- RIGHT OUTER ----
+         else
+            g(i)  = g_wd + (xa - (w + delta_cells))
+            if (present(gder1)) gder1(i) = 1.0
+            if (present(gder2)) gder2(i) = 0.0
+         end if
+      end do
+!
+    endsubroutine sus_map_1D
+!***********************************************************************
+    subroutine sus_map_0D(xi,param2,g,gder1,gder2)
+
+      real, intent(in)  :: xi
+      real  :: ampl,width_cells,delta_cells
+      real, intent(out) :: g
+      real, optional, intent(out) :: gder1,gder2
+      real, dimension(3) :: param2
+      real :: w, alpha
+      real :: xa, sa, sb, sc
+      real :: g_mw, g_pw, g_wd
+
+      ampl         = param2(1) ! refinement amplitude
+      width_cells  = param2(2) ! band width (in cells)      
+      delta_cells  = param2(3) ! edge smoothness (in cells)
+      
+      w     = 0.5*width_cells
+      alpha = 1.0 - 1.0/ampl
+      xa    = xi
+
+      g_mw = (-w) - alpha*delta_cells*(1.0 - 0.5)
+      g_pw = g_mw + (1.0/ampl)*(2.0*w)
+      g_wd = g_pw + (1.0/ampl)*delta_cells + alpha*delta_cells*0.5
+      
+      ! ---- LEFT OUTER ----
+      if (xa < -w - delta_cells) then
+         g = xa
+         if (present(gder1)) gder1 = 1.0
+         if (present(gder2)) gder2 = 0.0
+         
+      ! ---- LEFT TRANSITION ----
+      else if (xa < -w) then
+         sa = (xa + w + delta_cells)/delta_cells
+         g  = xa - alpha*delta_cells*(sa**3 - 0.5*sa**4)
+         if (present(gder1)) then
+            sb = 3.0*sa**2 - 2.0*sa**3
+            gder1 = 1.0 - alpha*sb
+         endif
+         if (present(gder2)) then
+            sc = 6.0*sa - 6.0*sa**2
+            gder2 = -alpha*sc/delta_cells
+         endif
+         
+      ! ---- CORE ----
+      else if (xa <= w) then
+         g = g_mw + (1.0/ampl)*(xa + w)
+         if (present(gder1)) gder1 = 1.0/ampl
+         if (present(gder2)) gder2 = 0.0
+
+      ! ---- RIGHT TRANSITION ----
+      else if (xa <= w + delta_cells) then
+         sa = (xa - w)/delta_cells
+
+         g = g_pw + (1.0/ampl)*(xa - w) + alpha*delta_cells*(sa**3 - 0.5*sa**4)
+         if (present(gder1)) then
+            sb = 3.0*sa**2 - 2.0*sa**3
+            gder1 = 1.0/ampl + alpha*sb
+         endif
+         if (present(gder2)) then
+            sc = 6.0*sa - 6.0*sa**2
+            gder2 = alpha*sc/delta_cells
+         endif
+
+      ! ---- RIGHT OUTER ----
+      else
+         g = g_wd + (xa - (w + delta_cells))
+         if (present(gder1)) gder1 = 1.0
+         if (present(gder2)) gder2 = 0.0
+      end if
+
+    end subroutine sus_map_0D
+!***********************************************************************
+    function find_star_bisection(xi_lo,xi_up,x_lo,x_up,x_star,grid_func,param2) result(xi_star)
+
+      real, intent(in) :: xi_lo, xi_up
+      real, intent(in) :: x_lo, x_up, x_star
+      character(len=*), intent(in) :: grid_func
+      real, optional, dimension(3) :: param2
+
+      real :: xi_star
+      real :: a, b, mid
+      real :: g_lo, g_up, g0
+      real :: f_a, f_mid
+      real :: tol
+      integer :: it
+      integer, parameter :: maxit=200
+
+      tol = max(epsi*(xi_up-xi_lo), epsi)
+
+      a = xi_lo
+      b = xi_up
+
+      ! ---- evaluate f(a)
+      call grid_profile(0.0, grid_func, g0, param2=param2)
+      call grid_profile(xi_lo-a, grid_func, g_lo, param2=param2)
+      call grid_profile(xi_up-a, grid_func, g_up, param2=param2)
+
+      f_a = x_lo + (x_up-x_lo)*(g0 - g_lo)/(g_up - g_lo) - x_star
+
+      do it = 1, maxit
+
+         mid = 0.5*(a + b)
+
+         call grid_profile(xi_lo-mid, grid_func, g_lo, param2=param2)
+         call grid_profile(xi_up-mid, grid_func, g_up, param2=param2)
+
+         f_mid = x_lo + (x_up-x_lo)*(g0 - g_lo)/(g_up - g_lo) - x_star
+
+         if (abs(b-a) < tol) exit
+
+         if (f_a*f_mid < 0.0) then
+            b = mid
+         else
+            a = mid
+            f_a = f_mid
+         endif
+
+      end do
+
+      xi_star = 0.5*(a + b)
+
+    end function find_star_bisection
+!***********************************************************************
+    function find_star(xi_lo,xi_up,x_lo,x_up,x_star,grid_func,param2) result (xi_star)
 !
 !  Finds the xi that corresponds to the inflection point of the grid-function
 !  by means of a newton-raphson root-finding algorithm.
@@ -2215,6 +2530,7 @@ if (abs(sum(ws)-1.)>1e-7) write(iproc+40,'(6(e12.5,1x), e12.5)') ws, sum(ws)
       integer, parameter :: maxit=1000
       logical :: lreturn
       integer :: it
+      real, optional, dimension(3) :: param2
 !
       if (xi_lo>=xi_up) &
           call fatal_error('find_star','xi1 >= xi2 -- this should not happen')
@@ -2226,8 +2542,8 @@ if (abs(sum(ws)-1.)>1e-7) write(iproc+40,'(6(e12.5,1x), e12.5)') ws, sum(ws)
 !
       do it=1,maxit
 !
-        call grid_profile(xi_lo-xi_star,grid_func,g_lo,gder_lo)
-        call grid_profile(xi_up-xi_star,grid_func,g_up,gder_up)
+        call grid_profile(xi_lo-xi_star,grid_func,g_lo,gder_lo,param2=param2)
+        call grid_profile(xi_up-xi_star,grid_func,g_up,gder_up,param2=param2)
 !
         f   =-(x_up-x_star)*g_lo   +(x_lo-x_star)*g_up
         fder= (x_up-x_star)*gder_lo-(x_lo-x_star)*gder_up
@@ -2253,6 +2569,7 @@ if (abs(sum(ws)-1.)>1e-7) write(iproc+40,'(6(e12.5,1x), e12.5)') ws, sum(ws)
     subroutine real_to_index(n, x, xi)
 !
 !  Transforms coordinates in real space to those in index space.
+!  In the calling code, x corresponds to the fp array.
 !
 !  10-sep-15/ccyang: coded.
 !
@@ -2409,7 +2726,7 @@ if (abs(sum(ws)-1.)>1e-7) write(iproc+40,'(6(e12.5,1x), e12.5)') ws, sum(ws)
 !  08-may-12/ccyang: include dx_1, dx_tilde, ... arrays
 !  25-feb-13/ccyang: construct global coordinates including ghost cells.
 !
-      use Mpicomm, only: mpisend_real,mpirecv_real,mpibcast_real, mpiallreduce_sum_int, MPI_COMM_WORLD
+      use Mpicomm, only: mpisend_real,mpirecv_real,mpibcast_real, mpiallreduce_sum_int, MPI_COMM_PENCIL
       use General, only: loptest, find_proc
 !
       logical, optional :: lprecise_symmetry
@@ -2474,9 +2791,9 @@ if (abs(sum(ws)-1.)>1e-7) write(iproc+40,'(6(e12.5,1x), e12.5)') ws, sum(ws)
 !
       if (loptest(lprecise_symmetry)) call symmetrize_grid(xgrid,nxgrid,1)
 
-      call mpibcast_real(xgrid,nxgrid,comm=MPI_COMM_WORLD)
-      call mpibcast_real(dx1grid,nxgrid,comm=MPI_COMM_WORLD)
-      call mpibcast_real(dxtgrid,nxgrid,comm=MPI_COMM_WORLD)
+      call mpibcast_real(xgrid,nxgrid,comm=MPI_COMM_PENCIL)
+      call mpibcast_real(dx1grid,nxgrid,comm=MPI_COMM_PENCIL)
+      call mpibcast_real(dxtgrid,nxgrid,comm=MPI_COMM_PENCIL)
 !
 !  Serial y-array
 !
@@ -2601,9 +2918,21 @@ if (abs(sum(ws)-1.)>1e-7) write(iproc+40,'(6(e12.5,1x), e12.5)') ws, sum(ws)
           dline_1(:,2) = rcyl_mn1 * dy_1(m)
           dline_1(:,3) = dz_1(n)
         else if (lcartesian_coords) then
-          dline_1(:,1) = dx_1(l1:l2)
-          dline_1(:,2) = dy_1(m)
-          dline_1(:,3) = dz_1(n)
+          if (lequidist(1)) then
+            dline_1(:,1) = dx1_scalar
+          else
+            dline_1(:,1) = dx_1(l1:l2)
+          endif
+          if (lequidist(2)) then
+            dline_1(:,2) = dy1_scalar
+          else
+            dline_1(:,2) = dy_1(m)
+          endif
+          if (lequidist(3)) then
+            dline_1(:,3) = dz1_scalar
+          else
+            dline_1(:,3) = dz_1(n)
+          endif
         else if (lpipe_coords) then
           dline_1(:,1) = dx_1(l1:l2)
           dline_1(:,2) = dy_1(m)
@@ -2736,14 +3065,11 @@ if (abs(sum(ws)-1.)>1e-7) write(iproc+40,'(6(e12.5,1x), e12.5)') ws, sum(ws)
 
     endsubroutine grid_bound_data
 !***********************************************************************
-    subroutine generate_halfgrid(x12,y12,z12)
+    subroutine generate_halfgrid
 !
 ! x[l1:l2]+0.5/dx_1[l1:l2]-0.25*dx_tilde[l1:l2]/dx_1[l1:l2]^2
 !
-      real, dimension (mx), intent(out) :: x12
-      real, dimension (my), intent(out) :: y12
-      real, dimension (mz), intent(out) :: z12
-!
+      if (lroot) print*,'initialize_grid: Set up half grid x12, y12, z12'
       if (nxgrid == 1) then
         x12 = x
       else
@@ -2755,6 +3081,7 @@ if (abs(sum(ws)-1.)>1e-7) write(iproc+40,'(6(e12.5,1x), e12.5)') ws, sum(ws)
       else
         y12 = y + 0.5/dy_1 - 0.25*dy_tilde/dy_1**2
       endif
+      if (lspherical_coords) sinth12 = sin(y12)
 !
       if (nzgrid == 1) then
         z12 = z

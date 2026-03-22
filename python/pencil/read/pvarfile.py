@@ -73,12 +73,12 @@ def pvar(*args, **kwargs):
     >>> print(pvar.pvx.shape)
     """
 
-    from pencil.sim import __Simulation__
+    from pencil.sim import Simulation
 
     started = None
 
     for a in args:
-        if isinstance(a, __Simulation__):
+        if isinstance(a, Simulation):
             started = a.started()
             break
 
@@ -119,8 +119,7 @@ class ParticleData(object):
         """
 
     def keys(self):
-        for i in self.__dict__.keys():
-            print(i)
+        return list(self.__dict__.keys())
 
     def read(
         self,

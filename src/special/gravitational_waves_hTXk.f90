@@ -39,7 +39,14 @@
 ! MAUX CONTRIBUTION 18
 !
 ! PENCILS PROVIDED stress_ij(6)
-! PENCILS EXPECTED gphi(3)
+! PENCILS EXPECTED gphi(3), gpsi(3)
+!
+!** AUTOMATIC REFERENCE-LINK.TEX GENERATION ********************
+! Declare relevant citations from pencil-code/doc/citations/ref.bib for this module.
+! The entries are taken from pencil-code/doc/citations/notes.tex
+!
+! 2020GApFD.114..130R,%RoperPol+ "The timestep constraint in solving the gravitational wave equations sourced by hydromagnetic ..."
+! 2020PhRvD.102h3512R,%RoperPol+ "Numerical simulations of gravitational waves from early-universe ..."
 !
 !***************************************************************
 !
@@ -74,7 +81,6 @@
 !
 module Special
 !
-  use Cparam
   use Cdata
   use Initcond
   use General, only: keep_compiler_quiet
@@ -94,24 +100,24 @@ module Special
   character (len=labellen) :: aux_stress='stress', idelkt='jump', ihorndeski_time='const'
   real :: amplGW=0., amplGW2=0., amplGWX=0., kpeak_GW=1., initpower_gw=0., initpower2_gw=-4., cutoff_GW=500.
   real :: trace_factor=0., stress_prefactor, fourthird_factor, EGWpref
-  real :: nscale_factor_conformal=1., tshift=0.
+  real :: nscale_factor_conformal=1., tshift=0., om2_min_factor=1e-4 !(=keep this for now, but in future, we want to put it to 0. exactly)
   real :: t_equality=3.789E11, t_acceleration=1.9215E13, t_0=1.3725E13
   real :: k1hel=0., k2hel=1., kgaussian_GW=0., ncutoff_GW=2., relhel_GW=0.
   real, pointer :: ddotam
-  logical, pointer :: lconservative
+  logical, pointer :: lconservative, lwaterfall, lflrw
   logical :: lno_transverse_part=.false., lgamma_factor=.false.
   logical :: lswitch_sign_e_X=.true., lswitch_symmetric=.false., ldebug_print=.false.
   logical :: lswitch_sign_e_X_boost=.false.
   logical :: lStress_as_aux=.true., lreynolds=.false., lkinGW=.true.
-  logical :: lelectmag=.false., lscalar=.false., lscalar_phi=.false.
-  logical :: lggTX_as_aux=.true., lhhTX_as_aux=.true.
+  logical :: lmagstress=.true., lelectmag=.false., lscalar=.false., lscalar_phi=.false.
+  logical :: luse_mag, lggTX_as_aux=.true., lhhTX_as_aux=.true.
   logical :: lremove_mean_hij=.false., lremove_mean_gij=.false.
   logical :: GWs_spec_complex=.true. !(fixed for now)
   logical :: lreal_space_hTX_as_aux=.false., lreal_space_gTX_as_aux=.false., lreal_space_hij_as_aux=.false.
   logical :: linflation=.false., lreheating_GW=.false., lmatter_GW=.false., ldark_energy_GW=.false.
   logical :: lonly_mag=.false.!, lread_scl_factor_file=.false.
   logical :: lstress=.true., lstress_ramp=.false., lstress_upscale=.false.
-  logical :: lturnoff=.false., ldelkt=.false.
+  logical :: lturnoff=.false., ldelkt=.false., lnew_switch_om2_min=.false.
   logical :: lnonlinear_source=.false., lnonlinear_Tpq_trans=.true.
   logical :: reinitialize_GW=.false., lboost=.false., lhorndeski=.false., lhorndeski_xi=.false.
   logical :: lscale_tobox=.false., lskip_projection_GW=.false., lvectorpotential=.false.
@@ -135,9 +141,9 @@ module Special
 !
   logical :: lread_scl_factor_file_exists, lread_pulsar=.false.
   integer :: npulsar
-  integer :: nt_file, iTij=0, iinfl_lna=0
+  integer :: nt_file, iTij=0, ilna=0
   real :: lgt0, dlgt, H0, dummy
-  real :: lgt_ini, a_ini, Hp_ini, appa_om=0
+  real :: lgt_ini, a_ini, Hp_ini, appa_om=0,appa_om_init
 ! added variables
   real, dimension (:,:,:,:), allocatable :: Tpq_re, Tpq_im
   real, dimension (:,:,:,:), allocatable :: nonlinear_Tpq_re, nonlinear_Tpq_im
@@ -150,15 +156,17 @@ module Special
   real :: nonlinear_source_fact=0., k_in_stress=1.
   integer :: itorder_GW=1, idt_file_safety=12
   integer :: boost_method=2
+  logical :: lsplit_GW_rhs_from_rest_on_gpu=.false.
 !
 ! input parameters
+!
   namelist /special_init_pars/ &
     ctrace_factor, cstress_prefactor, fourthird_in_stress, lno_transverse_part, &
     initGW, amplGW, amplGW2, amplGWX, kpeak_GW, initpower_gw, initpower2_gw, cutoff_GW, &
     lStress_as_aux, lgamma_factor, &
     lreal_space_hTX_as_aux, lreal_space_gTX_as_aux, lreal_space_hij_as_aux, &
-    lscalar, lscalar_phi, &
-    lelectmag, lggTX_as_aux, lhhTX_as_aux, linflation, lreheating_GW, lmatter_GW, ldark_energy_GW, &
+    lscalar, lscalar_phi, lnew_switch_om2_min, om2_min_factor, &
+    lmagstress, lelectmag, lggTX_as_aux, lhhTX_as_aux, linflation, lreheating_GW, lmatter_GW, ldark_energy_GW, &
     lonly_mag, lread_scl_factor_file, t_ini, &
     lno_noise_GW, lrandom_ampl_GW, &
     lscale_tobox, lfactors_GW, nfact_GWs, nfact_GWh, nfact_GW, &
@@ -172,9 +180,9 @@ module Special
     ldebug_print, lswitch_sign_e_X, lswitch_symmetric, lStress_as_aux, &
     lswitch_sign_e_X_boost, &
     nscale_factor_conformal, tshift, cc_light, lgamma_factor, &
-    t_equality, t_acceleration, &
+    t_equality, t_acceleration, lnew_switch_om2_min, om2_min_factor, &
     lStress_as_aux, lkinGW, aux_stress, tau_stress_comp, exp_stress_comp, lscalar, lscalar_phi, &
-    lelectmag, tau_stress_kick, fac_stress_kick, delk, tdelk, ldelkt, idelkt, tau_delk, &
+    lmagstress, lelectmag, tau_stress_kick, fac_stress_kick, delk, tdelk, ldelkt, idelkt, tau_delk, &
     lreal_space_hTX_as_aux, lreal_space_gTX_as_aux, lreal_space_hij_as_aux, &
     initGW, reinitialize_GW, rescale_GW, &
     lggTX_as_aux, lhhTX_as_aux, lremove_mean_hij, lremove_mean_gij, &
@@ -189,6 +197,7 @@ module Special
     lnophase_in_stress, llinphase_in_stress, slope_linphase_in_stress, &
     lread_scl_factor_file, t_ini, OmL0, OmM0, idt_file_safety, &
     lconstmod_in_stress, k_in_stress, itorder_GW, lLighthill, &
+    lsplit_GW_rhs_from_rest_on_gpu, &
     lread_pulsar !, nbin_angular
 !
 ! Diagnostic variables (needs to be consistent with reset list below).
@@ -297,27 +306,27 @@ module Special
 !  May want to do this only when Fourier transform is enabled.
 !
       if (lggTX_as_aux) then
-        call farray_register_auxiliary('ggT',iggT,on_gpu=lgpu)
-        call farray_register_auxiliary('ggX',iggX,on_gpu=lgpu)
-        call farray_register_auxiliary('ggTim',iggTim,on_gpu=lgpu)
-        call farray_register_auxiliary('ggXim',iggXim,on_gpu=lgpu)
+        call farray_register_auxiliary('ggT',iggT,rhs=.true.,read_from_gpu=lgpu)
+        call farray_register_auxiliary('ggX',iggX,rhs=.true.,read_from_gpu=lgpu)
+        call farray_register_auxiliary('ggTim',iggTim,rhs=.true.,read_from_gpu=lgpu)
+        call farray_register_auxiliary('ggXim',iggXim,rhs=.true.,read_from_gpu=lgpu)
       endif
 !
       if (lhhTX_as_aux) then
-        call farray_register_auxiliary('hhT',ihhT,on_gpu=lgpu)
-        call farray_register_auxiliary('hhX',ihhX,on_gpu=lgpu)
-        call farray_register_auxiliary('hhTim',ihhTim,on_gpu=lgpu)
-        call farray_register_auxiliary('hhXim',ihhXim,on_gpu=lgpu)
+        call farray_register_auxiliary('hhT',ihhT,rhs=.true.,read_from_gpu=lgpu)
+        call farray_register_auxiliary('hhX',ihhX,rhs=.true.,read_from_gpu=lgpu)
+        call farray_register_auxiliary('hhTim',ihhTim,rhs=.true.,read_from_gpu=lgpu)
+        call farray_register_auxiliary('hhXim',ihhXim,rhs=.true.,read_from_gpu=lgpu)
       endif
 !
       if (lStress_as_aux) then
         !TP: moved registration of Str first since the other ones are not 
         !    necessarily used on the GPU side and having it come first helps
-        call farray_register_auxiliary('Str',iStress_ij,array=6,on_gpu=lgpu)
-        call farray_register_auxiliary('StT',iStressT,on_gpu     = itorder_GW==2 .and. lgpu)
-        call farray_register_auxiliary('StX',iStressX,on_gpu     = itorder_GW==2 .and. lgpu)
-        call farray_register_auxiliary('StTim',iStressTim,on_gpu = itorder_GW==2 .and. lgpu)
-        call farray_register_auxiliary('StXim',iStressXim,on_gpu = itorder_GW==2 .and. lgpu)
+        call farray_register_auxiliary('Str',iStress_ij,array=6,rhs=.true.,read_from_gpu=(idiag_nlin1/=0))
+        call farray_register_auxiliary('StT',iStressT,rhs = itorder_GW==2)
+        call farray_register_auxiliary('StX',iStressX,rhs = itorder_GW==2)
+        call farray_register_auxiliary('StTim',iStressTim,rhs = itorder_GW==2)
+        call farray_register_auxiliary('StXim',iStressXim,rhs = itorder_GW==2)
       endif
 !
 !  To get hT and hX in real space, invoke lreal_space_hTX_as_aux
@@ -349,7 +358,13 @@ module Special
 !
       iTij=farray_index_by_name('Tij')
 !
-      if (lscalar) iinfl_lna=farray_index_by_name_ode('infl_lna')
+      if (lscalar) then
+        if (lklein_gordon) then
+          ilna=farray_index_by_name_ode('lna')
+        else
+          ilna=farray_index_by_name_ode('infl_lna')
+        endif
+      endif
 !
     endsubroutine register_special
 !***********************************************************************
@@ -389,6 +404,18 @@ module Special
       else
         if (.not.associated(lconservative)) allocate(lconservative)
         lconservative=.false.
+      endif
+!
+!  Check if we are running the klein_gordon module
+!
+      if (lklein_gordon) then
+        call get_shared_variable('lwaterfall', lwaterfall, caller='register_special')
+        call get_shared_variable('lflrw', lflrw, caller='register_special')
+      else
+        if (.not.associated(lwaterfall)) allocate(lwaterfall)
+        lwaterfall=.false.
+        if (.not.associated(lflrw)) allocate(lflrw)
+        lflrw=.false.
       endif
 !
 !  get a"/a (here called ddotam)
@@ -612,6 +639,7 @@ module Special
 !
       call keep_compiler_quiet(f)
 !
+        appa_om_init = appa_om
     endsubroutine initialize_special
 !***********************************************************************
     subroutine read_pulsar_data
@@ -882,10 +910,14 @@ module Special
       endif
 !
 !  Magnetic field needed for Maxwell stress
+!  But only with lmagstress can we suppress it.
 !
-      if (lmagnetic) then
+      if (lmagnetic .and. lmagstress) then
+        luse_mag=.true.
         lpenc_requested(i_bb)=.true.
         if (trace_factor/=0.) lpenc_requested(i_b2)=.true.
+      else
+        luse_mag=.false.
       endif
 !
 !  Electric field needed for Maxwell stress
@@ -900,6 +932,7 @@ module Special
       if (lscalar) then
         lpenc_requested(i_gphi)=.true.
 !        lpenc_requested(i_infl_a2)=.true.
+        if (lwaterfall) lpenc_requested(i_gpsi)=.true.
       endif
 !
     endsubroutine pencil_criteria_special
@@ -919,6 +952,7 @@ module Special
     subroutine calc_pencils_special(f,p)
 !
 !  Calculate Special pencils; especially the unprojected STRESS tensor p%stress_ij.
+!  In dspecial_dt, we put the result into the f-array; f(l1:l2,m,n,iStress_ij+ij-1).
 !  Most basic pencils should come first, as others may depend on them.
 !
 !  24-aug-17/axel: coded
@@ -935,7 +969,7 @@ module Special
       intent(in) :: f
       intent(inout) :: p
       integer :: i, j, ij
-      real :: fact
+      real :: fact, a2=1.
 !
 !  The following is only needed during the first of 3 substeps.
 !  So the gravitational waves (and the necessary stress) are
@@ -973,11 +1007,18 @@ module Special
               else
                 if (lreynolds) p%stress_ij(:,ij)=p%stress_ij(:,ij)+p%uu(:,i)*p%uu(:,j)*prefactor*p%rho
               endif
-              if (lmagnetic) p%stress_ij(:,ij)=p%stress_ij(:,ij)-p%bb(:,i)*p%bb(:,j)
+              if (luse_mag)  p%stress_ij(:,ij)=p%stress_ij(:,ij)-p%bb(:,i)*p%bb(:,j)
               if (lelectmag) p%stress_ij(:,ij)=p%stress_ij(:,ij)-p%el(:,i)*p%el(:,j)
 !              if (lscalar_phi) p%stress_ij(:,ij)=p%stress_ij(:,ij)+p%infl_a2*p%gphi(:,i)*p%gphi(:,j)
-              if (lscalar_phi) p%stress_ij(:,ij)=p%stress_ij(:,ij) &
-                +exp(2*f_ode(iinfl_lna))*p%gphi(:,i)*p%gphi(:,j)
+              if (lscalar_phi) then
+                if (lflrw) a2=exp(2*f_ode(ilna))
+                p%stress_ij(:,ij)=p%stress_ij(:,ij) &
+                  +a2*p%gphi(:,i)*p%gphi(:,j)
+                if (lwaterfall) then
+                  p%stress_ij(:,ij)=p%stress_ij(:,ij) &
+                    +a2*p%gpsi(:,i)*p%gpsi(:,j)
+                endif
+              endif
             endif
 !
 !  Remove trace.
@@ -987,7 +1028,7 @@ module Special
                 if (lmagnetic) p%stress_ij(:,ij)=p%stress_ij(:,ij)+trace_factor*p%b2
               else
                 if (lreynolds) p%stress_ij(:,ij)=p%stress_ij(:,ij)-trace_factor*p%u2*prefactor*p%rho
-                if (lmagnetic) p%stress_ij(:,ij)=p%stress_ij(:,ij)+trace_factor*p%b2
+                if (luse_mag)  p%stress_ij(:,ij)=p%stress_ij(:,ij)+trace_factor*p%b2
                 if (lelectmag) p%stress_ij(:,ij)=p%stress_ij(:,ij)+trace_factor*p%e2
               endif
             endif
@@ -1034,7 +1075,7 @@ module Special
         scale_factor=t_acceleration**3/(t*t_equality)
       elseif (lscalar) then
 !        scale_factor=sqrt(p%infl_a2(1))
-        scale_factor=exp(f_ode(iinfl_lna))
+        scale_factor=exp(f_ode(ilna))
       else
         if (t+tshift==0.) then
           scale_factor=1.
@@ -1048,26 +1089,45 @@ module Special
 !
 !   26-jul-2025/TP: carved from dspecial_dt
 ! 
+      use Gpu, only: update_on_gpu
+
       real :: lgt1, lgt2, lgf1, lgf2, lgf, lgt_current
       integer :: it_file
-        lgt_current=alog10(real(t))+lgt_ini
-        it_file=int((lgt_current-lgt0)/dlgt)+1
-        if (it_file<1.or.it_file>nt_file) then
-          print*,'=',it_file, t_file(it_file), t, t_file(it_file+1), t_ini
-          call fatal_error('dspecial_dt','it<1.or.it>nt')
-        endif
-        lgt1=lgt_file(it_file)
-        lgt2=lgt_file(it_file+1)
+      real, save :: Hp_old,appa_old
+      integer, save :: Hp_index_on_gpu=-1
+      integer, save :: appa_index_on_gpu=-1
 
-        lgf1=lgff2(it_file)
-        lgf2=lgff2(it_file+1)
-        lgf=lgf1+(lgt_current-lgt1)*(lgf2-lgf1)/(lgt2-lgt1)
-        Hp_target=10**lgf/Hp_ini
 
-        lgf1=lgff3(it_file)
-        lgf2=lgff3(it_file+1)
-        lgf=lgf1+(lgt_current-lgt1)*(lgf2-lgf1)/(lgt2-lgt1)
-        appa_target=10**lgf/Hp_ini**2
+      lgt_current=alog10(real(t))+lgt_ini
+      it_file=int((lgt_current-lgt0)/dlgt)+1
+      if (it_file<1.or.it_file>nt_file) then
+        print*,'=',it_file, t_file(it_file), t, t_file(it_file+1), t_ini
+        call fatal_error('dspecial_dt','it<1.or.it>nt')
+      endif
+      lgt1=lgt_file(it_file)
+      lgt2=lgt_file(it_file+1)
+
+      lgf1=lgff2(it_file)
+      lgf2=lgff2(it_file+1)
+      lgf=lgf1+(lgt_current-lgt1)*(lgf2-lgf1)/(lgt2-lgt1)
+      Hp_target=10**lgf/Hp_ini
+
+      lgf1=lgff3(it_file)
+      lgf2=lgff3(it_file+1)
+      lgf=lgf1+(lgt_current-lgt1)*(lgf2-lgf1)/(lgt2-lgt1)
+      appa_target=10**lgf/Hp_ini**2
+
+      if(lgpu .and. Hp_old /= Hp_target) then
+        call update_on_gpu(Hp_index_on_gpu,'AC_hp_target__mod__cdata',Hp_target)
+      endif
+
+      if(lgpu .and. appa_old /= appa_target) then
+        call update_on_gpu(appa_index_on_gpu,'AC_appa_target__mod__cdata',appa_target)
+      endif
+
+      Hp_old = Hp_target
+      appa_old = appa_target
+      
     endsubroutine read_Hp_and_appa_target
 !***********************************************************************
     subroutine read_scl_factor
@@ -1146,7 +1206,6 @@ module Special
 !
         call read_scl_factor
         !TP: have to read here in case we use disp_current which uses Hp_target
-        call read_Hp_and_appa_target
       endif
 !
 !  Possibilty to compensate against the decaying stress in decaying turbulence.
@@ -1185,17 +1244,24 @@ module Special
     endsubroutine dspecial_dt
 !***********************************************************************
     subroutine calc_diagnostics_special(f,p)
+
       use Diagnostics
       real,dimension(mx,my,mz,mfarray) :: f
       type(pencil_case) :: p
       real :: sign_switch=0
+      real, dimension(nx) :: ggT,ggTim,ggX,ggXim
 
       if (lggTX_as_aux) then
-        if (idiag_EEGW/=0) call sum_mn_name((f(l1:l2,m,n,iggT)**2+f(l1:l2,m,n,iggTim)**2 &
-                                            +f(l1:l2,m,n,iggX)**2+f(l1:l2,m,n,iggXim)**2 &
+
+        ggT   = f(l1:l2,m,n,iggT)
+        ggTim = f(l1:l2,m,n,iggTim)
+        ggX   = f(l1:l2,m,n,iggX)
+        ggXim = f(l1:l2,m,n,iggXim)
+        if (idiag_EEGW/=0) call sum_mn_name((ggT**2+ggTim**2 &
+                                            +ggX**2+ggXim**2 &
                                             )*nwgrid*EGWpref,idiag_EEGW)
-        if (idiag_gg2m/=0) call sum_mn_name((f(l1:l2,m,n,iggT)**2+f(l1:l2,m,n,iggTim)**2 &
-                                            +f(l1:l2,m,n,iggX)**2+f(l1:l2,m,n,iggXim)**2 &
+        if (idiag_gg2m/=0) call sum_mn_name((ggT**2+ggTim**2 &
+                                            +ggX**2+ggXim**2 &
                                             )*nwgrid,idiag_gg2m)
         if (idiag_Stgm/=0) call sum_mn_name((f(l1:l2,m,n,iStressT  )*f(l1:l2,m,n,iggT  ) &
                                             +f(l1:l2,m,n,iStressTim)*f(l1:l2,m,n,iggTim) &
@@ -1693,17 +1759,6 @@ if (ip < 25 .and. abs(k1) <nx .and. abs(k2) <ny .and. abs(k3) <nz) print*,k1,k2,
                   endif
                 endif
 !
-!if ((ikx==2 .or. ikx==nx) .and. iky==1 .and. ikz==1) then
-!  print*,'AXEL: k1,k2,k3=',k1,k2,k3
-!  print*,'AXEL: k1_boost,k2_boost,k3_boost=',k1_boost,k2_boost,k3_boost
-!  print*,'AXEL: hhT,hhTim,hhX,hhXim=', &
-!    f(nghost+ikx,nghost+iky,nghost+ikz,ihhT  ), &
-!    f(nghost+ikx,nghost+iky,nghost+ikz,ihhTim), &
-!    f(nghost+ikx,nghost+iky,nghost+ikz,ihhX  ), &
-!    f(nghost+ikx,nghost+iky,nghost+ikz,ihhXim)
-!  print*,'AXEL: hhT_boost,hhTim_boost,hhX_boost,hhXim_boost=',hhT_boost,hhTim_boost,hhX_boost,hhXim_boost
-!endif
-!
 !  Now do g, but this could also be switcheable
 !
                !if (GWs_spec_boost) then
@@ -1719,7 +1774,7 @@ if (ip < 25 .and. abs(k1) <nx .and. abs(k2) <ny .and. abs(k3) <nz) print*,k1,k2,
                !endif
 !
 !  end of lboost
-!???
+!
               endif
 !
 !  SVT decomposition (not related to boost).
@@ -1945,13 +2000,6 @@ if (ip < 25 .and. abs(k1) <nx .and. abs(k2) <ny .and. abs(k3) <nz) print*,k1,k2,
                       enddo
                       enddo
                       fact_boost   =DT_a_sum_boost*DT_b_sum_boost+DX_a_sum_boost*DX_b_sum_boost
-!if (ikx==2 .and. iky==2 .and. ikz==2 .and. ipulsar==1 .and. jpulsar==3) then
-!  print*,'AXEL2: DT_a_sum,DT_b_sum,DX_a_sum,DX_b_sum=',DT_a_sum,DT_b_sum,DX_a_sum,DX_b_sum
-!  print*,'AXEL2: DT_a_sum_boost,DT_b_sum_boost,DX_a_sum_boost,DX_b_sum_boost=', &
-!                 DT_a_sum_boost,DT_b_sum_boost,DX_a_sum_boost,DX_b_sum_boost
-!  print*,'AXEL2: fact,fact_boost=',fact,fact_boost
-!endif
-!if (ikx==2 .and. iky==2 .and. ikz==2 .and. ipulsar=1 .and. jpulsar=3) print*,'AXEL: fact,fact_boost=',fact,fact_boost
                       facthel_boost=DT_a_sum*DX_b_sum-DX_a_sum*DT_b_sum
                       spectra%GWh_Gamma_Bb(ik,ibin_angular)=spectra%GWh_Gamma_Bb(ik,ibin_angular) &
                          +(hhX_boost  **2 &
@@ -2053,9 +2101,7 @@ if (ip < 25 .and. abs(k1) <nx .and. abs(k2) <ny .and. abs(k3) <nz) print*,k1,k2,
 !
               elseif (ik==0) then
                 spectra%GWhhel_Gamma_ang(ik,:)=spectra%GWhhel_Gamma_ang(ik,:)+1.
-!print*,'AEXEL: test t,ik=',t,ik
               else
-!print*,'AXEL: other test t,ik=',t,ik
               endif
 !
 !  endif from k^2=0
@@ -2360,6 +2406,54 @@ if (ip < 25 .and. abs(k1) <nx .and. abs(k2) <ny .and. abs(k3) <nz) print*,k1,k2,
        enddo
     endsubroutine compute_hij
 !***********************************************************************
+    function has_negative_frequency(ik,ngrid) result(res)
+      integer :: ik,ngrid,nyquist_frequency
+      logical :: res
+      nyquist_frequency = (ngrid/2)+1
+      if(ik > nyquist_frequency) then
+              res = .true.
+      else
+              res = .false.
+      endif
+    endfunction has_negative_frequency
+!***********************************************************************
+    function below_nyquist_frequency(ik,ngrid) result(res)
+      integer :: ik,ngrid,nyquist_frequency
+      logical :: res
+      nyquist_frequency = (ngrid/2)+1
+      if(ik < nyquist_frequency) then
+              res = .true.
+      else
+              res = .false.
+      endif
+    endfunction below_nyquist_frequency
+!***********************************************************************
+    subroutine get_conjugate_pair_index(ik_src,ik_dst,ngrid)
+      integer :: ik_src,ik_dst,ngrid
+      integer :: offset_from_nyquist
+      integer :: nyquist_frequency 
+      nyquist_frequency = (ngrid/2)+1
+      if(ik_src == 1 .or. ik_src == nyquist_frequency) then
+        ik_dst = ik_src
+      else if(has_negative_frequency(ik_src,ngrid)) then
+        offset_from_nyquist = ik_src - nyquist_frequency
+        ik_dst = nyquist_frequency-offset_from_nyquist
+      else
+        offset_from_nyquist = nyquist_frequency - ik_src
+        ik_dst = nyquist_frequency+offset_from_nyquist
+      endif
+    endsubroutine get_conjugate_pair_index
+!***********************************************************************
+    subroutine get_conjugate_pair_indexes(ikx_src,iky_src,ikz_src,ikx_dst,iky_dst,ikz_dst)
+      integer :: ikx_src,iky_src,ikz_src
+      integer :: ikx_dst,iky_dst,ikz_dst
+
+      call get_conjugate_pair_index(ikx_src,ikx_dst,nxgrid)
+      call get_conjugate_pair_index(iky_src,iky_dst,nygrid)
+      call get_conjugate_pair_index(ikz_src,ikz_dst,nzgrid)
+
+    endsubroutine get_conjugate_pair_indexes
+!***********************************************************************
     subroutine solve_and_stress(f,S_T_re,S_T_im,S_X_re,S_X_im)
 !   TODO: The name is simply a placeholder since could not come up with a better name
 !
@@ -2392,7 +2486,7 @@ if (ip < 25 .and. abs(k1) <nx .and. abs(k2) <ny .and. abs(k3) <nz) print*,k1,k2,
       complex :: discrim, det1, lam1, lam2, explam1t, explam2t
       complex :: cosoth, cosotg, sinoth, sinotg
       intent(inout) :: f
-      logical :: lsign_om2
+      logical :: lsign_om2, lswitch_om2_min_condition
 !
 !  determine time-dependent delkt
 !
@@ -2420,7 +2514,6 @@ if (ip < 25 .and. abs(k1) <nx .and. abs(k2) <ny .and. abs(k3) <nz) print*,k1,k2,
                       call compute_scl_factor
               endif
       endif
-      if (lread_scl_factor_file) call read_Hp_and_appa_target
       if (lhorndeski.or.lhorndeski_xi) then
         select case (ihorndeski_time)
           case ('const')
@@ -2491,12 +2584,16 @@ if (ip < 25 .and. abs(k1) <nx .and. abs(k2) <ny .and. abs(k3) <nz) print*,k1,k2,
         appa_om=appa_om*horndeski_alpM_eff+horndeski_alpM_eff2
         appa_om=appa_om+horndeski_alpM_eff3
       endif
+      if (lgpu .and. .not. (lread_scl_factor_file.and.lread_scl_factor_file_exists) &
+              .and. .not. lhorndeski_xi) then
+              appa_om = appa_om_init
+      endif
 
 !  Compute om2_min, below which no GWs are computed.
 !  Choose 1e-4 arbitrarily.
 !
       kmin=2*pi/sqrt(Lx**2+Ly**2+Lz**2)
-      om2_min=(1e-4*kmin)**2
+      om2_min=(om2_min_factor*kmin)**2
 !
 !  Set ST=SX=0 and reset all spectra.
 !
@@ -2731,8 +2828,21 @@ if (ip < 25 .and. abs(k1) <nx .and. abs(k2) <ny .and. abs(k3) <nz) print*,k1,k2,
             ggXim=f(nghost+ikx,nghost+iky,nghost+ikz,iggXim)
 !
 !  compute cos(om*dt) and sin(om*dt) to get from one timestep to the next.
+!  The "old" condition om2>om2_min is actually wrong and should be
+!  replaced by om2/=0. This is accomplished by putting lnew_switch_om2_min=T.
+!  If om2=0 exactly (i.e., if we had neither the old nor the new condition),
+!  we obviously get a NaN for that frequency. Quantities like EEGW and hrms
+!  then include one such NaN entry and are therefore always NaN. In general,
+!  unless a''=0 exactly, it won't happen. By default, lnew_switch_om2_min=F,
+!  so we would get jumps in the GW spectra for small k.
 !
-            if (om2>om2_min) then
+            if (lnew_switch_om2_min) then
+              lswitch_om2_min_condition=om2/=0.
+            else
+              lswitch_om2_min_condition=om2>om2_min
+            endif
+!
+            if (lswitch_om2_min_condition) then
               om12=1./om2
 !
 !  check whether om^2 is positive. If om^2 is positive, we have the standard
@@ -2916,7 +3026,7 @@ if (ip < 25 .and. abs(k1) <nx .and. abs(k2) <ny .and. abs(k3) <nz) print*,k1,k2,
 !  It also allows for the inclusion of nonlinear corrections to the wave equation.
 !  Alternatively, we can also solve the Lighthill equation if lLighthill=T.
 !
-!  07-aug-17/axel: coded
+!  07-aug-17/axel: coded (MAIN part doing the TT projection)
 !
       use Fourier, only: fourier_transform, fft_xyz_parallel, kx_fft, ky_fft, kz_fft
       use Diagnostics
@@ -3124,9 +3234,6 @@ if (ip < 25 .and. abs(k1) <nx .and. abs(k2) <ny .and. abs(k3) <nz) print*,k1,k2,
 !
           call fft_xyz_parallel(hij_re,hij_im,linv=.true.)
           f(l1:l2,m1:m2,n1:n2,ihij)=hij_re
-!print*,'AXEL: =ij,i,j,hij_re=',ij,i,j,hij_re(2,2,2)
-!print*,'AXEL: =ij,i,j,hij_re=',ij,i,j,hij_re(2,1,1)
-!print*,'AXEL: =ij,i,j,hij_im=',ij,i,j,hij_im(2,1,1)
 !
 !  enddo ij loop
 !
@@ -3337,6 +3444,12 @@ if (ip < 25 .and. abs(k1) <nx .and. abs(k2) <ny .and. abs(k3) <nz) print*,k1,k2,
 !
     endsubroutine get_slices_special
 !***********************************************************************
+    subroutine load_variables_to_gpu_special
+        if (lread_scl_factor_file) then
+          call read_Hp_and_appa_target
+        endif
+    endsubroutine load_variables_to_gpu_special
+!***********************************************************************
     subroutine pushpars2c(p_par)
 
     use Syscalls, only: copy_addr
@@ -3371,7 +3484,7 @@ if (ip < 25 .and. abs(k1) <nx .and. abs(k2) <ny .and. abs(k3) <nz) print*,k1,k2,
     call copy_addr(tturnoff,p_par(24))
     call copy_addr(t_ini,p_par(25))
     call copy_addr(itij,p_par(26)) ! int
-    call copy_addr(iinfl_lna,p_par(27)) ! int
+    call copy_addr(ilna,p_par(27)) ! int
     call copy_addr(lgt0,p_par(28))
     call copy_addr(dlgt,p_par(29))
     call copy_addr(lgt_ini,p_par(30))
@@ -3412,11 +3525,13 @@ if (ip < 25 .and. abs(k1) <nx .and. abs(k2) <ny .and. abs(k3) <nz) print*,k1,k2,
     call copy_addr(h0,p_par(68))
     call copy_addr(horndeski_alpm_prime,p_par(69))
     call copy_addr(nt_file,p_par(70)) ! int
-    if (allocated(lgt_file)) call copy_addr(lgt_file,p_par(71)) ! (nt_file) gmem
-    if (allocated(lgff)) call copy_addr(lgff,p_par(72)) ! (nt_file) gmem
-    if (allocated(lgff2)) call copy_addr(lgff2,p_par(73)) ! (nt_file) gmem
-    if (allocated(lgff3)) call copy_addr(lgff3,p_par(74)) ! (nt_file) gmem
-
+    if (allocated(lgt_file)) call copy_addr(lgt_file,p_par(71)) ! (nt_file__mod__gravitational_waves_htxk) gmem
+    if (allocated(lgff)) call copy_addr(lgff,p_par(72)) ! (nt_file__mod__gravitational_waves_htxk) gmem
+    if (allocated(lgff2)) call copy_addr(lgff2,p_par(73)) ! (nt_file__mod__gravitational_waves_htxk) gmem
+    if (allocated(lgff3)) call copy_addr(lgff3,p_par(74)) ! (nt_file__mod__gravitational_waves_htxk) gmem
+    call copy_addr(appa_om_init,p_par(75)) 
+    call copy_addr(luse_mag,p_par(76)) ! bool
+    call copy_addr(lsplit_gw_rhs_from_rest_on_gpu,p_par(77)) ! bool
 
     endsubroutine pushpars2c
 !***********************************************************************

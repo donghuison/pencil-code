@@ -11,7 +11,6 @@
 !***************************************************************
 module ImplicitDiffusion
 !
-  use Cparam
   use Cdata
   use General, only: keep_compiler_quiet
   use Messages, only: fatal_error
@@ -19,6 +18,7 @@ module ImplicitDiffusion
   implicit none
 !
   include 'implicit_diffusion.h'
+  integer :: pushpars2c        ! should be procedure pointer (F2003)
 !
   contains
 !***********************************************************************

@@ -1,3 +1,4 @@
+#if Lhydro_MODULE && Ldensity_MODULE
 Kernel hydro_after_boundary_conservative(real AC_t__mod__cdata){
   real cs201
   real cs2011
@@ -25,8 +26,8 @@ Kernel hydro_after_boundary_conservative(real AC_t__mod__cdata){
   	  cs201=1.+AC_cs20__mod__equationofstate
   	}
   	cs2011=1./cs201
-  	if (AC_ldensity__mod__cparam) {
-  	  if (AC_lmagnetic__mod__cparam) {
+  	if (ldensity) {
+  	  if (lmagnetic) {
   	    if (AC_b_ext2__mod__magnetic!=0.) {
   	      hydro_energy=value(Field(AC_irho__mod__cdata-1))-0.5*AC_b_ext2__mod__magnetic
   	    }
@@ -65,7 +66,7 @@ Kernel hydro_after_boundary_conservative(real AC_t__mod__cdata){
   	  ss=value(F_UVEC)
   	  ss2=(ss.x*ss.x)+(ss.y*ss.y)+(ss.z*ss.z)
   	  rat0=ss2*(hydro_energy1*hydro_energy1)
-  	  if (AC_lmagnetic__mod__cparam) {
+  	  if (lmagnetic) {
   	    va2_pseudo=AC_b_ext2__mod__magnetic*cs2011*hydro_energy1
   	    rat=rat0/((1.+va2_pseudo)*(1.+va2_pseudo))
   	  }
@@ -76,7 +77,7 @@ Kernel hydro_after_boundary_conservative(real AC_t__mod__cdata){
   	  if (AC_lrelativistic_eos__mod__density) {
   	    lorentz_gamma2=lorentz_gamma2*(0.5-rat*AC_cs20__mod__equationofstate*cs2011 +  sqrt(0.25-rat*AC_cs20__mod__equationofstate*(cs2011*cs2011)))
   	  }
-  	  if (AC_lmagnetic__mod__cparam) {
+  	  if (lmagnetic) {
   	    for iter_relb in 1:AC_niter_relb__mod__hydro+1 {
   	      if (AC_lrelativistic__mod__hydro) {
   	        rho1=(cs201*lorentz_gamma2-AC_cs20__mod__equationofstate)/hydro_energy
@@ -110,6 +111,7 @@ Kernel hydro_after_boundary_conservative(real AC_t__mod__cdata){
   	}
   	if (AC_ilorentz__mod__cdata != 0) {
   	  DF_LORENTZ=lorentz_gamma2
+	  write(F_LORENTZ,DF_LORENTZ)
   	}
   	if (AC_lhiggsless__mod__hydro) {
   	  if (AC_lhiggsless_old__mod__hydro) {
@@ -144,3 +146,8 @@ Kernel hydro_after_boundary_conservative(real AC_t__mod__cdata){
   	write(F_TIJ_5,DF_TIJ_5)
   }
 }
+#else
+Kernel hydro_after_boundary_conservative(real AC_t__mod__cdata){
+	suppress_unused_warning(AC_t__mod__cdata)
+}
+#endif

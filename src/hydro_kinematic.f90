@@ -72,8 +72,8 @@ module Hydro
   logical :: lforcing_cont_uu=.false., lrandom_location=.false.
   logical :: lwrite_random_location=.false., lwrite_random_wavenumber=.false.
   logical :: lrandom_wavenumber=.false., lwrite_random_ampl=.false.
+  logical :: ldiffrot_from_expansion=.false.
   integer :: ll_sh=0, mm_sh=0, n_xprof=-1
-  integer :: pushpars2c  ! should be procedure pointer (F2003)
 !
 !  init parameters
 !  (none)
@@ -169,6 +169,9 @@ module Hydro
   real, dimension(:,:,:,:), allocatable :: uu_2, frgn_buffer, interp_buffer
   real, dimension(:,:,:), allocatable :: smooth_factor
 !
+  integer :: enum_kinematic_flow = 0
+  integer :: enum_wind_profile = 0
+
   contains
 !***********************************************************************
     subroutine register_hydro
@@ -179,25 +182,28 @@ module Hydro
 !   6-nov-01/wolf: coded
 !
       use FArrayManager
-      use Mpicomm, only: lroot
       use SharedVariables, only: put_shared_variable
 !
 !  Identify version number (generated automatically by SVN).
 !
-      !if (lroot) call svn_id( &
-      !    "$Id$")
+      if (lroot) call svn_id( &
+          "$Id$")
 !
       call put_shared_variable('lpressuregradient_gas',lpressuregradient_gas,caller='register_hydro')
 !
+!  Register extra aux slots for uu if requested by lkinflow_as_aux or lkinflow_as_comaux
+!  (e.g. for writing uu to snapshots for later analysis). For this to work you
+!  must reserve enough auxiliary workspace by setting, for example,
+!     ! MAUX CONTRIBUTION 3
+!  in the beginning of your src/cparam.local file, *before* setting
+!  ncpus, nprocy, etc.
+!
       if (lkinflow_as_aux.or.lkinflow_as_comaux) then
-        if (lkinflow_as_comaux) then
-          call farray_register_auxiliary('uu',iuu,vector=3,communicated=.true.)
-        else
-          call farray_register_auxiliary('uu',iuu,vector=3)
-        endif
+        call farray_register_auxiliary('uu',iuu,vector=3,communicated=lkinflow_as_comaux)
         iux=iuu
         iuy=iuu+1
         iuz=iuu+2
+        if (lroot .and. (ip<14)) print*, 'initialize_hydro: iuu = ', iuu
       endif
 !
       kinflow=kinematic_flow
@@ -223,11 +229,11 @@ module Hydro
       use Slices_methods, only: alloc_slice_buffers
 !
       real, dimension (mx,my,mz,mfarray) :: f
-      real :: sph, sph_har_der
+      real :: sph, sph_har_der, LP1
       real, dimension (nx) :: vel_prof, tmp_mn
       real, dimension (nx,3) :: tmp_nx3
-      real, dimension (:,:), allocatable :: yz
-      integer :: iyz
+      real, dimension (:,:), allocatable :: yz,legendre_coeff
+      integer :: iyz,nr,ell_max,ell,iell,ll,mm,ir
 !
 !  Compute preparatory functions needed to assemble
 !  different flow profiles later on in pencil_case.
@@ -265,6 +271,12 @@ module Hydro
       case ('solar-like')
         profx_kinflow1=+0.5*(1.+erfunc(((x(l1:l2)-uphi_rbot)/uphi_step_width)))
         profy_kinflow1=1.-diff_rot_a2*cos(y)**2-diff_rot_a4*cos(y)**4
+      case('diffrot_from_expansion')
+        if (.not.lkinflow_as_aux) call fatal_error('initialize_hydro', &
+            '"diffrot_from_expansion" requires lkinflow_as_aux=T') 
+        if (.not.lspherical_coords) call inevitably_fatal_error("initialize_hydro", &
+            '"diffrot_from_expansion" only meaningful for spherical coordinates')
+        ldiffrot_from_expansion=.true.
       case ('KS')
         call periodic_KS_setup(-5./3.) !Kolmogorov spec. periodic KS
         !call random_isotropic_KS_setup(-5./3.,1.,(nxgrid)/2.) !old form
@@ -281,59 +293,73 @@ module Hydro
         if (nxgrid==1) kx_uukin=0.
         if (nygrid==1) ky_uukin=0.
         if (nzgrid==1) kz_uukin=0.
+      case ('spher-harm-poloidal','spher-harm-poloidal-per')
+        if (.not.lspherical_coords) call inevitably_fatal_error("init_uu", &
+            '"spher-harm-poloidal" only meaningful for spherical coordinates')
+        if (.not.lkinflow_as_aux) call inevitably_fatal_error("init_uu", &
+            '"spher-harm-poloidal" requires lkinflow_as_aux=T')
+      case ('from-snap','from-foreign-snap')
+        if (.not.lkinflow_as_aux) call inevitably_fatal_error("init_uu", &
+            '"from-*snap" requires lkinflow_as_aux=T')
       case default;
         if (lroot .and. (ip < 14)) call information('initialize_hydro','no preparatory profile needed')
       end select
 !
 ! kinflows end here
 !
-!  Register an extra aux slot for uu if requested (so uu is written
-!  to snapshots and can be easily analyzed later). For this to work you
-!  must reserve enough auxiliary workspace by setting, for example,
-!     ! MAUX CONTRIBUTION 3
-!  in the beginning of your src/cparam.local file, *before* setting
-!  ncpus, nprocy, etc.
+      if ((lkinflow_as_aux.or.lkinflow_as_comaux) .and. iuu/=0) then
 !
-!  After a reload, we need to rewrite index.pro, but the auxiliary
-!  arrays are already allocated and must not be allocated again.
+!  The kinematic flow can only be used as auxiliary if it has been registered.
+!  Later registering by setting lkinflow_as_aux or lkinflow_as_comaux to .true. at 
+!  RELOAD time is not possible. Setting to .false. does not "unregister" uu.
 !
-      if (lkinflow_as_aux.or.lkinflow_as_comaux) then
-   !    if (iuu==0) then
-        if (iuu/=0) then
-   !      if (lkinflow_as_comaux) then
-   !        call farray_register_auxiliary('uu',iuu,vector=3,communicated=.true.)
-   !      else
-   !        call farray_register_auxiliary('uu',iuu,vector=3)
-   !      endif
-   !      iux=iuu
-   !      iuy=iuu+1
-   !      iuz=iuu+2
+        if (lkinflow_as_uudat) then
 !
 !  Possibility to read uu.dat, but currently only for one processor.
 !  However, this can be useful when a periodic kinematic flow is to
-!  to be used in test-field analyses at subharmic wavenumbers,
+!  to be used in test-field analyses at subharmonic wavenumbers,
 !  because then each processor uses the same flow on each pressor.
-!  Note, however, that lkinflow_as_uudat=.false. by default.
 !
-          if (lkinflow_as_uudat) then
-            open(1,file='uu.dat',form='unformatted')
-            read(1) f(l1:l2,m1:m2,n1:n2,iux:iuz)
+          open(1,file='uu.dat',form='unformatted')
+          read(1) f(l1:l2,m1:m2,n1:n2,iux:iuz)
+          close(1)
+          if (ampl_kinflow/=1.) f(l1:l2,m1:m2,n1:n2,iux:iuz)=ampl_kinflow*f(l1:l2,m1:m2,n1:n2,iux:iuz)
+          if (lkinflow_as_comaux) call update_ghosts(f,iux,iuz)
+         
+        else if (ldiffrot_from_expansion) then
+
+          if (lroot) then
+            open(1,file='Omega_r_ell.dat')
+            read(1,*) nr,ell_max
+            if (nr/=nx) call fatal_error('initialize_hydro', 'for diffrot_from_expansion nr must be = nx')
+            allocate(legendre_coeff(nr,ell_max))
+            do ir=1,nr
+              read(1,*) (legendre_coeff(ir,ell),ell=1,ell_max) 
+            enddo
             close(1)
-            if (ampl_kinflow/=1.) f(l1:l2,m1:m2,n1:n2,iux:iuz)=ampl_kinflow*f(l1:l2,m1:m2,n1:n2,iux:iuz)
-            if (lkinflow_as_comaux) call update_ghosts(f,iux,iuz)
           endif
-        else
-! set the initial velocity to zero
-          if (kinematic_flow/='from-snap'.or.kinematic_flow/='from-foreign-snap') f(:,:,:,iux:iuz) = 0.
-          if (lroot .and. (ip<14)) print*, 'initialize_hydro: iuu = ', iuu
-          call farray_index_append('iuu',iuu,3)
-        endif
-        
-        if (kinematic_flow=='spher-harm-poloidal'.or.kinematic_flow=='spher-harm-poloidal-per') then
-          if (.not.lspherical_coords) call inevitably_fatal_error("init_uu", &
-              '"spher-harm-poloidal" only meaningful for spherical coordinates')
-          if (.not.lkinflow_as_aux) call inevitably_fatal_error("init_uu", &
-              '"spher-harm-poloidal" requires lkinflow_as_aux=T')
+
+          call mpibcast(ell_max)
+          if (.not.lroot) allocate(legendre_coeff(nx,ell_max))
+          call mpibcast(legendre_coeff,(/nr,ell_max/))
+
+          do mm=m1,m2 
+!print*,'AXEL: ell_max=',ell_max
+            do iell=1,ell_max
+              ell=2*(iell-1)
+              call legendre_pl(LP1,ell,y(mm)) ! LP1 = P_L(cos(y(mm))) 
+!LP1=plegendre(2*(ell-1), 0, cos(y(mm)))
+!print*,'AXEL: ell,y(mm)*180./pi,LP1=',ell,y(mm)*180./pi,LP1
+              do ll=l1,l2
+                f(ll,mm,n1:n2,iuz)=f(ll,mm,n1:n2,iuz)+legendre_coeff(ll,iell)*LP1*x(ll)*sin(y(mm))
+              enddo            
+            enddo
+          enddo        
+          deallocate(legendre_coeff)
+          if (lkinflow_as_comaux) call update_ghosts(f,iux,iuz) 
+          
+        elseif (kinematic_flow=='spher-harm-poloidal'.or.kinematic_flow=='spher-harm-poloidal-per') then
+
           if (n_xprof==-1) then
             tmp_mn=(x(l1:l2)-xyz0(1))*(x(l1:l2)-xyz1(1))
             vel_prof=tmp_mn/x(l1:l2) + 2.*x(l1:l2)-(xyz0(1)+xyz1(1))     ! f/r + d f/dr 
@@ -373,13 +399,24 @@ module Hydro
               enddo
             enddo
           endif
+        else
+!
+! set the initial velocity to zero
+!
+          if (kinematic_flow/='from-snap'.or.kinematic_flow/='from-foreign-snap') f(:,:,:,iux:iuz) = 0.
+          call farray_index_append('iuu',iuu,3)
+        
+        endif   !  if (kinematic_flow=='spher-harm-poloidal'.or.kinematic_flow=='spher-harm-poloidal-per')
+      else      !  if (lkinflow_as_aux.or.lkinflow_as_comaux)
+        if (iuu==0) then
+          call warning('initialize_hydro','no auxiliary registered for kinflow - lkinflow_as_*aux is ignored')
+          lkinflow_as_aux=.false.; lkinflow_as_comaux=.false.
+        else
+          if (lkinflow_as_uudat) call fatal_error('initialize_hydro', &
+              'kinflow_as_uudat requires lkinflow_as_aux=T or lkinflow_as_comaux=T')
         endif
       endif
 !
-      if (ivid_uu/=0) then
-        if (.not.lkinflow_as_aux) call alloc_slice_buffers(uu_xy,uu_xz,uu_yz,uu_xy2,uu_xy3,uu_xy4,uu_xz2)
-      endif
-
       if (kinematic_flow=='from-foreign-snap') then
         if (lforeign) then
           if (.not.lreloading) then
@@ -424,6 +461,11 @@ module Hydro
           call fatal_error("initialize_hydro", "No foreign code available")
         endif
       endif
+!
+      if (ivid_uu/=0) then
+        if (.not.lkinflow_as_aux) call alloc_slice_buffers(uu_xy,uu_xz,uu_yz,uu_xy2,uu_xy3,uu_xy4,uu_xz2)
+      endif
+
       call calc_means_hydro(f)
 !
     endsubroutine initialize_hydro
@@ -2573,16 +2615,19 @@ module Hydro
 !
       case('from_aux')
         if (lpenc_loc(i_uu)) p%uu=ampl_kinflow*f(l1:l2,m,n,iux:iuz)
-      case('spher-harm-poloidal')
+      case('spher-harm-poloidal', 'diffrot_from_expansion')
         if (lpenc_loc(i_uu)) p%uu=f(l1:l2,m,n,iux:iuz)
       case('spher-harm-poloidal-per')
         if (lpenc_loc(i_uu)) p%uu=f(l1:l2,m,n,iux:iuz)*cos(omega_kinflow*t)
       case('sound3D')
         if (lpenc_loc(i_uu)) p%uu=f(l1:l2,m,n,iux:iuz)
+!
+!  For Lorentz-force, the uu array is set to jxb/rho earlier in hydro_before_boundary.
+!
       case('Lorentz-force')
         if (lpenc_loc(i_uu)) then
+          if (iux==0) call fatal_error('hydro_kinematic', 'must use luu_as_aux')
           if (lpenc_loc(i_uu)) p%uu=f(l1:l2,m,n,iux:iuz)
-          !if (alpha_damping/=0) p%uu=p%jxbr/alpha_damping
         endif
       case default
         call inevitably_fatal_error('hydro_kinematic', 'kinematic_flow not found')
@@ -2723,10 +2768,15 @@ module Hydro
         call sound3D(f)
 !
 !  Use the Lorentz force in the strong damping approximation.
+!  Ignore density when ldensity=F.
 !
       elseif (kinematic_flow=='Lorentz-force') then
         do j=1,3
-          f(:,:,:,iux-1+j)=f(:,:,:,ijxbx-1+j)*exp(-f(:,:,:,ilnrho))/alpha_damping
+          if (ldensity) then
+            f(:,:,:,iux-1+j)=f(:,:,:,ijxbx-1+j)*exp(-f(:,:,:,ilnrho))/alpha_damping
+          else
+            f(:,:,:,iux-1+j)=f(:,:,:,ijxbx-1+j)/alpha_damping
+          endif
         enddo
 !
       elseif (kinematic_flow=='Galloway-Proctor-RandomTemporalPhase'.or. &
@@ -3124,7 +3174,7 @@ module Hydro
 !
       if (mod(max_box,4.)/=0) print*, 'warning will not be periodic'
 !
-      print*, 'calculating KS wavenumbers'
+      if (lroot) print*, 'calculating KS wavenumbers'
 !
       do i=1,10000
         call random_number_wrapper(angle)
@@ -3881,5 +3931,98 @@ module Hydro
                                  ltime_old=ltime_old_kinflow)
 !
     endsubroutine sound3D
+!***********************************************************************
+    subroutine load_variables_to_gpu_hydro
+    endsubroutine load_variables_to_gpu_hydro
+!***********************************************************************
+    subroutine pushpars2c(p_par)
+
+    use Syscalls, only: copy_addr
+    use General , only: string_to_enum
+
+    integer, parameter :: n_pars=200
+    integer(KIND=ikind8), dimension(n_pars) :: p_par
+
+    call copy_addr(phase1,p_par(1))
+    call copy_addr(phase2,p_par(2))
+    call copy_addr(ampl_random,p_par(3))
+    call copy_addr(ks_modes,p_par(4)) ! int
+    call copy_addr(random_ampl,p_par(5))
+    call copy_addr(random_wavenumber,p_par(6))
+    call copy_addr(abc_a,p_par(7))
+    call copy_addr(abc_b,p_par(8))
+    call copy_addr(abc_c,p_par(9))
+    call copy_addr(wind_amp,p_par(10))
+    call copy_addr(wind_rmin,p_par(11))
+    call copy_addr(wind_step_width,p_par(12))
+    call copy_addr(wind_ampz,p_par(13))
+    call copy_addr(wind_z,p_par(14))
+    call copy_addr(wind_radius,p_par(15))
+    call copy_addr(circ_amp,p_par(16))
+    call copy_addr(circ_rmax,p_par(17))
+    call copy_addr(circ_step_width,p_par(18))
+    call copy_addr(kx_uukin1,p_par(19))
+    call copy_addr(ky_uukin1,p_par(20))
+    call copy_addr(kz_uukin1,p_par(21))
+    call copy_addr(kx_uukin,p_par(22))
+    call copy_addr(ky_uukin,p_par(23))
+    call copy_addr(kz_uukin,p_par(24))
+    call copy_addr(cx_uukin,p_par(25))
+    call copy_addr(cy_uukin,p_par(26))
+    call copy_addr(cz_uukin,p_par(27))
+    call copy_addr(phasex_uukin,p_par(28))
+    call copy_addr(phasey_uukin,p_par(29))
+    call copy_addr(phasez_uukin,p_par(30))
+    call copy_addr(uphi_rbot,p_par(31))
+    call copy_addr(gcs_rzero,p_par(32))
+    call copy_addr(gcs_psizero,p_par(33))
+    call copy_addr(kinflow_ck_balpha,p_par(34))
+    call copy_addr(tc_omega_out,p_par(35))
+    call copy_addr(eps_kinflow,p_par(36))
+    call copy_addr(exp_kinflow,p_par(37))
+    call copy_addr(omega_kinflow,p_par(38))
+    call copy_addr(ampl_kinflow,p_par(39))
+    call copy_addr(rp,p_par(40))
+    call copy_addr(gamma_dg11,p_par(41))
+    call copy_addr(relhel_uukin,p_par(42))
+    call copy_addr(chi_uukin,p_par(43))
+    call copy_addr(del_uukin,p_par(44))
+    call copy_addr(lambda_kinflow,p_par(45))
+    call copy_addr(zinfty_kinflow,p_par(46))
+    call copy_addr(sigma_uukin,p_par(47))
+    call copy_addr(tau_uukin,p_par(48))
+    call copy_addr(time_uukin,p_par(49))
+    call copy_addr(sigma1_uukin_scl_yz,p_par(50))
+    call copy_addr(binary_radius,p_par(51))
+    call copy_addr(radius_kinflow,p_par(52))
+    call copy_addr(width_kinflow,p_par(53))
+    call copy_addr(kinflow_ck_ell,p_par(54)) ! int
+    call copy_addr(tree_lmax,p_par(55)) ! int
+    call copy_addr(kappa_kinflow,p_par(56)) ! int
+    call copy_addr(lpressuregradient_gas,p_par(57)) ! bool
+    call copy_addr(lkinflow_as_comaux,p_par(58)) ! bool
+    call copy_addr(coskx,p_par(59)) ! (nx)
+    call copy_addr(sinkx,p_par(60)) ! (nx)
+    call copy_addr(profx_kinflow1,p_par(61)) ! (nx)
+    call copy_addr(profx_kinflow2,p_par(62)) ! (nx)
+    call copy_addr(profx_kinflow3,p_par(63)) ! (nx)
+    call copy_addr(profy_kinflow1,p_par(64)) ! (my)
+    call copy_addr(profy_kinflow2,p_par(65)) ! (my)
+    call copy_addr(profy_kinflow3,p_par(66)) ! (my)
+    call copy_addr(location,p_par(67)) ! real3
+    call copy_addr(ks_k,p_par(68)) ! (3) (ks_modes__mod__hydro)
+    call copy_addr(ks_a,p_par(69)) ! (3) (ks_modes__mod__hydro)
+    call copy_addr(ks_b,p_par(70)) ! (3) (ks_modes__mod__hydro)
+    call copy_addr(ks_omega,p_par(71)) ! (ks_modes__mod__hydro)
+    call string_to_enum(enum_kinematic_flow,kinematic_flow)
+    call string_to_enum(enum_wind_profile,wind_profile)
+    call copy_addr(enum_kinematic_flow,p_par(72)) ! int
+    call copy_addr(enum_wind_profile,p_par(73)) ! int
+    if (allocated(pl)) call copy_addr(pl,p_par(74)) ! (my)
+    if (allocated(zl)) call copy_addr(zl,p_par(75)) ! (mx)
+    if (allocated(dpldtheta)) call copy_addr(dpldtheta,p_par(76)) ! (mx)
+    if (allocated(dzldr)) call copy_addr(dzldr,p_par(77)) ! (my)
+
+    endsubroutine pushpars2c
 !***********************************************************************
 endmodule Hydro

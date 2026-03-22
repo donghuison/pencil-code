@@ -1,5 +1,8 @@
 ! $Id$
 ! adapted from timestep_rkf, and from numerical recipe stiff algorithm
+!** AUTOMATIC CPARAM.INC GENERATION ****************************
+! CPARAM logical, parameter :: lcourant_dt = .false.
+!***************************************************************
 !
 module Timestep
 !
@@ -68,7 +71,6 @@ module Timestep
     subroutine initialize_timestep
 !
       ldt=.false.
-      lcourant_dt = .false.
 
     endsubroutine initialize_timestep
 !***********************************************************************
@@ -161,7 +163,7 @@ module Timestep
     subroutine stiff(f, df, p, errmax)
 ! Stiff algorithm for time stepping
 !
-      use Mpicomm, only: mpiallreduce_max,MPI_COMM_WORLD
+      use Mpicomm, only: mpiallreduce_max,MPI_COMM_PENCIL
       use Equ, only: pde
       use Sub, only: ludcmp, lubksb
       use Chemistry, only: jacobn
@@ -357,7 +359,7 @@ module Timestep
 !
       errmaxs=errmaxs/eps_stiff
 !
-      call mpiallreduce_max(errmaxs,errmax,MPI_COMM_WORLD)
+      call mpiallreduce_max(errmaxs,errmax,MPI_COMM_PENCIL)
 !
     endsubroutine stiff
 !***********************************************************************

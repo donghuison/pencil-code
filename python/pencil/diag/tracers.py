@@ -229,25 +229,25 @@ class Tracers(object):
                     self.y1[ix, iy, t_idx] = self.y0[ix, iy, t_idx].copy()
                     self.z1[ix, iy, t_idx] = grid.z[0]
 
-            # Prepare the splines for the tricubis interpolation.
+            # Prepare for the tricubic interpolation.
+            # Pre-compute spline coefficients once for reuse across multiple streamlines
             if self.params.interpolation == "tricubic":
                 try:
-                    from eqtools.trispline import Spline
+                    from scipy.ndimage import spline_filter
 
-                    x = np.linspace(
-                        self.params.Ox, self.params.Ox + self.params.Lx, self.params.nx
+                    # Pre-compute spline coefficients (expensive, but done only once)
+                    self.splines = np.array([
+                        spline_filter(field[0], order=3),
+                        spline_filter(field[1], order=3),
+                        spline_filter(field[2], order=3),
+                    ])
+                except (ImportError, ModuleNotFoundError) as e:
+                    print(
+                        f"Warning: Could not import scipy.ndimage.spline_filter "
+                        f"for tricubic interpolation: {e}"
                     )
-                    y = np.linspace(
-                        self.params.Oy, self.params.Oy + self.params.Ly, self.params.ny
-                    )
-                    z = np.linspace(
-                        self.params.Oz, self.params.Oz + self.params.Lz, self.params.nz
-                    )
-                    field_x = Spline(z, y, x, field[0, ...])
-                    field_y = Spline(z, y, x, field[1, ...])
-                    field_z = Spline(z, y, x, field[2, ...])
-                    self.splines = np.array([field_x, field_y, field_z])
-                except:
+                    print("Warning: Fall back to trilinear.")
+                    self.params.interpolation = "trilinear"
                     self.splines = None
             else:
                 self.splines = None

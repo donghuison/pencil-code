@@ -7,18 +7,46 @@ manipulate simulations.
 import os
 from os.path import join, exists, split, islink, realpath, abspath, basename
 import numpy as np
+import subprocess
+import warnings
 
-from pencil.util import PathWrapper, pc_print
+from pencil.util import (
+    PathWrapper,
+    pc_print,
+    copy_docstring,
+    )
 
 class CommandFailedError(RuntimeError):
     pass
 
-def simulation(*args, **kwargs):
-    """
-    simulation(*args, **kwargs)
 
-    Generate simulation object from parameters.
-    Simulation objects are containers for simulations. pencil can work with
+class _DotDict(dict):
+    """A dict subclass that also supports attribute-style access.
+
+    This allows sim.param to be used both as a dict (sim.param['key'])
+    and with attribute access (sim.param.key), so that it is compatible
+    with the Param objects returned by pc.read.param() and accepted by
+    all reading routines.
+    """
+
+    def __getattr__(self, key):
+        try:
+            return self[key]
+        except KeyError:
+            raise AttributeError("param.{} does not exist".format(key))
+
+    def __setattr__(self, key, value):
+        self[key] = value
+
+    def __delattr__(self, key):
+        try:
+            del self[key]
+        except KeyError:
+            raise AttributeError(key)
+
+class Simulation:
+    """
+    Simulation objects are containers for simulations. Pencil can work with
     several of them at once if stored in a simulations object.
 
     Parameters
@@ -55,14 +83,6 @@ def simulation(*args, **kwargs):
     self.index             index object
     self.dim:              dim object
     self.tmp_dict:         temporal dictionary of stuff, will not be saved
-    """
-
-    return __Simulation__(*args, **kwargs)
-
-
-class __Simulation__(object):
-    """
-    Simulation object.
     """
 
     def __init__(self, path=".", hidden=False, hard=False, quiet=False):
@@ -180,12 +200,19 @@ class __Simulation__(object):
             debug_breakpoint,
         )
         from pencil import is_sim_dir
+        import pathlib
 
         # set up paths
-        if path_root == False or type(path_root) != type("string"):
-            print("! ERROR: No path_root specified to copy the simulation to.")
-            return False
-        path_root = abspath(path_root)  # simulation root dir
+        try:
+            path_root = pathlib.Path(path_root) # simulation root dir
+        except TypeError:
+            # return False # Kishore: I think `return False` is not helpful at all
+            raise TypeError(f"! ERROR: path_root is of invalid type {type(path_root)}.")
+
+        if not path_root.is_dir():
+            raise ValueError(f"Specified path_root ({path_root}) is either non-existent or not a directory")
+
+        path_root = abspath(path_root)
 
         # name and folder of new simulation but keep name of old if sim with old
         # name is NOT existing in NEW directory
@@ -548,7 +575,7 @@ class __Simulation__(object):
                 if exists(join(self.datadir, "param.nml")):
                     if not quiet: print("~ Reading param.nml.. ")
                     param = param(quiet=quiet, datadir=self.datadir)
-                    self.param = {}
+                    self.param = _DotDict()
                     # read params into Simulation object
                     for key in dir(param):
                         if key.startswith("_") or key == "read":
@@ -558,7 +585,7 @@ class __Simulation__(object):
                         else:
                             try:
                                 # allow for nested param objects
-                                self.param[key] = {}
+                                self.param[key] = _DotDict()
                                 for subkey in dir(getattr(param, key)):
                                     if subkey.startswith("_") or subkey == "read":
                                         continue
@@ -687,6 +714,8 @@ class __Simulation__(object):
         verbose=False,
         hostfile=None,
         autoclean=True,
+        previous_flags=False,
+        additional_options="",
         **kwargs,
         ):
         """Compiles the simulation. Per default the linking is done before the
@@ -707,6 +736,12 @@ class __Simulation__(object):
         autoclean : bool
             If compilation fails, automatically set cleanall=True and retry.
 
+        previous_flags : bool
+            If True, use the same flags as the last time pc_build was called.
+
+        additional_options: str
+            Addition options to be passed to pc_build.
+
         Accepts all other keywords accepted by self.bash
         """
 
@@ -715,8 +750,10 @@ class __Simulation__(object):
 
         timestamp = io.timestamp()
 
-        command = []
-        command.append("pc_build")
+        if previous_flags:
+            command = [self._get_last_build_cmd()]
+        else:
+            command = ["pc_build"]
 
         if cleanall:
             self.cleanall(verbose=verbose, hostfile=hostfile, **kwargs)
@@ -724,34 +761,53 @@ class __Simulation__(object):
             command.append(" --fast")
         if hostfile:
             command.append(" -f " + hostfile)
-        if verbose != False:
+
+        command.append(additional_options)
+
+        command = " ".join(command)
+        if verbose:
             print(f"! Compiling {self.path}")
+            print(f"Command: {command}")
 
         try:
             ret = self.bash(
-                command=" ".join(command),
+                command=command,
                 verbose=verbose,
                 logfile=join(self.pc_dir, "compilelog_" + timestamp),
                 **kwargs,
                 )
         except CommandFailedError:
-            if autoclean:
-                ret = None
-            else:
+            ret = False
+            if not autoclean:
                 raise
-        finally:
-            if (ret is not True) and autoclean and (not cleanall):
-                #If cleanall was already passed, no point in cleaning again and retrying.
-                return self.compile(
-                    cleanall=True,
-                    autoclean=False, #prevent infinite recursion
-                    fast=fast,
-                    verbose=verbose,
-                    hostfile=hostfile,
-                    **kwargs,
-                    )
-            else:
-                return ret
+
+        if (ret is not True) and autoclean and (not cleanall):
+            #If cleanall was already passed, no point in cleaning again and retrying.
+            return self.compile(
+                cleanall=True,
+                autoclean=False, #prevent infinite recursion
+                fast=fast,
+                verbose=verbose,
+                hostfile=hostfile,
+                **kwargs,
+                )
+        else:
+            return ret
+
+    def _get_last_build_cmd(self):
+        """
+        Figure out how pc_build was invoked (flags, options) last time it was run.
+        """
+        #TODO: may be better to do this in Python itself by iterating over the lines.
+        out = subprocess.run(
+            "grep -w pc_build pc_commands.log | tail -1",
+            cwd=self.path,
+            shell=True,
+            capture_output=True,
+            text=True,
+            check=True,
+            )
+        return out.stdout.strip()
 
     def build(self, **kwargs):
         """Same as compile()"""
@@ -787,10 +843,7 @@ class __Simulation__(object):
             If True, a nonzero return code for command will be raised as a Python error.
         """
 
-        import subprocess
         from pencil import io
-        from os.path import join
-        import os
 
         timestamp = io.timestamp()
         io.mkdir(self.pc_dir)
@@ -913,7 +966,7 @@ class __Simulation__(object):
         from os.path import join, exists
         from pencil.io import remove_files as remove
 
-        folder = join(self.path, "data")
+        folder = self.datadir
         keeps = []
 
         if not exists(folder):
@@ -970,7 +1023,8 @@ class __Simulation__(object):
         values = [i for i in last.split(" ") if not i == ""]
 
         if len(header) != len(values):
-            return self.get_ts().t[-1]
+            #NOTE: we cannot use self.get_ts here since that internally calls self.get_T_last.
+            raise RuntimeError(f"format of time_series.dat is invalid (expected {len(header)} columns, but found {len(values)} in last line)")
 
         return float(dict(zip(header, values))["t"])
 
@@ -1097,7 +1151,7 @@ class __Simulation__(object):
 
         if DEBUG:
             print("~ DEBUG: Searching through simulation.params and dim ...")
-        if type(self.param) == type({"dictionary": "with_values"}):
+        if isinstance(self.param, dict):
             if quantity in self.param.keys():
                 if DEBUG:
                     print("~ DEBUG: " + quantity + " found in simulation.params ...")
@@ -1111,58 +1165,60 @@ class __Simulation__(object):
 
         if DEBUG:
             print("~ DEBUG: Searching through simulation.quantity_searchables ...")
-        from pencil.io import get_value_from_file
+        from pencil.io import get_value_from_file, GetValueError
 
         for filename in self.quantity_searchables:
-            q = get_value_from_file(
-                filename, quantity, sim=self, DEBUG=DEBUG, silent=True
-            )
-            if q is not None:
+            try:
+                q = get_value_from_file(
+                    filename, quantity, sim=self, DEBUG=DEBUG, silent=True
+                )
+            except GetValueError:
+                if DEBUG:
+                    print("~ DEBUG: Couldnt find quantity here.. continue searching")
+            else:
                 if DEBUG:
                     print("~ DEBUG: " + quantity + " found in " + filename + " ...")
                 return q
-            else:
-                if DEBUG:
-                    print("~ DEBUG: Couldnt find quantity here.. continue searching")
 
-        print("! ERROR: Couldnt find " + quantity + "!")
-        return None
+        raise GetValueError("! ERROR: Couldnt find " + quantity + "!")
 
-    def get_ts(self, unique_clean=True):
-        """Returns time series object.
-        Args:
-            unique_clean:  set True, np.unique is used to clean up the ts,
-                           e.g. remove errors at the end of crashed runs"""
+    def get_ts(self, **kwargs):
+        """
+        Returns time series object. All kwargs are passed to `pencil.read.ts`.
+        """
         from pencil.read import ts
+
+        if 'unique_clean' not in kwargs:
+            kwargs['unique_clean'] = True
+
+        td = self.tmp_dict
 
         # check if already loaded
         if (
-            "ts" in self.tmp_dict.keys()
-            and self.tmp_dict["ts"].t[-1] == self.get_T_last()
-        ):
-            return self.tmp_dict["ts"]
+            "ts" in td
+            and td["ts"].t[-1] == self.get_T_last()
+            and td.get("_ts_kwargs", None) == kwargs
+            ):
+            return td["ts"]
 
         if self.started():
-            ts = ts(sim=self, quiet=True, unique_clean=unique_clean)
-            self.tmp_dict["ts"] = ts
+            ts = ts(sim=self, quiet=True, **kwargs)
+            td["ts"] = ts
+            td["_ts_kwargs"] = kwargs
             return ts
         else:
-            print(
+            warnings.warn(
                 "? WARNING: Simulation "
                 + self.name
                 + " has not yet been started. No timeseries available!"
             )
             return False
 
-    def change_value_in_file(
-        self, filename, quantity, newValue, filepath=False, DEBUG=False
-    ):
+    def change_value_in_file(self, *args, **kwargs):
         """Same as pencil.io.change_value_in_file."""
         from pencil.io import change_value_in_file
 
-        return change_value_in_file(
-            filename, quantity, newValue, sim=self, filepath=filepath, DEBUG=DEBUG
-        )
+        return change_value_in_file(*args, sim=self, **kwargs)
 
     def run(self, verbose=False, hostfile=None, cleardata=False, **kwargs):
         """Runs the simulation.
@@ -1215,3 +1271,19 @@ class __Simulation__(object):
             logfile=join(self.pc_dir, "runlog_" + timestamp),
             **kwargs,
             )
+
+class __Simulation__(Simulation):
+    """
+    Only exists to avoid breaking old code. New code must use Simulation.
+    Added: 2025-Jan-30 (Kishore)
+    """
+    def __init__(self, *args, **kwargs):
+        warnings.warn("The __Simulation__ class has now been renamed to Simulation (without underscores). Please modify your code accordingly")
+        super().__init__(*args, **kwargs)
+
+@copy_docstring(Simulation)
+def simulation(*args, **kwargs):
+    """
+    Wrapper for :py:class:`Simulation`
+    """
+    return Simulation(*args, **kwargs)

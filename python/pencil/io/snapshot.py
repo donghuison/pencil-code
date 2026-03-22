@@ -10,7 +10,6 @@ Contains the functions to generate a snapshot (VAR files).
 """
 import sys
 
-
 def write_snapshot(
     snapshot,
     file_name="VAR0",
@@ -20,6 +19,8 @@ def write_snapshot(
     nprocz=1,
     precision="d",
     nghost=3,
+    persist=None,
+    param=None,
     t=None,
     x=None,
     y=None,
@@ -35,7 +36,8 @@ def write_snapshot(
     call signature:
 
     write_snapshot(snapshot, file_name='VAR0', datadir='data',
-                   nprocx=1, nprocy=1, nprocz=1, precision='d', nghost=3)
+                   nprocx=1, nprocy=1, nprocz=1, precision='d', nghost=3, persist=None,
+                   param=None, t=None, x=None, y=None, z=None, lshear=False, dx=None, dy=None, dz=None)
 
     Keyword arguments:
 
@@ -58,6 +60,12 @@ def write_snapshot(
     *nghost*:
       Number of ghost zones.
 
+    *persist*:
+      Structure of persistent values
+
+    *param*:
+      Optional Param object.
+
     *t*:
       Time of the snapshot.
 
@@ -75,6 +83,7 @@ def write_snapshot(
     from os.path import join
     import numpy as np
     from scipy.io import FortranFile
+    from pencil import read
 
     # Determine the shape of the input snapshot.
     nx = snapshot.shape[3]
@@ -120,6 +129,9 @@ def write_snapshot(
             sys.stdout.flush()
     else:
         z = np.arange(0, nz)
+
+    if (param is None) and lshear:
+        param = read.param(datadir=sim_datadir, quiet=True)
 
     # Add ghost zones to the xyz arrays.
     x_ghost = np.zeros(nx + 2 * nghost, dtype=data_type)
@@ -189,10 +201,28 @@ def write_snapshot(
                 meta_data_cpu = np.append(meta_data_cpu, y_cpu)
                 meta_data_cpu = np.append(meta_data_cpu, z_cpu)
                 meta_data_cpu = np.append(meta_data_cpu, [dx, dy, dz])
+
                 if lshear:
-                    meta_data_cpu = np.append(meta_data_cpu, lshear)
+                    meta_data_cpu = np.append(meta_data_cpu, param.deltay)
+
                 meta_data_cpu = meta_data_cpu.astype(data_type)
                 destination_file.write_record(meta_data_cpu)
+
+                if persist != None:
+                    key0=list(read.record_types.keys())[0]
+                    destination_file.write_record(np.int32(read.record_types[key0][0]))
+                    for item in tuple(persist.__dict__.items()):
+                        for key in read.record_types.keys():
+                            if key == item[0]:
+                                destination_file.write_record(np.int32(read.record_types[key][0]))
+                                if read.record_types[key][1] == 'd':
+                                    destination_file.write_record(np.array(item[1], dtype=data_type))
+                                else:
+                                    if read.record_types[key][1] == 'i':
+                                        destination_file.write_record(np.int32(item[1]))
+
+                    destination_file.write_record(np.int32(read.record_types[key0][0]))
+
                 destination_file.close()
                 iproc += 1
 
@@ -350,11 +380,11 @@ def write_h5_snapshot(
         "precision",
     ]
     
-    if settings == None:
+    if settings is None:
         settings = {}
         dim = read.dim(datadir=sim_datadir)
         for key in skeys:
-            settings[key] = dim.__getattribute__(key)
+            settings[key] = getattr(dim, key)
         settings["precision"] = precision.upper().encode() #Uppercase to be consistent with the convention used in snapshots written by io_hdf5.f90
         settings["nghost"] = nghost
         settings["version"] = np.int32(0)
@@ -376,18 +406,13 @@ def write_h5_snapshot(
         "dy_tilde",
         "dz_tilde",
     ]
-    if grid == None:
+    if grid is None:
         grid = read.grid(datadir=sim_datadir, quiet=True)
     else:
-        gd_err = False
         for key in gkeys:
             if not key in grid.__dict__.keys():
-                print("ERROR: key " + key + " missing from grid")
-                sys.stdout.flush()
-                gd_err = True
-        if gd_err:
-            print("ERROR: grid incomplete")
-            sys.stdout.flush()
+                raise RuntimeError(f"key {key} missing from grid")
+
     ukeys = [
         "length",
         "velocity",
@@ -400,39 +425,21 @@ def write_h5_snapshot(
         "mass",
         "system",
     ]
-    if param == None:
+    if param is None:
         param = read.param(datadir=sim_datadir, quiet=True)
-        param.__setattr__("unit_mass", param.unit_density * param.unit_length ** 3)
-        param.__setattr__("unit_energy", param.unit_mass * param.unit_velocity ** 2)
-        param.__setattr__("unit_time", param.unit_length / param.unit_velocity)
-        param.__setattr__("unit_flux", param.unit_mass / param.unit_time ** 3)
+        param.unit_mass = param.unit_density * param.unit_length ** 3
+        param.unit_energy = param.unit_mass * param.unit_velocity ** 2
+        param.unit_time = param.unit_length / param.unit_velocity
+        param.unit_flux = param.unit_mass / param.unit_time ** 3
         param.unit_system = param.unit_system.encode()
 
     # check whether the snapshot matches the simulation shape
     if lghosts:
-        try:
-            snapshot.shape[0] == settings["mvar"]
-            snapshot.shape[1] == settings["mx"]
-            snapshot.shape[2] == settings["my"]
-            snapshot.shape[3] == settings["mz"]
-        except ValueError:
-            print(
-                "ERROR: snapshot shape {} ".format(snapshot.shape)
-                + "does not match simulation dimensions with ghosts."
-            )
-            sys.stdout.flush()
+        if snapshot.shape != (settings["mvar"], settings["mz"], settings["my"], settings["mx"]):
+            raise ValueError(f"snapshot shape {snapshot.shape} does not match simulation dimensions with ghosts.")
     else:
-        try:
-            snapshot.shape[0] == settings["mvar"]
-            snapshot.shape[1] == settings["nx"]
-            snapshot.shape[2] == settings["ny"]
-            snapshot.shape[3] == settings["nz"]
-        except ValueError:
-            print(
-                "ERROR: snapshot shape {} ".format(snapshot.shape)
-                + "does not match simulation dimensions without ghosts."
-            )
-            sys.stdout.flush()
+        if snapshot.shape != (settings["mvar"], settings["nz"], settings["ny"], settings["nx"]):
+            raise ValueError(f"snapshot shape {snapshot.shape} does not match simulation dimensions without ghosts.")
 
     # Determine the precision used and ensure snapshot has correct data_type.
     if precision == "f":
@@ -442,12 +449,7 @@ def write_h5_snapshot(
         data_type = np.float64
         snapshot = np.float64(snapshot)
     else:
-        print(
-            "ERROR: Precision {0} not understood.".format(precision)
-            + " Must be either 'f' or 'd'"
-        )
-        sys.stdout.flush()
-        return -1
+        raise ValueError(f"Precision {precision} not understood; must be either 'f' or 'd'")
 
     # Check that the shape does not conflict with the proc numbers.
     if (
@@ -455,31 +457,23 @@ def write_h5_snapshot(
         or (settings["ny"] % settings["nprocy"] > 0)
         or (settings["nz"] % settings["nprocz"] > 0)
     ):
-        print(
+        raise ValueError(
             "ERROR: Shape of the input array is not compatible with the "
             + "cpu layout. Make sure that nproci devides ni."
         )
-        sys.stdout.flush()
-        return -1
 
     # Check the shape of the xyz arrays if specified and overwrite grid values.
-    if x != None:
+    if x is not None:
         if len(x) != settings["mx"]:
-            print("ERROR: x array is incompatible with the shape of snapshot.")
-            sys.stdout.flush()
-            return -1
+            raise ValueError("x array is incompatible with the shape of snapshot.")
         grid.x = data_type(x)
-    if y != None:
+    if y is not None:
         if len(y) != settings["my"]:
-            print("ERROR: y array is incompatible with the shape of snapshot.")
-            sys.stdout.flush()
-            return -1
+            raise ValueError("y array is incompatible with the shape of snapshot.")
         grid.y = data_type(y)
-    if z != None:
+    if z is not None:
         if len(z) != settings["mz"]:
-            print("ERROR: z array is incompatible with the shape of snapshot.")
-            sys.stdout.flush()
-            return -1
+            raise ValueError("z array is incompatible with the shape of snapshot.")
         grid.z = data_type(z)
 
     # Define a time.
@@ -487,12 +481,15 @@ def write_h5_snapshot(
         t = data_type(0.0)
 
     # making use of pc_hdf5 functionality:
+    #2025-Nov-07/Kishore: if we are not going to use the user-provided value of
+    #2025-Nov-07/Kishore: state, why is it an argument of this function?
     if not proc == None:
         state = "a"
     else:
         state = "w"
     filename = join(datadir, file_name)
-    print("write_h5_snapshot: filename =", filename)
+    if not quiet:
+        print("write_h5_snapshot: filename =", filename)
     with open_h5(
         filename,
         state,
@@ -517,39 +514,24 @@ def write_h5_snapshot(
                     continue
                 #create ghost zones if required
                 if not lghosts:
-                    tmp_arr = np.zeros(
-                        [
-                            snapshot.shape[1] + 2 * nghost,
-                            snapshot.shape[2] + 2 * nghost,
-                            snapshot.shape[3] + 2 * nghost,
-                        ]
-                    )
+                    tmp_arr = np.zeros([settings["mz"], settings["my"], settings["mx"]])
                     tmp_arr[
                         dim.n1 : dim.n2 + 1, dim.m1 : dim.m2 + 1, dim.l1 : dim.l2 + 1
-                    ] = np.array(snapshot[indx.__getattribute__(key) - 1])
-                    dataset_h5(
-                        data_grp,
-                        key,
-                        status=state,
-                        data=tmp_arr,
-                        dtype=data_type,
-                        overwrite=overwrite,
-                        rank=rank,
-                        comm=comm,
-                        size=size,
-                    )
+                    ] = snapshot[getattr(indx, key) - 1]
                 else:
-                    dataset_h5(
-                        data_grp,
-                        key,
-                        status=state,
-                        data=np.array(snapshot[indx.__getattribute__(key) - 1]),
-                        dtype=data_type,
-                        overwrite=overwrite,
-                        rank=rank,
-                        comm=comm,
-                        size=size,
-                    )
+                    tmp_arr = snapshot[getattr(indx, key) - 1]
+
+                dataset_h5(
+                    data_grp,
+                    key,
+                    status=state,
+                    data=tmp_arr,
+                    dtype=data_type,
+                    overwrite=overwrite,
+                    rank=rank,
+                    comm=comm,
+                    size=size,
+                )
         else:
             for key in indx.__dict__.keys():
                 if key in ["uu", "keys", "aa", "KR_Frad", "uun", "gg", "bb"]:
@@ -584,7 +566,7 @@ def write_h5_snapshot(
             for key in indx.__dict__.keys():
                 if key in ["uu", "keys", "aa", "KR_Frad", "uun", "gg", "bb"]:
                     continue
-                tmp_arr = np.array(snapshot[indx.__getattribute__(key) - 1])
+                tmp_arr = np.array(snapshot[getattr(indx, key) - 1])
                 data_grp[key][
                     n1 + ipz * nz : n2 + ipz * nz + 1,
                     m1 + ipy * ny : m2 + ipy * ny + 1,
@@ -642,7 +624,7 @@ def write_h5_snapshot(
                 grid_grp,
                 key,
                 status=state,
-                data=(grid.__getattribute__(key)),
+                data=(getattr(grid, key)),
                 dtype=data_type,
                 rank=rank,
                 comm=comm,
@@ -653,7 +635,7 @@ def write_h5_snapshot(
             grid_grp,
             "Ox",
             status=state,
-            data=(param.__getattribute__("xyz0")[0],),
+            data=(param.xyz0[0],),
             dtype=data_type,
             rank=rank,
             comm=comm,
@@ -664,7 +646,7 @@ def write_h5_snapshot(
             grid_grp,
             "Oy",
             status=state,
-            data=(param.__getattribute__("xyz0")[1],),
+            data=(param.xyz0[1],),
             dtype=data_type,
             rank=rank,
             comm=comm,
@@ -675,7 +657,7 @@ def write_h5_snapshot(
             grid_grp,
             "Oz",
             status=state,
-            data=(param.__getattribute__("xyz0")[2],),
+            data=(param.xyz0[2],),
             dtype=data_type,
             rank=rank,
             comm=comm,
@@ -698,7 +680,7 @@ def write_h5_snapshot(
                     unit_grp,
                     key,
                     status=state,
-                    data=(param.__getattribute__("unit_" + key),),
+                    data=(getattr(param, "unit_" + key),),
                     rank=rank,
                     comm=comm,
                     size=size,
@@ -709,7 +691,7 @@ def write_h5_snapshot(
                     unit_grp,
                     key,
                     status=state,
-                    data=param.__getattribute__("unit_" + key),
+                    data=getattr(param, "unit_" + key),
                     rank=rank,
                     comm=comm,
                     size=size,

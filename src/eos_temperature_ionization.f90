@@ -106,7 +106,7 @@ module EquationOfState
 !
 !  Set indices for auxiliary variables.
 !
-      call farray_register_auxiliary('yH',iyH)
+      call farray_register_auxiliary('yH',iyH,rhs=.true.)
 !
 !  Writing files for use with IDL
 !
@@ -2079,7 +2079,7 @@ module EquationOfState
 
     use Syscalls, only: copy_addr
 
-    integer, parameter :: n_pars=1
+    integer, parameter :: n_pars=100
     integer(KIND=ikind8), dimension(n_pars) :: p_par
 
     call copy_addr(cs20,p_par(1))
@@ -2112,6 +2112,8 @@ module EquationOfState
     call copy_addr(ymetals,p_par(28))
     call copy_addr(lhminus_opacity_correction,p_par(29)) ! bool
     call copy_addr(kappa0,p_par(30))
+    call copy_addr(lconst_yh,p_par(31)) ! bool
+    call copy_addr(yh_const,p_par(32))
 
     endsubroutine pushpars2c
 !***********************************************************************

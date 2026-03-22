@@ -38,6 +38,7 @@ module Energy
   real :: zcool=0.0, zcool1=0.0, zcool2=0.0
   real :: rcool=0.0, rcool1=0.0, rcool2=0.0, ppcool=1.
   real :: wcool=0.1, wcool1=0.1, wcool2=0.1, deltaT=0.0, cs2cool2=0.0
+  real :: rheat=0.0, heat_int=0.0
   real :: TT_int, TT_ext, cs2_int, cs2_ext
   real :: cool_int=0.0, cool_ext=0.0, ampl_TT=0.0
   real :: chi_jump_shock=1.0, xchi_shock=0.0,widthchi_shock=0.02
@@ -105,11 +106,11 @@ module Energy
   real :: xjump_mid=0.0,yjump_mid=0.0,zjump_mid=0.0
   real :: wpatch=0.0, amp_patch=1.0, patch_fac=1.0, coolfac=0.0
   real :: pp_cool=0.0
+  real, dimension(9) :: coef_cs2=0.0
   integer, parameter :: nheatc_max=4
-  integer :: iglobal_hcond=0
-  integer :: iglobal_glhc=0
   integer :: ippaux=0
-  integer, target :: isothtop=0
+  integer, target :: isothtop=0 !PAR_DOC: flag for isothermal top layer for
+    !PAR_DOC: \code{initss=piecew-poly}.
   integer :: cool_type=1
   integer, parameter :: ncool_patch_max=500
   integer :: ncool_patch=0
@@ -137,7 +138,8 @@ module Energy
   logical :: reinitialize_ss=.false.
   logical :: lviscosity_heat=.true.
   logical :: lfreeze_sint=.false.,lfreeze_sext=.false.
-  logical :: lhcond_global=.false.,lchit_aniso_simplified=.false.
+  logical :: lchit_aniso_simplified=.false.
+  logical, target :: lhcond_global=.false.
   logical :: lchit_total=.false., lchit_mean=.false., lchit_fluct=.false.
   logical :: lchiB_simplified=.false.
   logical :: lfpres_from_pressure=.false.
@@ -159,7 +161,7 @@ module Energy
   logical :: lchit_noT=.false.
   logical :: lss_running_aver_as_aux=.false.
   logical :: lss_running_aver_as_var=.false.
-  logical :: lss_running_aver=.false.
+  logical, target :: lss_running_aver=.false.
   logical :: lFenth_as_aux=.false.
   logical :: lcool_prof_as_var=.false.
   logical :: lss_flucz_as_aux=.false., lsld_char_wprofr=.false.
@@ -191,8 +193,8 @@ module Energy
 !  xy-averaged field
 !
   real, dimension (mz) :: ssmz,cs2mz
-  real, dimension (nz,3) :: gssmz
-  real, dimension (nz) :: del2ssmz
+  real, dimension (mz,3) :: gssmz
+  real, dimension (mz) :: del2ssmz
   real, dimension (mx) :: ssmx
   real, dimension (nx,3) :: gssmx
   real, dimension (nx) :: cs2mx, del2ssmx
@@ -265,7 +267,7 @@ module Energy
       heattype, nheat_rho, nheat_TT, lrhs_max, &
       wpatch, amp_patch, ncool_patch, &
       patch_fac, coolfac, lnew_cooling_patches, lcool_prof_as_var, &
-      tau_cool_pp,pp_cool
+      tau_cool_pp,pp_cool, coef_cs2, rheat, heat_int
 !
 !  Diagnostic variables for print.in
 !  (need to be consistent with reset list below).
@@ -289,6 +291,8 @@ module Energy
                                 ! DIAG_DOC:   \quad(mean squared entropy)
   integer :: idiag_eem=0        ! DIAG_DOC: $\left<e\right>$
   integer :: idiag_ppm=0        ! DIAG_DOC: $\left<p\right>$
+  integer :: idiag_ppmax=0      ! DIAG_DOC: $\max(p)$
+  integer :: idiag_ppmin=0      ! DIAG_DOC: $\min(p)$
   integer :: idiag_csm=0        ! DIAG_DOC: $\left<c_{\rm s}\right>$
   integer :: idiag_csmax=0      ! DIAG_DOC: $\max (c_{\rm s})$
   integer :: idiag_cgam=0       ! DIAG_DOC: $\left<c_{\gamma}\right>$
@@ -505,6 +509,7 @@ module Energy
 
   real, dimension (nx) :: Hmax,ssmax,diffus_chi,diffus_chi3,cs2cool_x, &
                           chit_prof,chit_prof_fluct,hcond,K_kramers
+  !$omp threadprivate(diffus_chi,chit_prof_fluct,K_kramers)
   real, dimension (nx,3) :: gss1, gss0
   real, dimension (nz) :: profz_cool, profz1_cool, profz_heat
   real, dimension (nx) :: profr_cool, profr1_cool, profr2_cool, profr_heat, profx_heat
@@ -556,7 +561,7 @@ module Energy
         lslope_limit_diff = .true.
         if (dimensionality<3)lisotropic_advection=.true.
         if (isld_char == 0) then
-          call farray_register_auxiliary('sld_char',isld_char,communicated=.true.,on_gpu=lgpu)
+          call farray_register_auxiliary('sld_char',isld_char,communicated=.true.,rhs=.true.)
           if (lroot) write(15,*) 'sld_char = fltarr(mx,my,mz)*one'
           aux_var(aux_count)=',sld_char'
           if (naux+naux_com <  maux+maux_com) aux_var(aux_count)=trim(aux_var(aux_count))//' $'
@@ -670,6 +675,8 @@ module Energy
       call put_shared_variable('mpoly0',mpoly0)
       call put_shared_variable('mpoly1',mpoly1)
       call put_shared_variable('mpoly2',mpoly2)
+      call put_shared_variable('lss_running_aver',lss_running_aver)
+      call put_shared_variable('lhcond_global',lhcond_global)
 !      call put_shared_variable('lheatc_chit',lheatc_chit)
 
       if (.not.ldensity.or.lboussinesq) &
@@ -1019,7 +1026,13 @@ module Energy
           if (cool/=0.) cs2cool=cs0**2
           mpoly=mpoly0  ! needed to compute Fbot when bc=c1 (L383)
 !
-      endselect
+        case ('isothermal')
+          ! this should be general
+          if (T0==0) then
+            call get_gamma_etc(gamma); gamma_m1=gamma-1.
+            T0=cs20/gamma_m1
+          endif
+       endselect
 !
 !  Turn off pressure gradient term and advection for 0-D runs.
 !
@@ -1271,7 +1284,7 @@ module Energy
                          tau_cool_ss/=0.0 .or. tau_relax_ss/=0.0 .or. &
                          cool_uniform/=0.0 .or. cool_newton/=0.0 .or. &
                          (cool_ext/=0.0 .and. cool_int/=0.0) .or. lturbulent_heat .or. &
-                         (tau_cool2 /=0) .or. lheat_cool_gravz)
+                         (tau_cool2 /=0.0) .or. lheat_cool_gravz .or. heat_int/=0.0)
 !
 ! Set the constants
 !
@@ -2640,7 +2653,7 @@ module Energy
 !  AJ: PLEASE IDENTIFY AUTHOR
 !
       use EquationOfState, only: eoscalc
-      use Mpicomm, only: mpibcast_real, MPI_COMM_WORLD
+      use Mpicomm, only: mpibcast_real, MPI_COMM_PENCIL
 !
       real, dimension (mx,my,mz,mfarray) :: f
       real, dimension(nx) :: absz
@@ -2707,10 +2720,10 @@ module Energy
           call eoscalc(irho_pp,rho,pp,ss=f(l1:l2,m,n,iss))
 !
           fmpi1=cs2bot
-          call mpibcast_real(fmpi1,0,comm=MPI_COMM_WORLD)
+          call mpibcast_real(fmpi1,0,comm=MPI_COMM_PENCIL)
           cs2bot=fmpi1
           fmpi1=cs2top
-          call mpibcast_real(fmpi1,ncpus-1,comm=MPI_COMM_WORLD)
+          call mpibcast_real(fmpi1,ncpus-1,comm=MPI_COMM_PENCIL)
           cs2top=fmpi1
 !
         endif
@@ -2733,7 +2746,7 @@ module Energy
 !  20-jan-15/MR: changes for use of reference state.
 !
       use EquationOfState , only: eoscalc, getmu, get_gamma_etc
-      use Mpicomm, only: mpibcast_real, MPI_COMM_WORLD
+      use Mpicomm, only: mpibcast_real, MPI_COMM_PENCIL
 !
       real, dimension (mx,my,mz,mfarray) :: f
       real, dimension(nx) :: rho,pp
@@ -2780,10 +2793,10 @@ module Energy
         call eoscalc(irho_pp,rho,pp,ss=f(l1:l2,m,n,iss))
 !
         fmpi1=cs2bot
-        call mpibcast_real(fmpi1,0,comm=MPI_COMM_WORLD)
+        call mpibcast_real(fmpi1,0,comm=MPI_COMM_PENCIL)
         cs2bot=fmpi1
         fmpi1=cs2top
-        call mpibcast_real(fmpi1,ncpus-1,comm=MPI_COMM_WORLD)
+        call mpibcast_real(fmpi1,ncpus-1,comm=MPI_COMM_PENCIL)
         cs2top=fmpi1
 !
        enddo
@@ -2805,7 +2818,7 @@ module Energy
 !   20-jan-15/MR: changes for use of reference state.
 !
       use EquationOfState, only: eoscalc
-      use Mpicomm, only: mpibcast_real, MPI_COMM_WORLD
+      use Mpicomm, only: mpibcast_real, MPI_COMM_PENCIL
 !
       real, dimension (mx,my,mz,mfarray) :: f
 
@@ -2835,10 +2848,10 @@ module Energy
         endif
 
         fmpi1=cs2bot
-        call mpibcast_real(fmpi1,0,comm=MPI_COMM_WORLD)
+        call mpibcast_real(fmpi1,0,comm=MPI_COMM_PENCIL)
         cs2bot=fmpi1
         fmpi1=cs2top
-        call mpibcast_real(fmpi1,ncpus-1,comm=MPI_COMM_WORLD)
+        call mpibcast_real(fmpi1,ncpus-1,comm=MPI_COMM_PENCIL)
         cs2top=fmpi1
 !
       enddo
@@ -2988,7 +3001,8 @@ module Energy
         lpenc_requested(i_rho1)=.true.
       endif
 !
-      if (cool/=0.0 .or. cool_ext/=0.0 .or. cool_int/=0.0 .or. luminosity/=0.0) then
+      if (cool/=0.0 .or. cool_ext/=0.0 .or. cool_int/=0.0 .or. luminosity/=0.0 .or. &
+          heat_int/=0.0) then
         if (cooltype=='Lambda-constant') then
           lpenc_requested(i_rho)=.true.
         elseif (cooltype=='corona') then
@@ -3009,6 +3023,8 @@ module Energy
         elseif (cooltype=='pressure'.or.cooling_profile=='surface_pp') then
           lpenc_requested(i_cs2)=.true.
           lpenc_requested(i_pp)=.true.
+        elseif (heattype=='imposed-cs2-core') then
+          lpenc_requested(i_cs2)=.true.
         else
           lpenc_requested(i_cs2)=.true.
         endif
@@ -3247,7 +3263,10 @@ module Energy
 !
       lpenc_diagnos2d(i_ss)=.true.
 !
-      if (idiag_dtchi/=0) lpenc_diagnos(i_rho1)=.true.
+      if (idiag_dtchi/=0) then
+              lpenc_diagnos(i_rho1)=.true.
+              ltimestep_diagnostics = .true.
+      endif
       if (idiag_dtH/=0) lpenc_diagnos(i_ee)=.true.
       if (idiag_Hmax/=0) lpenc_diagnos(i_ee)=.true.
       if (idiag_tauhmin/=0) then
@@ -3265,7 +3284,7 @@ module Energy
       endif
       if (idiag_csm/=0 .or. idiag_csmax/=0) lpenc_diagnos(i_cs2)=.true.
       if (idiag_eem/=0) lpenc_diagnos(i_ee)=.true.
-      if (idiag_ppm/=0) lpenc_diagnos(i_pp)=.true.
+      if (idiag_ppm/=0 .or. idiag_ppmax/=0 .or. idiag_ppmin/=0) lpenc_diagnos(i_pp)=.true.
       if (idiag_pdivum/=0.or.idiag_pdivumz/=0) then
         lpenc_diagnos(i_pp)=.true.
         lpenc_diagnos(i_divu)=.true.
@@ -3374,7 +3393,10 @@ module Energy
           idiag_uyTTmxy/=0 .or. idiag_uzTTmxy/=0 .or. idiag_ursphTTmphi/=0) &
         lpenc_diagnos2d(i_TT)=.true.
       if (idiag_yHm/=0 .or. idiag_yHmax/=0) lpenc_diagnos(i_yH)=.true.
-      if (idiag_dtc/=0) lpenc_diagnos(i_cs2)=.true.
+      if (idiag_dtc/=0) then
+        ltimestep_diagnostics = .true.
+        lpenc_diagnos(i_cs2)=.true.
+      endif
       if (idiag_TTp/=0) then
         lpenc_diagnos(i_rho)=.true.
         lpenc_diagnos(i_cs2)=.true.
@@ -3569,6 +3591,10 @@ module Energy
       endif
 !
       if (lcooling_patches.and.lpencil(i_cool_prof)) p%cool_prof=f(l1:l2,m,n,icool_prof)
+
+      if (lupdate_courant_dt) then
+        if (lhydro.and.ldensity) advec_cs2=p%advec_cs2
+      endif
 !
     endsubroutine calc_pencils_energy
 !***********************************************************************
@@ -3708,7 +3734,7 @@ module Energy
       if (lheatc_chiconst) call calc_heatcond_constchi(f,df,p)
       if (lheatc_chi_cspeed) call calc_heatcond_cspeed_chi(df,p)
       if (lheatc_sqrtrhochiconst) call calc_heatcond_sqrtrhochi(df,p)
-      if (lheatc_shock.or.lheatc_shock2)    call calc_heatcond_shock(df,p)
+      if (lheatc_shock.or.lheatc_shock2) call calc_heatcond_shock(df,p)
       if (lheatc_shock_profr) call calc_heatcond_shock_profr(df,p)
       if (lheatc_hyper3ss)    call calc_heatcond_hyper3(df,p)
       if (lheatc_spitzer)     call calc_heatcond_spitzer(df,p)
@@ -3761,8 +3787,8 @@ module Energy
 !
 !  Enforce maximum heating rate timestep constraint
 !
+
       if (lupdate_courant_dt) then
-        if (lhydro.and.ldensity) advec_cs2=p%advec_cs2
         if (lthdiff_Hmax.or.idiag_dtH/=0) then
           if (lthdiff_Hmax) then
             ssmax=max(ssmax,abs(df(l1:l2,m,n,iss))*p%cv1)
@@ -3804,8 +3830,8 @@ module Energy
         uT=1. !(AB: for the time being; to keep compatible with auto-test
 
         if (ldt) then
+          if (idiag_dtchi/=0) call max_mn_name(diffus_chi/cdtv,idiag_dtchi,l_dt=.true.)
           if (.not.lmultithread) then
-            if (idiag_dtchi/=0) call max_mn_name(diffus_chi/cdtv,idiag_dtchi,l_dt=.true.)
             if (idiag_dtH/=0) then
               if (lthdiff_Hmax) then
                 call max_mn_name(ssmax/cdts,idiag_dtH,l_dt=.true.)
@@ -3843,10 +3869,12 @@ module Energy
         if (idiag_ssruzm/=0) call sum_mn_name(p%ss*p%rho*p%uu(:,3),idiag_ssruzm)
         if (idiag_ssuzm/=0) call sum_mn_name(p%ss*p%uu(:,3),idiag_ssuzm)
         call sum_mn_name(p%ss,idiag_ssm)
-        call sum_mn_name(p%ss*p%cp1,idiag_ssbycpm)
+        if (idiag_ssbycpm/=0) call sum_mn_name(p%ss*p%cp1,idiag_ssbycpm)
         if (idiag_ss2m/=0) call sum_mn_name(p%ss**2,idiag_ss2m)
         call sum_mn_name(p%ee,idiag_eem)
         call sum_mn_name(p%pp,idiag_ppm)
+        if (idiag_ppmax/=0) call max_mn_name( p%pp,idiag_ppmax)
+        if (idiag_ppmin/=0) call max_mn_name(-p%pp,idiag_ppmin,lneg=.true.)
         call sum_mn_name(p%cs2,idiag_csm,lsqrt=.true.)
         call max_mn_name(p%cs2,idiag_csmax,lsqrt=.true.)
         if (idiag_cgam/=0) call sum_mn_name(16.*real(sigmaSB)*p%TT**3*p%cp1*p%rho1,idiag_cgam)
@@ -3893,8 +3921,8 @@ module Energy
 !
 !  Radiative heat flux at the bottom (assume here that hcond=hcond0=const).
 !
-        if (idiag_fradbot/=0.and.lfirst_proc_z) then
-          if (n==n1) then
+        if (idiag_fradbot/=0) then
+          if (n==n1 .and. lfirst_proc_z) then
             if (hcond0==0.) then
               Ktmp=chi*p%rho*p%cp
             else
@@ -3902,13 +3930,13 @@ module Energy
             endif
             fradz=sum(-Ktmp*p%TT*p%glnTT(:,3)*dsurfxy)
           endif
-          call surf_mn_name(fradz,idiag_fradbot,n1)
+          call surf_mn_name(fradz,idiag_fradbot,n1,lfirst_proc_z)
         endif
 !
 !  Radiative heat flux at the top (assume here that hcond=hcond0=const).
 !
-        if (idiag_fradtop/=0.and.llast_proc_z) then
-          if (n==n2) then
+        if (idiag_fradtop/=0) then
+          if (n==n2 .and. llast_proc_z) then
             if (hcond0==0.) then
               Ktmp=chi*p%rho*p%cp
             else
@@ -3916,14 +3944,14 @@ module Energy
             endif
             fradz=sum(-Ktmp*p%TT*p%glnTT(:,3)*dsurfxy)
           endif
-          call surf_mn_name(fradz,idiag_fradtop,n2)
+          call surf_mn_name(fradz,idiag_fradtop,n2,llast_proc_z)
         endif
 !
 !  Mean temperature at the top.
 !
-        if (idiag_TTtop/=0.and.llast_proc_z) then
-          if (n==n2) TTtop=sum(p%TT*dsurfxy)
-          call surf_mn_name(TTtop,idiag_TTtop,n2)
+        if (idiag_TTtop/=0) then
+          if (n==n2 .and. llast_proc_z) TTtop=sum(p%TT*dsurfxy)
+          call surf_mn_name(TTtop,idiag_TTtop,n2,llast_proc_z)
         endif
 !
 !  Calculate integrated temperature in limited radial range.
@@ -4227,6 +4255,29 @@ module Energy
       real, dimension (mx,my,mz,mfarray) :: f
       type(pencil_case) :: p
 
+      real, dimension(nx) :: thdiff
+      real, dimension(nx) :: g2,Krho1
+      real, dimension(nx,3) :: dummy
+!
+! Done here since with GPU, RHS is not evaluated and thus not diffus_chi.
+!
+      if (lmultithread .and. lupdate_courant_dt) then
+
+        if (idiag_dtdiffus/=0 .or. idiag_dtchi/=0) diffus_chi = 0.0
+        if (lheatc_Kprof)    call calc_heatcond_arrays(f,p,thdiff)
+        if (lheatc_chiconst) call calc_heatcond_constchi_arr(f,p,thdiff)
+        if (lheatc_Kconst)   call calc_heatcond_constK_arrays(p,thdiff)
+        if (lheatc_kramers) then
+          call kramers_get_K(p,g2,Krho1)
+          diffus_chi=diffus_chi+(p%cv1*Krho1+chi_t)*dxyz_2
+        endif
+        !TP: a bit ugly that we have this so explicitly here but works for now
+        if (chi_t1/=0..and.lchit_fluct) then
+          call get_chit_prof_fluct(dummy)
+          diffus_chi=diffus_chi+chit_prof_fluct*dxyz_2
+        endif
+      endif
+
       call calc_2d_diagnostics_energy(p)
       call calc_1d_diagnostics_energy(f,p)
       call calc_0d_diagnostics_energy(p)
@@ -4275,7 +4326,7 @@ module Energy
 !    Slope limited diffusion: update characteristic speed
 !    Not staggered yet
 !
-      if (lslope_limit_diff .and. llast) then
+     if (lslope_limit_diff .and. llast) then
         call get_gamma_etc(gamma,cv=cv); gamma_m1=gamma-1.; cv1=1./cv
 !
        if (ldensity_nolog) then
@@ -4346,7 +4397,7 @@ module Energy
 !
       use EquationOfState, only: get_gamma_etc
       use Deriv, only: der_x, der2_x, der_z, der2_z
-      use Mpicomm, only: mpiallreduce_sum, mpibcast_real_arr, MPI_COMM_WORLD
+      use Mpicomm, only: mpiallreduce_sum, mpibcast_real_arr, MPI_COMM_PENCIL
       use Sub, only: finalize_aver,calc_all_diff_fluxes,div,smooth,global_mean
       Use General, only: random_number_wrapper
 !
@@ -4381,9 +4432,9 @@ module Energy
 !
 !  Compute first and second derivatives.
 !
-        gssmz(:,1:2)=0.
-        call der_z(ssmz,gssmz(:,3))
-        call der2_z(ssmz,del2ssmz)
+        gssmz(n1:n2,1:2)=0.
+        call der_z(ssmz,gssmz(n1:n2,3))
+        call der2_z(ssmz,del2ssmz(n1:n2))
       endif
 !
 !  Compute yz- and z-averages of entropy.
@@ -4690,36 +4741,23 @@ module Energy
 !
     endsubroutine set_border_entropy
 !***********************************************************************
-    subroutine calc_heatcond_constchi(f,df,p)
-!
-!  Heat conduction for constant value of chi=K/(rho*cp)
-!  This routine also adds in turbulent diffusion, if chi_t /= 0.
-!  Ds/Dt = ... + 1/(rho*T) grad(flux), where
-!  flux = chi*rho*gradT + chi_t*rho*T*grads
-!  This routine is currently not correct when ionization is used.
-!
-!  29-sep-02/axel: adapted from calc_heatcond_simple
-!  12-mar-06/axel: used p%glnTT and p%del2lnTT, so that general cp work ok
+    subroutine calc_heatcond_constchi_arr(f,p,thdiff)
 !
       use Diagnostics!, only: max_mn_name
       use EquationOfState, only: get_gamma_etc
       use Sub, only: dot, multmv_transp, multsv_mn
-!
+
+      real, dimension (nx), intent(out) :: thdiff
       real, dimension (mx,my,mz,mfarray) :: f
-      real, dimension (mx,my,mz,mvar) :: df
       type (pencil_case) :: p
 !
-      intent(inout) :: df
-      intent(in) :: p
-!
-      real, dimension(nx) :: thdiff, g2
+      real, dimension(nx) :: g2
       real, dimension(nx,3) :: gradchit_prof
       real :: gamma
 !
 !  Check that chi is ok.
 !
-      if (headtt) print*,'calc_heatcond_constchi: chi=',chi
-!
+      if (headtt) print*,'calc_heatcond_constchi_arr: chi=',chi
 !
 !  Heat conduction
 !  Note: these routines require revision when ionization turned on
@@ -4751,11 +4789,6 @@ module Energy
 
       endif
 !
-!  Add heat conduction to entropy equation.
-!
-      df(l1:l2,m,n,iss)=df(l1:l2,m,n,iss)+thdiff
-      if (headtt) print*,'calc_heatcond_constchi: added thdiff'
-!
 !  Check maximum diffusion from thermal diffusion.
 !  With heat conduction, the second-order term for entropy is
 !  gamma*chi*del2ss.
@@ -4770,6 +4803,39 @@ module Energy
         if (chi_t/=0.) diffus_chi = diffus_chi+chi_t*chit_prof*dxyz_2
       endif
 !
+    endsubroutine calc_heatcond_constchi_arr
+!***********************************************************************
+    subroutine calc_heatcond_constchi(f,df,p)
+!
+!  Heat conduction for constant value of chi=K/(rho*cp)
+!  This routine also adds in turbulent diffusion, if chi_t /= 0.
+!  Ds/Dt = ... + 1/(rho*T) grad(flux), where
+!  flux = chi*rho*gradT + chi_t*rho*T*grads
+!  This routine is currently not correct when ionization is used.
+!
+!  29-sep-02/axel: adapted from calc_heatcond_simple
+!  12-mar-06/axel: used p%glnTT and p%del2lnTT, so that general cp work ok
+!
+      use Diagnostics!, only: max_mn_name
+      use EquationOfState, only: get_gamma_etc
+      use Sub, only: dot, multmv_transp, multsv_mn
+!
+      real, dimension (mx,my,mz,mfarray) :: f
+      real, dimension (mx,my,mz,mvar) :: df
+      type (pencil_case) :: p
+!
+      intent(inout) :: df
+      intent(in) :: p
+!
+      real, dimension(nx) :: thdiff
+
+      call calc_heatcond_constchi_arr(f,p,thdiff)
+!
+!  Add heat conduction to entropy equation.
+!
+      df(l1:l2,m,n,iss)=df(l1:l2,m,n,iss)+thdiff
+      if (headtt) print*,'calc_heatcond_constchi: added thdiff'
+
     endsubroutine calc_heatcond_constchi
 !***********************************************************************
     subroutine calc_heatcond_cspeed_chi(df,p)
@@ -5044,7 +5110,7 @@ module Energy
 !
       df(l1:l2,m,n,iss) = df(l1:l2,m,n,iss) + thdiff
 !
-      if (headtt) print*,'calc_heatcond_hyper3: added thdiff'
+      if (headtt) print*,'calc_heatcond_hyper3_polar: added thdiff'
 !
       if (lupdate_courant_dt) diffus_chi3=diffus_chi3+chi_hyper3*pi4_1*dxmin_pencil**4
 !
@@ -5081,7 +5147,7 @@ module Energy
 !
       df(l1:l2,m,n,iss) = df(l1:l2,m,n,iss) + thdiff
 !
-      if (headtt) print*,'calc_heatcond_hyper3: added thdiff'
+      if (headtt) print*,'calc_heatcond_hyper3_mesh: added thdiff'
 !
       if (lupdate_courant_dt) then
         if (ldynamical_diffusion) then
@@ -5215,7 +5281,7 @@ module Energy
 !
 !  Check that chi is ok.
 !
-      if (headtt) print*,'calc_heatcond_shock: chi_shock,chi_jump_shock=',chi_shock,chi_jump_shock
+      if (headtt) print*,'calc_heatcond_shock_profr: chi_shock,chi_jump_shock=',chi_shock,chi_jump_shock
 !
       pchi_shock = chi_shock + chi_shock*(chi_jump_shock-1.)*step(p%r_mn,xchi_shock,widthchi_shock)
 !
@@ -5264,30 +5330,26 @@ module Energy
 !
     endsubroutine calc_heatcond_shock_profr
 !***********************************************************************
-    subroutine calc_heatcond_constK(df,p)
+    subroutine calc_heatcond_constK_arrays(p,thdiff)
 !
 !  Heat conduction.
 !
 !   8-jul-02/axel: adapted from Wolfgang's more complex version
 !  30-mar-06/ngrs: simplified calculations using p%glnTT and p%del2lnTT
 !
+!
       use Diagnostics, only: max_mn_name, yzsum_mn_name_x, phisum_mn_name_rz
       use EquationOfState, only: get_gamma_etc
       use Sub, only: dot
-!
       type (pencil_case) :: p
-      real, dimension (mx,my,mz,mvar) :: df
-!
-      intent(in) :: p
-      intent(inout) :: df
 
-      real, dimension (nx) :: chix
-      real, dimension (nx) :: thdiff,g2
+      real, dimension (nx) :: thdiff
       real :: gamma
+      real, dimension (nx) :: chix,g2
 !
 !  This particular version assumes a simple polytrope, so mpoly is known.
 !
-      if (headtt) print*,'calc_heatcond_constK: hcond=', maxval(hcond)
+      if (headtt) print*,'calc_heatcond_constK_arrays: hcond=', maxval(hcond)
 !
 !  Heat conduction
 !  Note: these routines require revision when ionization turned on
@@ -5321,11 +5383,6 @@ module Energy
         thdiff = p%rho1*hcond_Kconst * (p%del2lnTT + g2)
       endif
 !
-!  Add heat conduction to entropy equation.
-!
-      df(l1:l2,m,n,iss) = df(l1:l2,m,n,iss) + thdiff
-      if (headtt) print*,'calc_heatcond_constK: added thdiff'
-!
 !  Check maximum diffusion from thermal diffusion.
 !  With heat conduction, the second-order term for entropy is
 !  gamma*chix*del2ss.
@@ -5334,6 +5391,30 @@ module Energy
         call get_gamma_etc(gamma)
         diffus_chi=diffus_chi+gamma*chix*dxyz_2
       endif
+    endsubroutine calc_heatcond_constK_arrays
+!***********************************************************************
+    subroutine calc_heatcond_constK(df,p)
+!
+!  Heat conduction.
+!
+!   8-jul-02/axel: adapted from Wolfgang's more complex version
+!  30-mar-06/ngrs: simplified calculations using p%glnTT and p%del2lnTT
+!
+!
+      type (pencil_case) :: p
+      real, dimension (mx,my,mz,mvar) :: df
+!
+      intent(in) :: p
+      intent(inout) :: df
+
+      real, dimension (nx) :: thdiff
+      
+      call calc_heatcond_constK_arrays(p,thdiff)
+!
+!  Add heat conduction to entropy equation.
+!
+      df(l1:l2,m,n,iss) = df(l1:l2,m,n,iss) + thdiff
+      if (headtt) print*,'calc_heatcond_constK: added thdiff'
 !
     endsubroutine calc_heatcond_constK
 !***********************************************************************
@@ -5491,44 +5572,25 @@ module Energy
 !
     endsubroutine calc_heatcond_hubeny
 !***********************************************************************
-    subroutine calc_heatcond_kramers(f,df,p)
+    subroutine kramers_get_K(p,g2,Krho1)
 !
-!  Heat conduction using Kramers' opacity law
+!  23-oct-2025/TP: carved from calc_heatcond_kramers
 !
-!  23-feb-11/pete: coded
-!  24-aug-15/MR: bounds for chi introduced
-!  20-jun-2024/KG: fix implementation of the chi bounds
-!
-      use Diagnostics
       use Sub, only: dot
-      use General, only: notanumber
-!
-      real, dimension (mx,my,mz,mfarray) :: f
-      real, dimension (mx,my,mz,mvar) :: df
-      type (pencil_case) :: p
-!
-      intent(in) :: p
-      intent(inout) :: df
-!
-      real, dimension(nx) :: thdiff, g2, g2_chi
-      real, dimension(nx) :: Krho1, del2ss1
-      real, dimension(nx,3) :: gradchit_prof
-      integer :: j
-!
-!  Diffusion of the form
-!      rho*T*Ds/Dt = ... + nab.(K*gradT),
-!  where
-!      K = K_0*(T**6.5/rho**2)**n.
-!  In reality n=1, but we may need to use n\=1 for numerical reasons.
+
+      type(pencil_case),   intent(IN)  :: p
+      real, dimension(nx), intent(OUT) :: g2
+      real, dimension(nx), intent(OUT) :: Krho1
+
+      real, dimension(nx) :: g2_chi
 !
       K_kramers = hcond0_kramers*p%rho1**(2.*nkramers)*p%TT**(6.5*nkramers)
       Krho1 = K_kramers*p%rho1   ! = K/rho
-!
-!  g2 is grad(ln(K) + ln(T)).grad(ln(T))
-!
       call dot(-2.*nkramers*p%glnrho+(6.5*nkramers+1)*p%glnTT,p%glnTT,g2)
-      call dot(p%glnrho+p%glnTT, p%glnTT, g2_chi)
 !
+      if (chimax_kramers>0. .or. chimin_kramers>0.) &
+        call dot(p%glnrho+p%glnTT, p%glnTT, g2_chi)
+
       if (chimax_kramers>0.) then
         where (Krho1 > chimax_kramers/p%cp1)
           Krho1 = chimax_kramers/p%cp1
@@ -5543,6 +5605,41 @@ module Energy
           g2 = g2_chi
         endwhere
       endif
+
+    endsubroutine kramers_get_K
+!***********************************************************************
+    subroutine calc_heatcond_kramers(f,df,p)
+!
+!  Heat conduction using Kramers' opacity law
+!
+!  23-feb-11/pete: coded
+!  24-aug-15/MR: bounds for chi introduced
+!  20-jun-2024/KG: fix implementation of the chi bounds
+!
+      use Sub, only: dot
+      use General, only: notanumber
+!
+      real, dimension (mx,my,mz,mfarray) :: f
+      real, dimension (mx,my,mz,mvar) :: df
+      type (pencil_case) :: p
+!
+      intent(in) :: p
+      intent(inout) :: df
+!
+      real, dimension(nx) :: thdiff, g2
+      real, dimension(nx) :: Krho1, del2ss1
+      real, dimension(nx,3) :: gradchit_prof
+      integer :: j
+!
+!  Diffusion of the form
+!      rho*T*Ds/Dt = ... + nab.(K*gradT),
+!  where
+!      K = K_0*(T**6.5/rho**2)**n.
+!  In reality n=1, but we may need to use n\=1 for numerical reasons.
+!
+!  g2 is grad(ln(K) + ln(T)).grad(ln(T))
+!
+      call kramers_get_K(p,g2,Krho1)
 !
       thdiff = Krho1*(p%del2lnTT+g2)
 !
@@ -5552,8 +5649,8 @@ module Energy
 !
         gss1=p%gss
         if (lcalc_ssmean) then
-          do j=1,3; gss1(:,j)=gss1(:,j)-gssmz(n-n1+1,j); enddo
-          del2ss1=p%del2ss-del2ssmz(n-n1+1)
+          do j=1,3; gss1(:,j)=gss1(:,j)-gssmz(n,j); enddo
+          del2ss1=p%del2ss-del2ssmz(n)
         else if (lcalc_ssmeanxy) then
           do j=1,3; gss1(:,j)=gss1(:,j)-gssmx(:,j); enddo
           del2ss1=p%del2ss-del2ssmx
@@ -5585,7 +5682,7 @@ module Energy
 !
         if (notanumber(thdiff)) then
           if (lproc_print) then
-            print*, 'calc_heatcond_kramers: m,n,y(m),z(n)=', m, n, y(m), z(n)
+            print*,'calc_heatcond_kramers: m,n,y(m),z(n)=', m, n, y(m), z(n)
             if (.not.allproc_print) lproc_print=.false.
           endif
           call fatal_error_local('calc_heatcond_kramers','NaNs in thdiff')
@@ -5636,8 +5733,8 @@ module Energy
 !     rho*T*Ds/Dt = ... + nab.((nu_smag/Pr_smag)*rho*T*grads),
 !
       if (lcalc_ssmean) then
-        do j=1,3; gss1(:,j)=p%gss(:,j)-gssmz(n-n1+1,j); enddo
-        del2ss1=p%del2ss-del2ssmz(n-n1+1)
+        do j=1,3; gss1(:,j)=p%gss(:,j)-gssmz(n,j); enddo
+        del2ss1=p%del2ss-del2ssmz(n)
       else if (lcalc_ssmeanxy) then
         do j=1,3;gss1(:,j)=p%gss(:,j)-gssmx(:,j); enddo
         del2ss1=p%del2ss-del2ssmx
@@ -5682,7 +5779,7 @@ module Energy
 !
         if (notanumber(thdiff)) then
           if (lproc_print) then
-            print*, 'calc_heatcond_smagorinsky: m,n,y(m),z(n)=', m, n, y(m), z(n)
+            print*,'calc_heatcond_smagorinsky: m,n,y(m),z(n)=', m, n, y(m), z(n)
             if (.not.allproc_print) lproc_print=.false.
           endif
           call fatal_error_local('calc_heatcond_smagorinsky','NaNs in thdiff')
@@ -5705,30 +5802,22 @@ module Energy
 !
     endsubroutine calc_heatcond_smagorinsky
 !***********************************************************************
-    subroutine calc_heatcond(f,df,p)
+    subroutine calc_heatcond_arrays(f,p,thdiff)
 !
-!  In this routine general heat conduction profiles are being provided
-!  and applied to the entropy equation.
+!  Non-mutating calculations of calc_heatcond
 !
-!  17-sep-01/axel: coded
-!  14-jul-05/axel: corrected expression for chi_t diffusion.
-!  30-mar-06/ngrs: simplified calculations using p%glnTT and p%del2lnTT
+!  14-sep-25/TP: carved from calc_heatcond
 !
       use Diagnostics
       use Debug_IO, only: output_pencil
       use Sub, only: dot, g2ij
       use General, only: notanumber
-!
-      real, dimension (mx,my,mz,mfarray) :: f
-      real, dimension (mx,my,mz,mvar) :: df
-      type (pencil_case) :: p
-!
-      intent(in) :: f,p
-      intent(inout) :: df
 
+      type (pencil_case), intent(IN) :: p
+      real, dimension (mx,my,mz,mfarray), intent(IN) :: f
+      real, dimension (nx), intent(OUT) :: thdiff
       real, dimension (nx,3) :: glnThcond,glhc
-      real, dimension (nx) :: chix
-      real, dimension (nx) :: thdiff,g2,del2ss1
+      real, dimension (nx) :: g2,del2ss1,chix
       real, dimension (nx) :: glnrhoglnT
       real, dimension (nx,3) :: gradchit_prof
       real, dimension (nx,3,3) :: tmp
@@ -5740,9 +5829,9 @@ module Energy
 !
       if (hcond0/=0..or.lread_hcond) then
         if (headtt) then
-          print*,'calc_heatcond: hcond0=',hcond0
-          print*,'calc_heatcond: lgravz=',lgravz
-          if (lgravz) print*,'calc_heatcond: Fbot,Ftop=',Fbot,Ftop
+          print*,'calc_heatcond_arrays: hcond0=',hcond0
+          print*,'calc_heatcond_arrays: lgravz=',lgravz
+          if (lgravz) print*,'calc_heatcond_arrays: Fbot,Ftop=',Fbot,Ftop
         endif
 
         call get_prof_pencil(hcond,glhc,lsphere_in_a_box.or.lcylinder_in_a_box, &
@@ -5787,7 +5876,7 @@ module Energy
 !  but this is not currently being checked.
 !
       if (chi_t/=0.) then
-        if (headtt) print*,'calc_headcond: "turbulent" entropy diffusion: chi_t=',chi_t
+        if (headtt) print*,'calc_headcond_arrays: "turbulent" entropy diffusion: chi_t=',chi_t
         call get_prof_pencil(chit_prof,gradchit_prof,lsphere_in_a_box,1.,chit_prof1,chit_prof2,xbot,xtop,p,f, &
                              stored_prof=chit_prof_stored,stored_dprof=dchit_prof_stored)
 !
@@ -5803,8 +5892,8 @@ module Energy
 !
         if (lcalc_ssmean .or. lcalc_ssmeanxy) then
           if (lcalc_ssmean) then
-            do j=1,3; gss1(:,j)=p%gss(:,j)-gssmz(n-n1+1,j); enddo
-            del2ss1=p%del2ss-del2ssmz(n-n1+1)
+            do j=1,3; gss1(:,j)=p%gss(:,j)-gssmz(n,j); enddo
+            del2ss1=p%del2ss-del2ssmz(n)
           else if (lcalc_ssmeanxy) then
             do j=1,3; gss1(:,j)=p%gss(:,j)-gssmx(:,j); enddo
             del2ss1=p%del2ss-del2ssmx
@@ -5870,33 +5959,42 @@ module Energy
         endif
       endif
 !
+!  Check maximum diffusion from thermal diffusion.
+!  NB: With heat conduction, the second-order term for entropy is
+!    gamma*chix*del2ss.
+!
+      if (lupdate_courant_dt) then
+        if (hcond0/=0..or.lread_hcond) diffus_chi=diffus_chi+chix*dxyz_2
+        if (chi_t/=0.) diffus_chi=diffus_chi+chi_t*chit_prof*dxyz_2
+      endif
+!
 !  Check for NaNs initially.
 !
       if (hcond0/=0..or.lread_hcond.or.chi_t/=0.) then
         if (headt) then
 !
-          if (notanumber(p%rho1))    print*,'calc_heatcond: NaNs in rho1'
+          if (notanumber(p%rho1))    print*,'calc_heatcond_arrays: NaNs in rho1'
           if (chi_t/=0.) then
-            if (notanumber(p%del2ss))  print*,'calc_heatcond: NaNs in del2ss'
+            if (notanumber(p%del2ss))  print*,'calc_heatcond_arrays: NaNs in del2ss'
           endif
           if (hcond0/=0..or.lread_hcond) then
-            if (notanumber(hcond))     print*,'calc_heatcond: NaNs in hcond'
-            if (notanumber(1/hcond))   print*,'calc_heatcond: NaNs in 1/hcond'
-            if (notanumber(glhc))      print*,'calc_heatcond: NaNs in glhc'
-            if (notanumber(chix))      print*,'calc_heatcond: NaNs in chix'
-            if (notanumber(glnThcond)) print*,'calc_heatcond: NaNs in glnThcond'
+            if (notanumber(hcond))     print*,'calc_heatcond_arrays: NaNs in hcond'
+            if (notanumber(1/hcond))   print*,'calc_heatcond_arrays: NaNs in 1/hcond'
+            if (notanumber(glhc))      print*,'calc_heatcond_arrays: NaNs in glhc'
+            if (notanumber(chix))      print*,'calc_heatcond_arrays: NaNs in chix'
+            if (notanumber(glnThcond)) print*,'calc_heatcond_arrays: NaNs in glnThcond'
           endif
-          if (notanumber(g2))        print*,'calc_heatcond: NaNs in g2'
+          if (notanumber(g2))        print*,'calc_heatcond_arrays: NaNs in g2'
 !
 !  Most of these should trigger the following trap.
 !
           if (notanumber(thdiff)) then
             if (lproc_print) then
-              print*,'calc_heatcond: NaNs in thdiff'
-              print*, 'calc_heatcond: m,n,y(m),z(n)=', m, n, y(m), z(n)
+              print*,'calc_heatcond_arrays: NaNs in thdiff'
+              print*,'calc_heatcond_arrays: m,n,y(m),z(n)=', m, n, y(m), z(n)
               if (.not.allproc_print) lproc_print=.false.
             endif
-            call fatal_error_local('calc_heatcond','NaNs in thdiff')
+            call fatal_error_local('calc_heatcond_arrays','NaNs in thdiff')
           endif
         endif
         if ((hcond0/=0..or.lread_hcond).and.lwrite_prof .and. ip<=9) then
@@ -5907,23 +6005,38 @@ module Energy
 
         if (headt .and. lfirst .and. ip == 13) call output_pencil('heatcond.dat',thdiff,1)
 !
+      endif
+
+    endsubroutine calc_heatcond_arrays
+!***********************************************************************
+    subroutine calc_heatcond(f,df,p)
+!
+!  In this routine general heat conduction profiles are being provided
+!  and applied to the entropy equation.
+!
+!  17-sep-01/axel: coded
+!  14-jul-05/axel: corrected expression for chi_t diffusion.
+!  30-mar-06/ngrs: simplified calculations using p%glnTT and p%del2lnTT
+!  14-sep-25/TP:   separated calculation of thdiff and diffus_chi from update of df
+!
+      real, dimension (mx,my,mz,mfarray) :: f
+      real, dimension (mx,my,mz,mvar) :: df
+      type (pencil_case) :: p
+!
+      intent(in) :: f,p
+      intent(inout) :: df
+      real, dimension (nx) :: thdiff
+
+      call calc_heatcond_arrays(f,p,thdiff)
+      if (hcond0/=0..or.lread_hcond.or.chi_t/=0.) then
+!
 !  At the end of this routine, add all contribution to
 !  thermal diffusion on the rhs of the entropy equation,
 !  so Ds/Dt = ... + thdiff = ... + (...)/(rho*T)
 !
         df(l1:l2,m,n,iss) = df(l1:l2,m,n,iss) + thdiff
-!
         if (headtt) print*,'calc_heatcond: added thdiff'
 !
-      endif
-!
-!  Check maximum diffusion from thermal diffusion.
-!  NB: With heat conduction, the second-order term for entropy is
-!    gamma*chix*del2ss.
-!
-      if (lupdate_courant_dt) then
-        if (hcond0/=0..or.lread_hcond) diffus_chi=diffus_chi+chix*dxyz_2
-        if (chi_t/=0.) diffus_chi=diffus_chi+chi_t*chit_prof*dxyz_2
       endif
 !
     endsubroutine calc_heatcond
@@ -5951,15 +6064,15 @@ module Energy
 !  "Turbulent" entropy diffusion (operates on entropy fluctuations only).
 !
       if (chi_t/=0.) then
-        if (headtt) print*,'calc_headcond: "turbulent" entropy diffusion: chi_t=',chi_t
+        if (headtt) print*,'calc_heatcond_sfluct: "turbulent" entropy diffusion: chi_t=',chi_t
 !
 !  ... + div(rho*T*chi*grads) = ... + chi*[del2s + (glnrho+glnTT+glnchi).grads]
 !  If lcalc_ssmean=T or lcalc_ssmeanxy=T, mean stratification is subtracted.
 !
         if (lcalc_ssmean .or. lcalc_ssmeanxy) then
           if (lcalc_ssmean) then
-            do j=1,3; gss1(:,j)=p%gss(:,j)-gssmz(n-n1+1,j); enddo
-            del2ss1=p%del2ss-del2ssmz(n-n1+1)
+            do j=1,3; gss1(:,j)=p%gss(:,j)-gssmz(n,j); enddo
+            del2ss1=p%del2ss-del2ssmz(n)
           else if (lcalc_ssmeanxy) then
             do j=1,3; gss1(:,j)=p%gss(:,j)-gssmx(:,j); enddo
             del2ss1=p%del2ss-del2ssmx
@@ -5975,13 +6088,28 @@ module Energy
 !
       df(l1:l2,m,n,iss) = df(l1:l2,m,n,iss) + thdiff
 !
-      if (headtt) print*,'calc_heatcond: added thdiff'
+      if (headtt) print*,'calc_heatcond_sfluct: added thdiff'
 !
 !  Check maximum diffusion from thermal diffusion.
 !
       if (lupdate_courant_dt) diffus_chi=diffus_chi+chi_t*dxyz_2
 !
     endsubroutine calc_heatcond_sfluct
+!***********************************************************************
+    subroutine get_chit_prof_fluct(gradchit_prof_fluct)
+
+      real, dimension(nx,3) :: gradchit_prof_fluct
+
+      if (lcalc_ssmean .or. lcalc_ssmeanxy .or. lss_running_aver) then
+        if ((lgravr.or.lgravx.or.lgravz).and..not.(lsphere_in_a_box.or.lchi_t1_noprof)) then
+          call get_prof_pencil(chit_prof_fluct,gradchit_prof_fluct,.false., &  ! no 2D/3D profiles of chit_fluct implemented
+                               stored_prof=chit_prof_fluct_stored,stored_dprof=dchit_prof_fluct_stored)
+        else
+          chit_prof_fluct=chi_t1; gradchit_prof_fluct=0.
+        endif
+      endif
+!
+    endsubroutine get_chit_prof_fluct
 !***********************************************************************
     subroutine calc_heatcond_chit(f,df,p)
 !
@@ -6044,8 +6172,8 @@ module Energy
 !
         if (lchit_mean .and. (lcalc_ssmean .or. lcalc_ssmeanxy)) then
           if (lcalc_ssmean) then
-            do j=1,3; gss0(:,j)=gssmz(n-n1+1,j); enddo
-            del2ss0=del2ssmz(n-n1+1)
+            do j=1,3; gss0(:,j)=gssmz(n,j); enddo
+            del2ss0=del2ssmz(n)
           else if (lcalc_ssmeanxy) then
             do j=1,3; gss0(:,j)=gssmx(:,j); enddo
             del2ss0=del2ssmx
@@ -6065,20 +6193,12 @@ module Energy
 !  lcalc_ssmean=T or lcalc_ssmeanxy=T
 !
       if (lchit_fluct.and.chi_t1/=0.) then
-        if (lcalc_ssmean .or. lcalc_ssmeanxy .or. lss_running_aver) then
-          if ((lgravr.or.lgravx.or.lgravz).and..not.(lsphere_in_a_box.or.lchi_t1_noprof)) then
-            call get_prof_pencil(chit_prof_fluct,gradchit_prof_fluct,.false., &  ! no 2D/3D profiles of chit_fluct implemented
-                                 stored_prof=chit_prof_fluct_stored,stored_dprof=dchit_prof_fluct_stored)
-          else
-            chit_prof_fluct=chi_t1; gradchit_prof_fluct=0.
-          endif
-        endif
-
+        call get_chit_prof_fluct(gradchit_prof_fluct)
         if (lcalc_ssmean .or. lcalc_ssmeanxy) then
 
           if (lcalc_ssmean) then
-            do j=1,3; gss1(:,j)=p%gss(:,j)-gssmz(n-n1+1,j); enddo
-            del2ss1=p%del2ss-del2ssmz(n-n1+1)
+            do j=1,3; gss1(:,j)=p%gss(:,j)-gssmz(n,j); enddo
+            del2ss1=p%del2ss-del2ssmz(n)
           else if (lcalc_ssmeanxy) then
             do j=1,3; gss1(:,j)=p%gss(:,j)-gssmx(:,j); enddo
             del2ss1=p%del2ss-del2ssmx
@@ -6142,7 +6262,7 @@ module Energy
 !
       df(l1:l2,m,n,iss) = df(l1:l2,m,n,iss) + thdiff
 !
-      if (headtt) print*,'calc_heatcond: added thdiff'
+      if (headtt) print*,'calc_heatcond_chit: added thdiff'
 !
 !  Check maximum diffusion from thermal diffusion.
 !
@@ -6199,7 +6319,8 @@ module Energy
 !
       if (lgravr .and. (.not.lspherical_coords) .and. &
            !several possible heating/cooling sources used
-           (luminosity/=0. .or. cool/=0. .or. cool_int/=0. .or. cool_ext/=0) ) &
+           (luminosity/=0. .or. cool/=0. .or. cool_int/=0. .or. cool_ext/=0. &
+                           .or. heat_int/=0.) ) &
            call get_heat_cool_gravr(heat,p)
 !
 !  (also see the comments inside the above subroutine to apply it to
@@ -6612,11 +6733,11 @@ module Energy
       use Diagnostics, only: phisum_mn_name_rz
 !
       type (pencil_case) :: p
-      real, dimension (nx) :: heat, prof, theta_profile, div_cool
+      real, dimension (nx) :: heat, prof, theta_profile, div_cool, cs2_prof
 !      real :: zbot,ztop
       intent(in) :: p
 !
-      if (luminosity /= 0.) then
+      if (luminosity /= 0. .or. heat_int /=0.) then
         select case (heattype)
         case ('gaussian', 'Gaussian') ! heating with a spatially fixed Gaussian profile
           if (nzgrid == 1) then
@@ -6624,12 +6745,21 @@ module Energy
           else
             prof = exp(-0.5*(p%r_mn/wheat)**2) * (2*pi*wheat**2)**(-1.5) ! 3-D one
           endif
+          heat = luminosity*prof
         case ('cs2-rho') ! heating depending on ambient density and temperature
           prof = (p%rho/rho0)**nheat_rho*(p%cs2/cs20)**nheat_TT
+          heat = luminosity*prof
+        case ('imposed-cs2-core') ! relax toward a fixed profile in the core below rheat
+          cs2_prof = &
+              coef_cs2(1)           + coef_cs2(2)*p%r_mn**2 + coef_cs2(3)*p%r_mn**4 + &
+              coef_cs2(4)*p%r_mn**6 + coef_cs2(5)*p%r_mn**8 + coef_cs2(6)*p%r_mn**10+ &
+              coef_cs2(7)*p%r_mn**12+ coef_cs2(8)*p%r_mn**14+ coef_cs2(9)*p%r_mn**16
+          prof = 1. - step(p%r_mn,rheat,wcool) ! inner heating/cooling step
+          heat =  heat        - heat_int*prof*(p%cs2-cs2_prof)/cs2_prof/p%rho1
+          div_cool = div_cool - heat_int*prof*(p%cs2-cs2_prof)/cs2_prof/p%rho1
         case default
           call fatal_error('get_heat_cool_gravr','no such heattype: '//trim(heattype))
         endselect
-        heat = luminosity*prof
       endif
 !
       if (headt .and. lfirst .and. ip<=9) call output_pencil('heat.dat',heat,1)
@@ -7083,7 +7213,8 @@ module Energy
         idiag_dtc=0; idiag_ethm=0; idiag_ethdivum=0; idiag_pdivumz=0
         idiag_ssruzm=0; idiag_ssuzm=0; idiag_ssm=0; idiag_ss2m=0
         idiag_ssbycpm=0
-        idiag_eem=0; idiag_ppm=0; idiag_csm=0; idiag_cgam=0; idiag_pdivum=0; idiag_heatm=0
+        idiag_eem=0; idiag_ppm=0; idiag_ppmax=0; idiag_ppmin=0
+        idiag_csm=0; idiag_cgam=0; idiag_pdivum=0; idiag_heatm=0
         idiag_ugradpm=0; idiag_ethtot=0; idiag_dtchi=0; idiag_ssmphi=0; idiag_ss2mphi=0
         idiag_fradbot=0; idiag_fradtop=0; idiag_TTtop=0
         idiag_yHmax=0; idiag_yHm=0; idiag_TTmax=0; idiag_TTmin=0; idiag_TTm=0
@@ -7144,6 +7275,8 @@ module Energy
         call parse_name(iname,cname(iname),cform(iname),'ss2m',idiag_ss2m)
         call parse_name(iname,cname(iname),cform(iname),'eem',idiag_eem)
         call parse_name(iname,cname(iname),cform(iname),'ppm',idiag_ppm)
+        call parse_name(iname,cname(iname),cform(iname),'ppmax',idiag_ppmax)
+        call parse_name(iname,cname(iname),cform(iname),'ppmin',idiag_ppmin)    
         call parse_name(iname,cname(iname),cform(iname),'pdivum',idiag_pdivum)
         call parse_name(iname,cname(iname),cform(iname),'heatm',idiag_heatm)
         call parse_name(iname,cname(iname),cform(iname),'csm',idiag_csm)
@@ -7173,10 +7306,6 @@ module Energy
         call parse_name(iname,cname(iname),cform(iname),'chikrammax',idiag_chikrammax)
         call parse_name(iname,cname(iname),cform(iname),'TT2m',idiag_TT2m)
       enddo
-!
-      if (idiag_fradbot/=0) call set_type(idiag_fradbot,lsurf=.true.)
-      if (idiag_fradtop/=0) call set_type(idiag_fradtop,lsurf=.true.)
-      if (idiag_TTtop/=0) call set_type(idiag_TTtop,lsurf=.true.)
 !
 !  Check for those quantities for which we want yz-averages.
 !
@@ -7714,6 +7843,9 @@ module Energy
           endif
 
         else  ! covers also lgravr=T
+          if (.not. present(stored_prof)) then
+            call fatal_error('get_prof_pencil','tried to access stored prof but was not give as a parameter!')
+          endif
           prof=stored_prof
           dprof(:,1)=stored_dprof; dprof(:,2:3)=0.
         endif
@@ -7871,7 +8003,7 @@ module Energy
 !
 !  11-dec-2014/pete: aped from read_hcond
 !
-      use Mpicomm, only: mpibcast_real_arr, MPI_COMM_WORLD
+      use Mpicomm, only: mpibcast_real_arr, MPI_COMM_PENCIL
 !
       real, dimension(nx), intent(out) :: cs2cool_x
       real, dimension(nxgrid) :: tmp1
@@ -7907,7 +8039,7 @@ module Energy
 !
       endif
 !
-      call mpibcast_real_arr(tmp1, nxgrid, comm=MPI_COMM_WORLD)  !MR: better scatter
+      call mpibcast_real_arr(tmp1, nxgrid, comm=MPI_COMM_PENCIL)  !MR: better scatter
 !
 !  Assuming no ghost zones in cooling_profile.dat
 !
@@ -8524,7 +8656,6 @@ module Energy
     call copy_addr(pr_smag1,p_par(110))
     call copy_addr(nheat_rho,p_par(111))
     call copy_addr(nheat_tt,p_par(112))
-    call copy_addr(iglobal_hcond,p_par(113)) ! int
     call copy_addr(ippaux,p_par(114)) ! int
     call copy_addr(cool_type,p_par(115)) ! int
     call copy_addr(lheatc_kprof,p_par(116)) ! bool
@@ -8588,10 +8719,8 @@ module Energy
     call copy_addr(ss_mz,p_par(174)) ! (mz)
     call copy_addr(chit_aniso_prof,p_par(175)) ! (nx)
     call copy_addr(dchit_aniso_prof,p_par(176)) ! (nx)
-    call copy_addr(ssmz,p_par(177)) ! (mz)
     call copy_addr(cs2mz,p_par(178)) ! (mz)
-    call copy_addr(gssmz,p_par(179)) ! (nz) (3)
-    call copy_addr(del2ssmz,p_par(180)) ! (nz)
+    call copy_addr(gssmz,p_par(179)) ! (mz) (3)
     call copy_addr(ssmx,p_par(181)) ! (mx)
     call copy_addr(gssmx,p_par(182)) ! (nx) (3)
     call copy_addr(cs2mx,p_par(183)) ! (nx)
@@ -8634,7 +8763,19 @@ module Energy
     call copy_addr(nlf_sld_ene,p_par(464))
     call copy_addr(hcondxbot,p_par(465))
     call copy_addr(hcondxtop,p_par(466))
-
+    call copy_addr(pp_cool,p_par(467))
+    call copy_addr(tau_cool_pp,p_par(468))
+    call copy_addr(lsld_char_cslimit,p_par(469)) ! bool
+    call copy_addr(w_sldchar_ene2,p_par(470))
+    call copy_addr(lsld_char_wprofr,p_par(471)) ! bool
+    call copy_addr(w_sldchar_ene_r0,p_par(472))
+    call copy_addr(w_sldchar_ene_p,p_par(473))
+    call copy_addr(lsld_char_rholimit,p_par(474)) ! bool
+    call string_to_enum(enum_div_sld_ene,div_sld_ene)
+    call copy_addr(enum_div_sld_ene,p_par(475)) ! int
+    call copy_addr(rheat,p_par(476)) 
+    call copy_addr(heat_int,p_par(477))
+    call copy_addr(coef_cs2,p_par(478)) ! (9)
 
     endsubroutine pushpars2c
 !***********************************************************************

@@ -23,8 +23,7 @@ class TimeSeries(object):
         self.keys = []
 
     def keys(self):
-        for i in self.__dict__.keys():
-            print(i)
+        return list(self.__dict__.keys())
 
     def read(
         self,
@@ -68,7 +67,7 @@ class TimeSeries(object):
         time_range : bool
           List of length 2, start and end time, of float with end time.
 
-        precision : float
+        precision : str
           "f" (single,default) or "d" (double) or "h" (half).
         """
 
@@ -79,9 +78,9 @@ class TimeSeries(object):
         if precision == "h":
             precision = "half"
         if sim:
-            from pencil.sim import __Simulation__
+            from pencil.sim import Simulation
 
-            if isinstance(sim, __Simulation__):
+            if isinstance(sim, Simulation):
                 datadir = sim.datadir
 
         datadir = os.path.expanduser(datadir)
@@ -102,7 +101,7 @@ class TimeSeries(object):
                     self.keys = keys_new
             else:
                 try:
-                    row = np.array(list(map(float, re.split(" +", line.strip(" \n")))))
+                    row = np.array(re.split(" +", line.strip(" \n")), dtype=precision)
                     data[nlines, :] = row
                     nlines += 1
                 except ValueError:
@@ -148,6 +147,9 @@ class TimeSeries(object):
 
 @copy_docstring(TimeSeries.read)
 def ts(*args, **kwargs):
+    """
+    Wrapper for :py:meth:`TimeSeries.read`
+    """
     ts_tmp = TimeSeries()
     ts_tmp.read(*args, **kwargs)
     return ts_tmp

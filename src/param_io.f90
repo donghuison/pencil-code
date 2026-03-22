@@ -12,7 +12,6 @@ module Param_IO
   use Chiral
   use Cosmicray
   use CosmicrayFlux
-  use Cparam
 !  use Conductivity
   use Density
   use Detonate
@@ -59,7 +58,7 @@ module Param_IO
   use Timeavg
   use Training, only: read_training_run_pars, write_training_run_pars
   use Viscosity
-  use GPU, only: read_gpu_run_pars, write_gpu_run_pars
+  use GPU, only: read_gpu_run_pars, write_gpu_run_pars,ltest_bcs
 !
   implicit none
 !
@@ -122,7 +121,7 @@ module Param_IO
       isaveglobal, lr_spec, r2u_spec, &
       np_spec, np_ap_spec, rhop_spec, FI_mixfrac_pdf2d, &
       r3u_spec, rhocc_pdf, cc_pdf, lncc_pdf, gcc_pdf, lngcc_pdf, cosEB_pdf, &
-      xyz_step, xi_step_frac, xi_step_width, dxi_fact, trans_width, &
+      xyz_step, xi_step_frac, xi_step_width, dxi_fact, trans_width, trans_delta, &
       lcylinder_in_a_box, lsphere_in_a_box, llocal_iso, init_loops, lwrite_2d, &
       lcylindrical_gravity, &
       border_frac_x, border_frac_y, border_frac_z, lborder_hyper_diff, border_frac_r, &
@@ -139,7 +138,8 @@ module Param_IO
       lnoghost_strati, ichannel1, ichannel2, tag_foreign, &
       lpoint, mpoint, npoint, lpoint2, mpoint2, npoint2, &
       lfatal_num_vector_369, density_scale_factor, &
-      lsmooth_farray,farray_smooth_width, radius_diag, lread_oldsnap_nocoolprof
+      lsmooth_farray,farray_smooth_width, radius_diag, lread_oldsnap_nocoolprof,&
+      lswap_init_lnrho_uu,thetamin,lsymmgrid
 !
   namelist /run_pars/ &
       cvsid, ip, xyz0, xyz1, Lxyz, lperi, lpole, ncoarse, &
@@ -148,7 +148,8 @@ module Param_IO
       lfractional_tstep_advance, lfractional_tstep_negative, leps_fixed, &
       cdtv, cdtv2, cdtv3, cdtsrc, cdts, cdtr, cdtf, &
       cdtc, isave, itorder, dsnap, dsnap_down, mvar_down, maux_down, &
-      d1davg, d2davg, dvid, dsound, dtmin, dspec, tmax, toutoff, &
+      d1davg, d2davg, dvid, dsound, dtmin, dspec, tmax, toutoff, trigger_snap, trigger_vid, &
+      lit1_logspacing, tmax_logspacing, &
       iwig, ldivu_perp, allproc_print, ssmask1, ssmask2, &
       dtracers, dfixed_points, unit_system, unit_length, &
       unit_velocity, unit_density, unit_temperature, unit_magnetic, &
@@ -170,7 +171,8 @@ module Param_IO
       isaveglobal, lr_spec, r2u_spec, &
       np_spec, np_ap_spec, rhop_spec, FI_mixfrac_pdf2d, &
       r3u_spec, rhocc_pdf, cc_pdf, lncc_pdf, gcc_pdf, lngcc_pdf, cosEB_pdf, &
-      lnspecial_pdf, special_pdf, ang_jb_pdf1d, ang_ub_pdf1d, ang_ou_pdf1d, &
+      lnspecial_pdf, special_pdf, lnrho_pdf, pdfs, cross_spec, &
+      ang_jb_pdf1d, ang_ub_pdf1d, ang_ou_pdf1d, &
       kinflow, ladv_der_as_aux, lkinflow_as_aux, &
       ampl_kinflow_x, ampl_kinflow_y, ampl_kinflow_z, &
       kx_kinflow, ky_kinflow, kz_kinflow, dtphase_kinflow, &
@@ -227,12 +229,14 @@ module Param_IO
       lignore_nonequi, tag_foreign, lforeign_comm_nblckg, tau_aver1, fmt_avgs, &
       ou_omega, ou_kzspec, ab_kzspec, cor_uu, ou_polar, ab_polar, jb_polar, &
       uut_spec, uut_polar, ouout_spec, ouout2_spec, ouout_polar, out_spec, uot_spec, &
-      saffman_ub, saffman_mag, saffman_mag_c, saffman_aa, saffman_aa_c, saffman_bb, &
+      saffman_ub, saffman_mag, saffman_mag_uc, saffman_mag_c, saffman_aa, saffman_aa_c, saffman_bb, &
+      saffman_EEM, saffman_EEM_uc, &
       uu_fft3d, oo_fft3d, bb_fft3d, jj_fft3d, uu_xkyz, oo_xkyz, bb_xkyz, jj_xkyz, &
       uu_kx0z, oo_kx0z, bb_kx0z, jj_kx0z, bb_k00z, ee_k00z, gwT_fft3d, &
       Em_specflux, Hm_specflux, Hc_specflux, density_scale_factor, radius_diag, &
       lmorton_curve, lsuppress_parallel_reductions, &
-      shared_mem_name, lupdate_cvs, lread_oldsnap_nocoolprof
+      lverbose_performance_log, &
+      shared_mem_name, lupdate_cvs, lread_oldsnap_nocoolprof,thetamin
 !
   namelist /IO_pars/ &
       lcollective_IO, IO_strategy
@@ -247,7 +251,7 @@ module Param_IO
 !  25-oct-02/axel: default is taken from cdata.f90 where it's defined
 !  14-jan-15/MR  : corrected call of mpibcast_char
 !
-      use Mpicomm, only: mpibcast_logical, mpibcast_char,MPI_COMM_WORLD
+      use Mpicomm, only: mpibcast_logical, mpibcast_char,MPI_COMM_PENCIL
 !
       character (len=*) :: dir
       logical :: exists
@@ -266,11 +270,11 @@ module Param_IO
 !
 !  Tell other processors whether we need to communicate dir (i.e. datadir).
 !
-      call mpibcast_logical(exists,comm=MPI_COMM_WORLD)
+      call mpibcast_logical(exists,comm=MPI_COMM_PENCIL)
 !
 !  Let root processor communicate dir (i.e. datadir) to all other processors.
 !
-      if (exists) call mpibcast_char(dir,comm=MPI_COMM_WORLD)
+      if (exists) call mpibcast_char(dir,comm=MPI_COMM_PENCIL)
 !
     endsubroutine get_datadir
 !***********************************************************************
@@ -335,13 +339,14 @@ module Param_IO
 !  18-aug-15/PABourdin: reworked to simplify code and display all errors at once
 !  19-aug-15/PABourdin: renamed from read_startpars to read_all_init_pars
 !
-      use File_io, only: parallel_open, parallel_close, read_namelist
+      use File_io, only: parallel_open, parallel_close, read_namelist, parallel_file_exists
       use Mpicomm, only: stop_it_if_any
       use Particles_main, only: read_all_particles_init_pars
+      use Syscalls, only: get_env_var
 !
       logical, optional, intent(IN) :: print
 !
-      character(len=fnlen) :: file
+      character(len=fnlen) :: file, home, user, host
 !
 !  Set default to shearing sheet if lshear=.true. (even when Sshear==0.).
 !
@@ -350,6 +355,26 @@ module Param_IO
 !  Open namelist file and read through all items that *may* be present in the various modules.
 !
       if (lstart) then
+!
+!  Open global namelist file.
+!
+        call get_env_var ('PENCIL_USER', user)
+        if (user /= '') then
+          call get_env_var ('PENCIL_HOME', home)
+          call get_env_var ('PENCIL_GLOBAL', host)
+          call safe_character_prepend (user, home, '/utils/')
+          call safe_character_append (user, '/')
+          if (host /= '') then
+            call safe_character_append (user, host, '_')
+          endif
+          call safe_character_append (user, 'global_start.in')
+          if (parallel_file_exists (user)) then
+            call parallel_open(user, remove_comments=.true.)
+            call read_all_namelists(linit_pars=.true.)
+            call parallel_close
+          endif
+        endif
+!
         file = 'start.in'
         call parallel_open(file, remove_comments=.true.)
       else
@@ -447,7 +472,7 @@ module Param_IO
 !AB: putting it to impossible is not correct; it should be inherited from the previous run.
 !AB: enabled again...
 !FAG: this has default 0 in cdata and can be redefined in start_pars and/or run_pars
-    tstart=impossible
+      tstart=impossible
 !
 !  Open namelist file.
 !
@@ -463,7 +488,7 @@ module Param_IO
         call safe_character_append (user, 'global_run.in')
         if (parallel_file_exists (user)) then
           call parallel_open(user, remove_comments=.true.)
-          call read_all_namelists
+          call read_all_namelists(loptional=.true.)
           call parallel_close
         endif
       endif
@@ -529,101 +554,103 @@ module Param_IO
 
     endsubroutine read_all_run_pars
 !***********************************************************************
-    subroutine read_all_namelists(linit_pars)
+    subroutine read_all_namelists(linit_pars,loptional)
 !
       use Particles_main, only: read_all_particles_init_pars, read_all_particles_run_pars
       use File_io, only: read_namelist
+      use General, only: ioptest
 !
-      logical, optional, intent(IN) :: linit_pars
+      logical, optional, intent(in) :: linit_pars
+      logical, optional, intent(in) :: loptional
 !
 !  Read through all items that *may* be present in the various modules.
 !
       if (loptest (linit_pars)) then
 !
-        call read_namelist(read_init_pars                ,'')
-        call read_namelist(read_initial_condition_pars   ,'initial_condition_pars',linitial_condition)
-        call read_namelist(read_streamlines_init_pars    ,'streamlines'    ,lstreamlines)
-        call read_namelist(read_eos_init_pars            ,'eos'            ,leos)
-        call read_namelist(read_hydro_init_pars          ,'hydro'          ,lhydro)
-        call read_namelist(read_density_init_pars        ,'density'        ,ldensity)
-        call read_namelist(read_gravity_init_pars        ,'grav'           ,lgrav)
-        call read_namelist(read_selfgravity_init_pars    ,'selfgrav'       ,lselfgravity)
-        call read_namelist(read_poisson_init_pars        ,'poisson'        ,lpoisson)
-        call read_namelist(read_energy_init_pars         ,'entropy'        ,lenergy)
-        call read_namelist(read_magnetic_init_pars       ,'magnetic'       ,lmagnetic)
-        call read_namelist(read_lorenz_gauge_init_pars   ,'lorenz_gauge'   ,llorenz_gauge)
-        call read_namelist(read_testscalar_init_pars     ,'testscalar'     ,ltestscalar)
-        call read_namelist(read_testfield_init_pars      ,'testfield'      ,ltestfield)
-        call read_namelist(read_testflow_init_pars       ,'testflow'       ,ltestflow)
-        call read_namelist(read_radiation_init_pars      ,'radiation'      ,lradiation)
-        call read_namelist(read_pscalar_init_pars        ,'pscalar'        ,lpscalar)
-        call read_namelist(read_ascalar_init_pars        ,'ascalar'        ,lascalar)
-        call read_namelist(read_chiral_init_pars         ,'chiral'         ,lchiral)
-        call read_namelist(read_chemistry_init_pars      ,'chemistry'      ,lchemistry)
-        call read_namelist(read_signal_init_pars         ,'signal'         ,lsignal)
-        call read_namelist(read_dustvelocity_init_pars   ,'dustvelocity'   ,ldustvelocity)
-        call read_namelist(read_dustdensity_init_pars    ,'dustdensity'    ,ldustdensity)
-        call read_namelist(read_neutralvelocity_init_pars,'neutralvelocity',lneutralvelocity)
-        call read_namelist(read_neutraldensity_init_pars ,'neutraldensity' ,lneutraldensity)
-        call read_namelist(read_cosmicray_init_pars      ,'cosmicray'      ,lcosmicray)
-        call read_namelist(read_cosmicrayflux_init_pars  ,'cosmicrayflux'  ,lcosmicrayflux)
-        call read_namelist(read_interstellar_init_pars   ,'interstellar'   ,linterstellar)
-        call read_namelist(read_shear_init_pars          ,'shear'          ,lshear)
-        call read_namelist(read_special_init_pars        ,'special'        ,lspecial)
-        call read_namelist(read_solid_cells_init_pars    ,'solid_cells'    ,lsolid_cells)
-        call read_namelist(read_NSCBC_init_pars          ,'NSCBC'          ,lnscbc)
-        call read_namelist(read_polymer_init_pars        ,'polymer'        ,lpolymer)
-        call read_namelist(read_pointmasses_init_pars    ,'pointmasses'    ,lpointmasses)
+        call read_namelist(read_init_pars                ,''               ,loptional=loptional)
+        call read_namelist(read_initial_condition_pars   ,'initial_condition_pars',linitial_condition, loptional)
+        call read_namelist(read_streamlines_init_pars    ,'streamlines'    ,lstreamlines, loptional)
+        call read_namelist(read_eos_init_pars            ,'eos'            ,leos, loptional)
+        call read_namelist(read_hydro_init_pars          ,'hydro'          ,lhydro, loptional)
+        call read_namelist(read_density_init_pars        ,'density'        ,ldensity, loptional)
+        call read_namelist(read_gravity_init_pars        ,'grav'           ,lgrav, loptional)
+        call read_namelist(read_selfgravity_init_pars    ,'selfgrav'       ,.true., loptest(loptional) .or. (.not. lselfgravity))
+        call read_namelist(read_poisson_init_pars        ,'poisson'        ,lpoisson, loptional)
+        call read_namelist(read_energy_init_pars         ,'entropy'        ,lenergy, loptional)
+        call read_namelist(read_magnetic_init_pars       ,'magnetic'       ,lmagnetic, loptional)
+        call read_namelist(read_lorenz_gauge_init_pars   ,'lorenz_gauge'   ,llorenz_gauge, loptional)
+        call read_namelist(read_testscalar_init_pars     ,'testscalar'     ,ltestscalar, loptional)
+        call read_namelist(read_testfield_init_pars      ,'testfield'      ,ltestfield, loptional)
+        call read_namelist(read_testflow_init_pars       ,'testflow'       ,ltestflow, loptional)
+        call read_namelist(read_radiation_init_pars      ,'radiation'      ,lradiation, loptional)
+        call read_namelist(read_pscalar_init_pars        ,'pscalar'        ,lpscalar, loptional)
+        call read_namelist(read_ascalar_init_pars        ,'ascalar'        ,lascalar, loptional)
+        call read_namelist(read_chiral_init_pars         ,'chiral'         ,lchiral, loptional)
+        call read_namelist(read_chemistry_init_pars      ,'chemistry'      ,lchemistry, loptional)
+        call read_namelist(read_signal_init_pars         ,'signal'         ,lsignal, loptional)
+        call read_namelist(read_dustvelocity_init_pars   ,'dustvelocity'   ,ldustvelocity, loptional)
+        call read_namelist(read_dustdensity_init_pars    ,'dustdensity'    ,ldustdensity, loptional)
+        call read_namelist(read_neutralvelocity_init_pars,'neutralvelocity',lneutralvelocity, loptional)
+        call read_namelist(read_neutraldensity_init_pars ,'neutraldensity' ,lneutraldensity, loptional)
+        call read_namelist(read_cosmicray_init_pars      ,'cosmicray'      ,lcosmicray, loptional)
+        call read_namelist(read_cosmicrayflux_init_pars  ,'cosmicrayflux'  ,lcosmicrayflux, loptional)
+        call read_namelist(read_interstellar_init_pars   ,'interstellar'   ,linterstellar, loptional)
+        call read_namelist(read_shear_init_pars          ,'shear'          ,lshear, loptional)
+        call read_namelist(read_special_init_pars        ,'special'        ,lspecial, loptional)
+        call read_namelist(read_solid_cells_init_pars    ,'solid_cells'    ,lsolid_cells, loptional)
+        call read_namelist(read_NSCBC_init_pars          ,'NSCBC'          ,lnscbc, loptional)
+        call read_namelist(read_polymer_init_pars        ,'polymer'        ,lpolymer, loptional)
+        call read_namelist(read_pointmasses_init_pars    ,'pointmasses'    ,lpointmasses, loptional)
 !
         call read_all_particles_init_pars
 !
       else
 !
-        call read_namelist(read_run_pars                ,'')
-        call read_namelist(read_streamlines_run_pars    ,'streamlines'       ,lstreamlines)
-        call read_namelist(read_eos_run_pars            ,'eos'               ,leos)
-        call read_namelist(read_hydro_run_pars          ,'hydro'             ,lhydro.or.lhydro_kinematic)
-        call read_namelist(read_density_run_pars        ,'density'           ,ldensity)
-        call read_namelist(read_forcing_run_pars        ,'forcing'           ,lforcing)
-        call read_namelist(read_gravity_run_pars        ,'grav'              ,lgrav)
-        call read_namelist(read_selfgravity_run_pars    ,'selfgrav'          ,lselfgravity)
-        call read_namelist(read_poisson_run_pars        ,'poisson'           ,lpoisson)
-        call read_namelist(read_energy_run_pars         ,'entropy'           ,lenergy)
-        !  call read_namelist(read_conductivity_run_pars   ,'conductivity')
-        call read_namelist(read_detonate_run_pars       ,'detonate'          ,ldetonate)
-        call read_namelist(read_magnetic_run_pars       ,'magnetic'          ,lmagnetic)
-        call read_namelist(read_lorenz_gauge_run_pars   ,'lorenz_gauge'      ,llorenz_gauge)
-        call read_namelist(read_testscalar_run_pars     ,'testscalar'        ,ltestscalar)
-        call read_namelist(read_testfield_run_pars      ,'testfield'         ,ltestfield)
-        call read_namelist(read_testflow_run_pars       ,'testflow'          ,ltestflow)
-        call read_namelist(read_radiation_run_pars      ,'radiation'         ,lradiation)
-        call read_namelist(read_pscalar_run_pars        ,'pscalar'           ,lpscalar)
-        call read_namelist(read_ascalar_run_pars        ,'ascalar'           ,lascalar)
-        call read_namelist(read_chiral_run_pars         ,'chiral'            ,lchiral)
-        call read_namelist(read_chemistry_run_pars      ,'chemistry'         ,lchemistry)
-        call read_namelist(read_dustvelocity_run_pars   ,'dustvelocity'      ,ldustvelocity)
-        call read_namelist(read_dustdensity_run_pars    ,'dustdensity'       ,ldustdensity)
-        call read_namelist(read_neutralvelocity_run_pars,'neutralvelocity'   ,lneutralvelocity)
-        call read_namelist(read_neutraldensity_run_pars ,'neutraldensity'    ,lneutraldensity)
-        call read_namelist(read_cosmicray_run_pars      ,'cosmicray'         ,lcosmicray)
-        call read_namelist(read_cosmicrayflux_run_pars  ,'cosmicrayflux'     ,lcosmicrayflux)
-        call read_namelist(read_heatflux_run_pars       ,'heatflux'          ,lheatflux)
-        call read_namelist(read_interstellar_run_pars   ,'interstellar'      ,linterstellar)
-        call read_namelist(read_shear_run_pars          ,'shear'             ,lshear)
-        call read_namelist(read_testperturb_run_pars    ,'testperturb'       ,ltestperturb)
-        call read_namelist(read_viscosity_run_pars      ,'viscosity'         ,lviscosity)
-        call read_namelist(read_special_run_pars        ,'special'           ,lspecial)
-        call read_namelist(read_shock_run_pars          ,'shock'             ,lshock)
-        call read_namelist(read_solid_cells_run_pars    ,'solid_cells'       ,lsolid_cells)
-        call read_namelist(read_NSCBC_run_pars          ,'NSCBC'             ,lnscbc)
-        call read_namelist(read_opacity_run_pars        ,'opacity'           ,lopacity)
-        call read_namelist(read_polymer_run_pars        ,'polymer'           ,lpolymer)
-        call read_namelist(read_pointmasses_run_pars    ,'pointmasses'       ,lpointmasses)
-        call read_namelist(read_power_spectrum_run_pars ,'power_spectrum'    ,lpower_spectrum)
-        call read_namelist(read_python_run_pars         ,'python'            ,lpython)
-        call read_namelist(read_implicit_diff_run_pars  ,'implicit_diffusion',limplicit_diffusion)
-        call read_namelist(read_training_run_pars       ,'training'          ,ltraining)
-        call read_namelist(read_gpu_run_pars            ,'gpu'               ,lgpu)
+        call read_namelist(read_run_pars                ,''                  ,loptional=loptional)
+        call read_namelist(read_streamlines_run_pars    ,'streamlines'       ,lstreamlines, loptional)
+        call read_namelist(read_eos_run_pars            ,'eos'               ,leos, loptional)
+        call read_namelist(read_hydro_run_pars          ,'hydro'             ,lhydro .or. lhydro_kinematic, loptional)
+        call read_namelist(read_density_run_pars        ,'density'           ,ldensity, loptional)
+        call read_namelist(read_forcing_run_pars        ,'forcing'           ,lforcing, loptional)
+        call read_namelist(read_gravity_run_pars        ,'grav'              ,lgrav, loptional)
+        call read_namelist(read_selfgravity_run_pars    ,'selfgrav'          ,lselfgravity, loptional)
+        call read_namelist(read_poisson_run_pars        ,'poisson'           ,lpoisson, loptional)
+        call read_namelist(read_energy_run_pars         ,'entropy'           ,lenergy, loptional)
+        !call read_namelist(read_conductivity_run_pars   ,'conductivity'      ,loptional=loptional)
+        call read_namelist(read_detonate_run_pars       ,'detonate'          ,ldetonate, loptional)
+        call read_namelist(read_magnetic_run_pars       ,'magnetic'          ,lmagnetic, loptional)
+        call read_namelist(read_lorenz_gauge_run_pars   ,'lorenz_gauge'      ,llorenz_gauge, loptional)
+        call read_namelist(read_testscalar_run_pars     ,'testscalar'        ,ltestscalar, loptional)
+        call read_namelist(read_testfield_run_pars      ,'testfield'         ,ltestfield, loptional)
+        call read_namelist(read_testflow_run_pars       ,'testflow'          ,ltestflow, loptional)
+        call read_namelist(read_radiation_run_pars      ,'radiation'         ,lradiation, loptional)
+        call read_namelist(read_pscalar_run_pars        ,'pscalar'           ,lpscalar, loptional)
+        call read_namelist(read_ascalar_run_pars        ,'ascalar'           ,lascalar, loptional)
+        call read_namelist(read_chiral_run_pars         ,'chiral'            ,lchiral, loptional)
+        call read_namelist(read_chemistry_run_pars      ,'chemistry'         ,lchemistry, loptional)
+        call read_namelist(read_dustvelocity_run_pars   ,'dustvelocity'      ,ldustvelocity, loptional)
+        call read_namelist(read_dustdensity_run_pars    ,'dustdensity'       ,ldustdensity, loptional)
+        call read_namelist(read_neutralvelocity_run_pars,'neutralvelocity'   ,lneutralvelocity, loptional)
+        call read_namelist(read_neutraldensity_run_pars ,'neutraldensity'    ,lneutraldensity, loptional)
+        call read_namelist(read_cosmicray_run_pars      ,'cosmicray'         ,lcosmicray, loptional)
+        call read_namelist(read_cosmicrayflux_run_pars  ,'cosmicrayflux'     ,lcosmicrayflux, loptional)
+        call read_namelist(read_heatflux_run_pars       ,'heatflux'          ,lheatflux, loptional)
+        call read_namelist(read_interstellar_run_pars   ,'interstellar'      ,linterstellar, loptional)
+        call read_namelist(read_shear_run_pars          ,'shear'             ,lshear, loptional)
+        call read_namelist(read_testperturb_run_pars    ,'testperturb'       ,ltestperturb, loptional)
+        call read_namelist(read_viscosity_run_pars      ,'viscosity'         ,lviscosity, loptional)
+        call read_namelist(read_special_run_pars        ,'special'           ,lspecial, loptional)
+        call read_namelist(read_shock_run_pars          ,'shock'             ,lshock, loptional)
+        call read_namelist(read_solid_cells_run_pars    ,'solid_cells'       ,lsolid_cells, loptional)
+        call read_namelist(read_NSCBC_run_pars          ,'NSCBC'             ,lnscbc, loptional)
+        call read_namelist(read_opacity_run_pars        ,'opacity'           ,lopacity, loptional)
+        call read_namelist(read_polymer_run_pars        ,'polymer'           ,lpolymer, loptional)
+        call read_namelist(read_pointmasses_run_pars    ,'pointmasses'       ,lpointmasses, loptional)
+        call read_namelist(read_power_spectrum_run_pars ,'power_spectrum'    ,lpower_spectrum, loptional)
+        call read_namelist(read_python_run_pars         ,'python'            ,lpython, loptional)
+        call read_namelist(read_implicit_diff_run_pars  ,'implicit_diffusion',limplicit_diffusion, loptional)
+        call read_namelist(read_training_run_pars       ,'training'          ,ltraining, loptional)
+        call read_namelist(read_gpu_run_pars            ,'gpu'               ,lgpu, .true.)
 !
         call read_all_particles_run_pars
 !
@@ -884,7 +911,7 @@ module Param_IO
 !  This is to have one item per line in the file param.nml (Cray compiler denies it).
 !
           call system_cmd( &
-          "sed -i -e's/\(&[a-zA-Z0-9_]*\) \( *[^ ].*\)/\1\n\2/' -e's/,\([^,]*=\)/,\n\1/g' data/param.nml >& /dev/null")
+          "sed -i -e's/\(&[a-zA-Z0-9_]*\) \( *[^ ].*\)/\1\n\2/' -e's/,\([^,]*=\)/,\n\1/g' data/param.nml > /dev/null 2>&1")
         endif
       endif
 !
@@ -1004,7 +1031,7 @@ module Param_IO
 !  This is to have one item per line in the file param2.nml (Cray compiler denies it).
 !
             call system_cmd( &
-            "sed -i -e's/\(&[a-zA-Z0-9_]*\) \( *[^ ].*\)/\1\n\2/' -e's/,\([^,]*=\)/,\n\1/g' data/param2.nml >& /dev/null")
+            "sed -i -e's/\(&[a-zA-Z0-9_]*\) \( *[^ ].*\)/\1\n\2/' -e's/,\([^,]*=\)/,\n\1/g' data/param2.nml > /dev/null 2>&1")
           endif
 
         else                                    ! output in params.log, stdout or other file

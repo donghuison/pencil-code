@@ -7,6 +7,7 @@
 import numpy as np
 import os
 from typing import Any, Tuple
+import pytest
 
 from test_utils import (
     assert_equal,
@@ -14,8 +15,10 @@ from test_utils import (
     _assert_close,
     _assert_equal_tuple,
     cmp_extracted,
+    require_sample,
 )
 
+import pencil as pc
 from pencil.read.timeseries import ts
 from pencil.read.dims import dim
 from pencil.read.varfile import var
@@ -23,24 +26,11 @@ from pencil.read.params import param
 from pencil.read.powers import power
 
 
-DATA_DIR = os.path.realpath(
-    os.path.join(
-        __file__, *[os.path.pardir] * 3, "tests", "input", "serial-1"
-    )  # ../../tests/input/serial-1
-)
-
-
-def data_file(file_name: str) -> str:
-    path = os.path.join(DATA_DIR, file_name)
-    if os.path.exists(path):
-        return path
-    else:
-        raise Exception("File {} not found.".format(path))
-
+DATA_DIR = pytest.static_data_location/"serial-1"
 
 def test_read_time_series() -> None:
     """Read time series."""
-    time_series = ts(data_file("time-series-1.dat"), quiet=True)
+    time_series = ts(datadir=DATA_DIR, quiet=True)
     expected = {
         "it": np.array([0, 50, 100, 150]),
         "t": np.array([0.000, 0.441, 0.939, 1.480]),
@@ -164,3 +154,55 @@ def test_read_power() -> None:
             np.allclose(expect, actual),
             "power.{}: expected {}, got {}".format(key, expect, actual),
         )
+
+@require_sample("samples/helical-MHDturb")
+def test_read_var_2(datadir_helical_MHDTurb):
+    var = pc.read.var(
+        datadir=datadir_helical_MHDTurb,
+        trimall=False,
+        lpersist=True,
+        magic=["bb"],
+        )
+
+    assert len(var.x) == 38
+    assert len(var.y) == 38
+    assert len(var.z) == 38
+
+    assert np.isclose(var.f[0,6,8,9], 0.02334117174211011)
+    assert np.isclose(var.uy[3,9,5], -0.05910974500656841)
+    assert np.isclose(var.uz[8,13,30], -0.02635602018447831)
+
+    assert np.isclose(var.persist.forcing_tsforce, 0.3999999999999999)
+
+@require_sample("samples/helical-MHDturb")
+def test_read_var_2_trim(datadir_helical_MHDTurb):
+    var = pc.read.var(datadir=datadir_helical_MHDTurb, trimall=True, lpersist=True)
+
+    assert len(var.x) == 32
+    assert len(var.y) == 32
+    assert len(var.z) == 32
+
+    assert np.isclose(var.f[0,3,5,6], 0.02334117174211011)
+    assert np.isclose(var.uy[0,6,2], -0.05910974500656841)
+    assert np.isclose(var.uz[5,10,27], -0.02635602018447831)
+
+    assert np.isclose(var.persist.forcing_tsforce, 0.3999999999999999)
+
+@require_sample("samples/conv-slab_cp_2")
+def test_read_var_3_local(datadir_conv_slab_cp_2):
+    kwargs = {
+        'datadir': datadir_conv_slab_cp_2,
+        'trimall': True,
+        'lpersist': True,
+        }
+
+    var_g = pc.read.var(**kwargs)
+    var_p0 = pc.read.var(**kwargs, proc=0)
+    var_p1 = pc.read.var(**kwargs, proc=1)
+
+    assert len(var_g.y) == 2*len(var_p0.y)
+    assert len(var_p0.y) == len(var_p1.y)
+    assert len(var_g.x) == len(var_p0.x)
+
+    assert var_g.uz[13,17,5] == var_p1.uz[13,1,5]
+    assert var_g.lnrho[13,11,5] == var_p0.lnrho[13,11,5]

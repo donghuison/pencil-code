@@ -3,6 +3,9 @@
 #include "../selfgravity.h"
 #include "../magnetic/before_boundary.h"
 #include "../alphadisk/after_timestep.h"
+//#include "../gravitational_waves.h"
+//#include "../hydro/hydro_after_boundary_conservative.h"
+//#include "../ioncalc.h"
 
 input real AC_dt
 input PC_SUB_STEP_NUMBER AC_step_num
@@ -11,20 +14,19 @@ input real AC_t
 
 ComputeSteps AC_rhs(boundconds)
 {
-	shock_1_divu()
-	shock_2_max()
-	shock_3_smooth()
+	shock_1_divu(AC_step_num)
+	shock_2_max(AC_step_num)
+	shock_3_smooth(AC_step_num)
         twopass_solve_intermediate(AC_step_num,AC_dt)
         twopass_solve_final(AC_step_num)
 }
 ComputeSteps AC_calculate_timestep(boundconds)
 {
-	shock_1_divu()
-	shock_2_max()
-	shock_3_smooth()
+	shock_1_divu(AC_step_num)
+	shock_2_max(AC_step_num)
+	shock_3_smooth(AC_step_num)
 	twopass_solve_intermediate(PC_FIRST_SUB_STEP,AC_dt)
 }
-
 ComputeSteps AC_calc_selfgravity_rhs(boundconds)
 {
 	selfgravity_calc_rhs()
@@ -33,23 +35,31 @@ ComputeSteps AC_calc_final_potential(boundconds)
 {
 	calc_final_potential(AC_t)
 }
-
 ComputeSteps AC_sor_step(boundconds)
 {
 	selfgravity_sor_step(0)
 	selfgravity_sor_step(1)
 }
-
 ComputeSteps AC_before_boundary_steps(boundconds)
 {
 	get_current_total_mass(AC_lrmv)
 	fix_mass_drift(AC_lrmv)
-	magnetic_before_boundary_reductions()
+	magnetic_before_boundary_reductions(AC_lrmv)
+	//hydro_before_boundary(AC_step_num)
+	//hydro_after_boundary_conservative(AC_t)
+	//ioncalc()
+}
+ComputeSteps AC_before_boundary_steps_including_halos(boundconds)
+{
 }
 ComputeSteps AC_after_timestep(boundconds)
 {
 	after_timestep_alphadisk()
 }
+//ComputeSteps AC_gravitational_waves_solve_and_stress(boundconds)
+//{
+//	//gravitational_waves_solve_and_stress(AC_t,AC_dt)
+//}
 BoundConds boundconds{
   #include "boundconds.h"
 }

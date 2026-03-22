@@ -29,7 +29,6 @@
 !***************************************************************
 module Magnetic
 !
-  use Cparam
   use Cdata
   use General, only: keep_compiler_quiet
   use Messages, only: svn_id, fatal_error, not_implemented
@@ -37,7 +36,6 @@ module Magnetic
   implicit none
 !
   include 'magnetic.h'
-  integer :: pushpars2c  ! should be procedure pointer (F2003)
 !
 !  Initialization parameters
 !
@@ -168,9 +166,7 @@ module Magnetic
   real, dimension(3) :: b_ext_inv = 0.0
   logical, parameter :: lcalc_aamean = .false.
   logical, parameter :: lcalc_aameanz = .false.
-  logical, parameter :: lelectron_inertia = .false.
   integer, parameter :: idiag_axmz = 0, idiag_aymz = 0
-  real, parameter :: inertial_length = 0.0, linertial_2 = 0.0
 !
   contains
 !***********************************************************************
@@ -205,7 +201,7 @@ module Magnetic
 !
 !  Request auxiliary variable for the effective electric field.
 !
-      call farray_register_auxiliary('ee', iee, vector=3, communicated=.true., ierr=istat)
+      call farray_register_auxiliary('ee', iee, vector=3, rhs=.true., communicated=.true., ierr=istat)
       if (istat /= 0) call fatal_error('register_magnetic', 'cannot register the variable ee')
       iex = iee
       iey = iex + 1
@@ -213,7 +209,7 @@ module Magnetic
 !
 !  Request auxiliary variable for the current density.
 !
-      call farray_register_auxiliary('jj', ijj, vector=3, communicated=.true., ierr=istat)
+      call farray_register_auxiliary('jj', ijj, vector=3, rhs=.true., communicated=.true., ierr=istat)
       if (istat /= 0) call fatal_error('register_magnetic', 'cannot register the variable jj')
       ijx = ijj
       ijy = ijx + 1
@@ -284,9 +280,6 @@ module Magnetic
       endif resis
 !
     endsubroutine initialize_magnetic
-!***********************************************************************
-    subroutine       initialize_magnetic_after_special
-    endsubroutine    initialize_magnetic_after_special
 !***********************************************************************
     subroutine init_aa(f)
 !
@@ -619,6 +612,14 @@ module Magnetic
       if (lpenc_loc(i_el).or.lpenc_loc(i_e2)) call not_implemented("calc_pencils_magnetic_pencpar", &
           "pencil e2 (electric field)")
 !
+!  Constrain the time step.
+!
+      timestep: if (lupdate_courant_dt) then
+        call set_advec_va2(p)
+        maxdiffus = max(maxdiffus,maxdiffus_eta)
+        maxdiffus3 = max(maxdiffus3,maxdiffus_eta3)
+      endif timestep
+!
     endsubroutine calc_pencils_magnetic_pencpar
 !***********************************************************************
     subroutine daa_dt(f, df, p)
@@ -663,18 +664,24 @@ module Magnetic
         endif eth
       endif ohmic
 !
-!  Constrain the time step.
-!
-      timestep: if (lupdate_courant_dt) then
-        call set_advec_va2(p)
-        maxdiffus = max(maxdiffus,maxdiffus_eta)
-        maxdiffus3 = max(maxdiffus3,maxdiffus_eta3)
-      endif timestep
-!
       call calc_diagnostics_magnetic(f,p)
 
     endsubroutine daa_dt
 !******************************************************************************
+    subroutine calc_diagnostic_auxiliaries_magnetic(f,p)
+!
+!  Dummy routine
+!
+      real, dimension (mx,my,mz,mfarray) :: f
+      type (pencil_case) :: p
+!
+      intent(in) :: f, p
+!
+      call keep_compiler_quiet(f)
+      call keep_compiler_quiet(p)
+!
+    endsubroutine calc_diagnostic_auxiliaries_magnetic
+!***********************************************************************
     subroutine calc_diagnostics_magnetic(f,p)
 
       real, dimension(:,:,:,:) :: f
@@ -1054,19 +1061,6 @@ module Magnetic
       if (lresis_hyper3_mesh) eta_hyper3_mesh = pi5_1 * uc / re_mesh / sqrt(real(dimensionality))
 !
     endsubroutine dynamical_resistivity
-!***********************************************************************
-    subroutine update_char_vel_magnetic(f)
-!
-!   Add the vector potential to the characteristic velocity
-!   for slope limited diffusion.
-!
-!   25-sep-15/MR+joern: for slope limited diffusion
-!
-      real, dimension(mx,my,mz,mfarray), intent(inout):: f
-!
-      if (lslope_limit_diff) f(:,:,:,iFF_diff2)=f(:,:,:,iFF_diff2)+sum(f(:,:,:,ibx:ibz)**2,4)
-      
-    endsubroutine update_char_vel_magnetic
 !***********************************************************************
 !***********************************************************************
 !
@@ -1513,5 +1507,31 @@ module Magnetic
       endif bext
 !
     endsubroutine get_bext
+!***********************************************************************
+    subroutine pushpars2c(p_par)
+
+    use Syscalls, only: copy_addr
+    use General , only: string_to_enum
+
+    integer, parameter :: n_pars=50
+    integer(KIND=ikind8), dimension(n_pars) :: p_par
+    call copy_addr(t_bext,p_par(1))
+    call copy_addr(t0_bext,p_par(2))
+    call copy_addr(lbext,p_par(3)) ! bool
+    call copy_addr(limplicit_resistivity,p_par(4)) ! bool
+    call copy_addr(lresis_const,p_par(5)) ! bool
+    call copy_addr(lresis_zdep,p_par(6)) ! bool
+    call copy_addr(lresis_shock,p_par(7)) ! bool
+    call copy_addr(lohmic_heat,p_par(8)) ! bool
+    call copy_addr(eta,p_par(9))
+    call copy_addr(eta_shock,p_par(10))
+    call copy_addr(lresistivity,p_par(11)) ! bool
+    call copy_addr(b_ext,p_par(12)) ! real3
+    call copy_addr(b0_ext,p_par(13)) ! real3
+    call copy_addr(maxdiffus_eta,p_par(14)) ! (nx)
+    call copy_addr(maxdiffus_eta3,p_par(15)) ! (nx)
+    call copy_addr(eta_zdep,p_par(16)) ! (mz)
+
+    endsubroutine pushpars2c
 !***********************************************************************
 endmodule Magnetic

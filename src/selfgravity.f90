@@ -19,7 +19,6 @@
 !***************************************************************
 module Selfgravity
 !
-  use Cparam
   use Cdata
   use General, only: keep_compiler_quiet
   use Messages
@@ -37,10 +36,13 @@ module Selfgravity
 !
   logical :: lselfgravity_gas=.true., lselfgravity_dust=.false.
   logical :: lselfgravity_neutrals=.false.
+  logical :: luse_G_Newton=.false.  !PAR_DOC: Use physical Newton constant (in the correct units)
+  logical :: lBryan_etal14=.false.  !PAR_DOC: Bryan_etal14 convention, where velocity is not comoving.
 !
   namelist /selfgrav_init_pars/ &
       rhs_poisson_const, lselfgravity_gas, lselfgravity_dust, &
-      lselfgravity_neutrals, tstart_selfgrav, gravitational_const, kappa
+      lselfgravity_neutrals, tstart_selfgrav, gravitational_const, kappa, &
+      luse_G_Newton, lBryan_etal14
 !
 !  Run Parameters
 !
@@ -61,7 +63,7 @@ module Selfgravity
   integer :: idiag_gpotselfx2m=0, idiag_gpotselfy2m=0, idiag_gpotselfz2m=0
   integer :: idiag_gxgym=0, idiag_gxgzm=0, idiag_gygzm=0
   integer :: idiag_grgpm=0, idiag_grgzm=0, idiag_gpgzm=0
-  integer :: idiag_qtoomre=0,idiag_qtoomremin=0
+  integer :: idiag_qtoomre=0,idiag_qtoomremin=0,idiag_qtoomremax=0
   integer :: idiag_jeanslength=0, idiag_ljeans2d=0
   integer :: idiag_rugpotselfm=0 ! DIAG_DOC: $\left<\rho\uv\cdot\nabla\Phi\right>$
   integer :: idiag_gpotself2m=0  ! DIAG_DOC: $\left<(\nabla\Phi)^2\right>$
@@ -83,7 +85,7 @@ module Selfgravity
 !
 !  Set indices for auxiliary variables
 !
-      call farray_register_auxiliary('potself',ipotself,communicated=.true.)
+      call farray_register_auxiliary('potself',ipotself,communicated=.true.,rhs=.true.)
 !
 !  Identify version number (generated automatically by SVN).
 !
@@ -123,12 +125,18 @@ module Selfgravity
       f(:,:,:,ipotself)=0.0
 !
 !  If gravitational constant was set, re-define rhs_poisson_const.
-!  else define the gravitational constant via rhs_poisson_const
+!  else define the gravitational constant via rhs_poisson_const.
+!  However, if luse_G_Newton=T, we ignore rhs_poisson_const
+!  and compute rhs_poisson_const=4*pi*G_Newton form G_Newton.
 !
       if (gravitational_const/=0.0) then
         rhs_poisson_const=4*pi*gravitational_const
       else
-        gravitational_const=rhs_poisson_const/(4*pi)
+        if (luse_G_Newton) then
+          rhs_poisson_const=4*pi*G_Newton
+        else
+          gravitational_const=rhs_poisson_const/(4*pi)
+        endif
       endif
 !
       if (.not.lpoisson) &
@@ -206,6 +214,14 @@ module Selfgravity
 !
       if (lstratz) call get_stratz(z, rho0z)
 !
+!  Write constants to disk.
+!
+     if (lroot) then
+        open (1,file=trim(datadir)//'/pc_constants.pro',position='append')
+        write (1,*) 'G_Newton=', G_Newton
+        close (1)
+     endif
+!
     endsubroutine initialize_selfgravity
 !***********************************************************************
     subroutine pencil_criteria_selfgravity()
@@ -233,7 +249,8 @@ module Selfgravity
         lpenc_diagnos(i_phiy)=.true.
       endif
 !
-      if (idiag_qtoomre/=0.or.idiag_qtoomremin/=0.or.idiag_jeanslength/=0.or.idiag_ljeans2d/=0) then
+      if (idiag_qtoomre/=0.or.idiag_qtoomremin/=0.or.idiag_qtoomremax/=0.or. &
+         idiag_jeanslength/=0.or.idiag_ljeans2d/=0) then
         lpenc_diagnos(i_rho)=.true.
         lpenc_diagnos(i_cs2)=.true.
       endif
@@ -310,6 +327,7 @@ module Selfgravity
 !  Calculate the potential of the self gravity.
 !
 !  15-may-06/anders+jeff: coded
+!  27-oct-25/axel: added ascale_type with default (from cdata) being the default
 !
       use Particles_main, only: particles_calc_selfpotential
       use FArrayManager
@@ -325,6 +343,7 @@ module Selfgravity
       if (t>=tstart_selfgrav) then
 !
 !  Consider self-gravity from gas and dust density or from either one.
+!  Set rhs_poisson based on the gas density. The particle contribution is added below.
 !
         if (ldensity.and.lselfgravity_gas) then
           if (lstratz) then
@@ -338,7 +357,7 @@ module Selfgravity
           rhs_poisson = 0.
         endif
 !
-!  Contribution from dust.
+!  Contribution from dust. Note: this is not particles!
 !
         if (ldustdensity.and.lselfgravity_dust) then
           if (ldustdensity_log) then
@@ -402,7 +421,19 @@ module Selfgravity
           f(l1:l2,m1:m2,n1:n2,ipotself) = 0.5 * rhs_poisson_const * &
               (1.0 - cos(pi * (t - tstart_selfgrav) / tselfgrav_gentle)) * rhs_poisson
         else
-          f(l1:l2,m1:m2,n1:n2,ipotself) = rhs_poisson_const*rhs_poisson
+          select case (ascale_type)
+            case ('default'); f(l1:l2,m1:m2,n1:n2,ipotself) = rhs_poisson_const*rhs_poisson
+!
+!  In Bryan+14 and ENZO, velocity is still physical, but density is not, so we must divide by ascale.
+!
+            case ('general')
+              if (lBryan_etal14) then
+                f(l1:l2,m1:m2,n1:n2,ipotself) = rhs_poisson_const*rhs_poisson/ascale
+              else
+                f(l1:l2,m1:m2,n1:n2,ipotself) = rhs_poisson_const*rhs_poisson*ascale
+              endif
+          endselect
+
         endif
 !
       endif ! if (t>=tstart_selfgrav) then
@@ -473,6 +504,8 @@ module Selfgravity
              call sum_mn_name(kappa*sqrt(p%cs2)/(gravitational_const*pi*p%rho),idiag_qtoomre)
         if (idiag_qtoomremin/=0) call max_mn_name(-kappa*sqrt(p%cs2)/ &
              (gravitational_const*pi*p%rho),idiag_qtoomremin,lneg=.true.)
+        if (idiag_qtoomremax/=0) call max_mn_name( kappa*sqrt(p%cs2)/ &
+             (gravitational_const*pi*p%rho),idiag_qtoomremax)
         if (idiag_jeanslength/=0) call max_mn_name(-sqrt(pi*p%cs2/ &
             (gravitational_const*p%rho)),idiag_jeanslength,lneg=.true.)
         if (idiag_ljeans2d/=0) call max_mn_name(-p%cs2/ &
@@ -580,7 +613,7 @@ module Selfgravity
         idiag_gpotselfx2m=0; idiag_gpotselfy2m=0; idiag_gpotselfz2m=0
         idiag_gxgym=0; idiag_gxgzm=0; idiag_gygzm=0
         idiag_grgpm=0; idiag_grgzm=0; idiag_gpgzm=0
-        idiag_qtoomre=0; idiag_qtoomremin=0
+        idiag_qtoomre=0; idiag_qtoomremin=0; idiag_qtoomremax=0
         idiag_jeanslength=0; idiag_ljeans2d=0
         idiag_rugpotselfm=0; idiag_gpotself2m=0
       endif
@@ -607,6 +640,7 @@ module Selfgravity
         call parse_name(iname,cname(iname),cform(iname),'gpgzm',idiag_gpgzm)
         call parse_name(iname,cname(iname),cform(iname),'qtoomre',idiag_qtoomre)
         call parse_name(iname,cname(iname),cform(iname),'qtoomremin',idiag_qtoomremin)
+        call parse_name(iname,cname(iname),cform(iname),'qtoomremax',idiag_qtoomremax)        
         call parse_name(iname,cname(iname),cform(iname),'jeanslength',idiag_jeanslength)
         call parse_name(iname,cname(iname),cform(iname),'ljeans2d',idiag_ljeans2d)
       enddo

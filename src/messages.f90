@@ -7,7 +7,6 @@ module Messages
   use Cdata
   use Mpicomm
 !$ use General, only: omp_single
-!$ use OMP_lib
 !
   implicit none
 !
@@ -67,7 +66,7 @@ module Messages
 
       inquire(FILE="COLOR", EXIST=ltermcap_color)
 !
-      if (mailaddress=='') call get_env_var('MAILADDR',mailaddress)
+      if (mailaddress=='') call get_env_var('PENCIL_USER_MAILADDR',mailaddress)
 
       if (mailaddress/='') then
         if (index(trim(mailaddress),'@')==0 .or. index(trim(mailaddress),'.')==0) then
@@ -76,7 +75,7 @@ module Messages
         endif
       endif
 
-      if (mailcmd=='') call get_env_var('MAILCMD',mailcmd)
+      if (mailcmd=='') call get_env_var('PENCIL_USER_MAILCMD',mailcmd)
       if (mailcmd=='') mailcmd = 'mail'
       if (submithost=='') call get_env_var("SLURM_SUBMIT_HOST",submithost)
       if (submithost=='') call get_env_var("HOSTNAME",submithost)
@@ -250,7 +249,7 @@ module Messages
 !  4-apr-2025/TP: not done on the GPU since surprisingly expensive: instead MPI_ABORT on any local error immediately
 !
       use General, only: itoa
-      use Mpicomm, only: mpireduce_sum_int, mpibcast_int, mpigather_scl_str, MPI_COMM_WORLD
+      use Mpicomm, only: mpireduce_sum_int, mpibcast_int, mpigather_scl_str, MPI_COMM_PENCIL
       use Mpicomm, only: die_immediately, die_gracefully
 
 
@@ -261,7 +260,7 @@ module Messages
       if (lgpu) return
       if (.not.llife_support) then
 
-        call mpiallreduce_sum_int(fatal_errors,fatal_errors_total,MPI_COMM_WORLD)
+        call mpiallreduce_sum_int(fatal_errors,fatal_errors_total,MPI_COMM_PENCIL)
 !
         if (fatal_errors_total/=0) then
           call mpigather_scl_str(message_stored,messages)
@@ -523,6 +522,7 @@ module Messages
 !
       use General, only: loptest
       use Mpicomm, only: mpiwtime
+!$    use OMP_lib
 
       integer :: lun=9
       character(len=*), optional :: location
@@ -534,7 +534,7 @@ module Messages
       integer :: mul_fac
       logical, save :: opened = .false.
 !
-!$ if (omp_in_parallel()) return
+!$    if (omp_in_parallel()) return
 !
       if (present(location)) scaller=location
 !
@@ -976,7 +976,7 @@ module Messages
 !
         if ( .not.lopen.and..not.lread ) &        ! send mail to user
           call system_cmd( &
-               'echo '//trim(errormsg)//'|'//trim(mailcmd)//"-s 'PencilCode Message' "//trim(mailaddress)//' >& /dev/null')
+               'echo '//trim(errormsg)//'|'//trim(mailcmd)//"-s 'PencilCode Message' "//trim(mailaddress)//' > /dev/null 2>&1')
       endif
     endif
 !

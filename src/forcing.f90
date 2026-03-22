@@ -13,7 +13,7 @@
 ! MVAR CONTRIBUTION 0
 ! MAUX CONTRIBUTION 0
 !
-! PENCILS PROVIDED fcont(3,n_forcing_cont_max)
+! PENCILS PROVIDED fcont(3,n_forcing_cont_max); curlfcont(3,n_forcing_cont_max)
 !
 !***************************************************************
 module Forcing
@@ -54,7 +54,14 @@ module Forcing
   real, dimension(nx) :: profx_ampl=1.,profx_hel=1., profx_ampl1=0.
   real, dimension(my) :: profy_ampl=1.,profy_hel=1.
   real, dimension(mz) :: profz_ampl=1.,profz_hel=1.,qdouble_profile=1.
-  integer :: kfountain=5,iff,ifx,ify,ifz,ifff,iffx,iffy,iffz,i2fff,i2ffx,i2ffy,i2ffz,iff_aux
+  integer :: kfountain=5,ifx,ify,ifz,ifff,iffx,iffy,iffz,i2fff,i2ffx,i2ffy,i2ffz
+  !Kishore: register_report_aux explicitly assumes that the variable is
+  !Kishore: uninitialized only if the corresponding index is zero. I have now
+  !Kishore: changed iff and iff_aux below to be explicitly initialized to zero
+  !Kishore: (for comparison, other variables used for f-array indices are
+  !Kishore: initialized to zero in cdata.f90).
+  integer :: iff=0, iff_aux=0
+  integer, dimension(n_forcing_cont_max) :: ifcont_aux=0
   integer :: kzlarge=1
   integer :: iforcing_zsym=0, nlocation=1
   logical :: lwork_ff=.false.,lmomentum_ff=.false.
@@ -68,7 +75,7 @@ module Forcing
   logical :: lscale_kvector_fac=.false.
   logical :: lforce_peri=.false., lforce_cuty=.false.
   logical :: lforcing2_same=.false., lforcing2_curl=.false.
-  logical :: lff_as_aux = .false.
+  logical :: lff_as_aux = .false., lfcont_as_comaux=.false.
   logical :: lforcing_osc = .false., lforcing_osc2 = .false., lforcing_osc_double = .false.
   real :: scale_kvectorx=1.,scale_kvectory=1.,scale_kvectorz=1.
   logical :: old_forcing_evector=.false., lforcing_coefs_hel_double=.false.
@@ -136,7 +143,6 @@ module Forcing
   real, dimension (my,n_forcing_cont_max) :: siny,cosy,sinyt,cosyt,embedy,expmk2y2
   real, dimension (mz,n_forcing_cont_max) :: sinz,cosz,sinzt,coszt,embedz
   real, dimension (100,n_forcing_cont_max) :: xi_GP,eta_GP
-  real, allocatable, dimension (:,:,:,:) :: fcont_from_file_read_input
   real, allocatable, dimension (:,:,:,:) :: fcont_from_file
 !
   namelist /forcing_run_pars/ &
@@ -165,6 +171,7 @@ module Forcing
        lforcing_cont,iforcing_cont, z_center_fcont, z_center, &
        lembed, k1_ff, ampl_ff, ampl1_ff, width_fcont, x1_fcont, x2_fcont, &
        kf_fcont, omega_fcont, omegay_fcont, omegaz_fcont, eps_fcont, &
+       lfcont_as_comaux, &
        lsamesign, lshearing_adjust_old, equator, &
        lscale_kvector_fac,scale_kvectorx,scale_kvectory,scale_kvectorz, &
        lforce_peri,lforce_cuty,lforcing2_same,lforcing2_curl, &
@@ -219,8 +226,6 @@ module Forcing
   integer :: KS_modes = 25
 !
   integer, dimension(n_forcing_cont_max) :: enum_iforcing_cont = 0
-  logical, dimension(2) :: lforce_helical = .false.
-  logical :: lsecond_force = .false.
 
   contains
 !
@@ -267,12 +272,17 @@ module Forcing
       use SharedVariables, only: get_shared_variable
       use Sub, only: step,erfunc,stepdown,register_report_aux
       use EquationOfState, only: cs20
+      use Hdf5_io, only: file_close_hdf5, file_open_hdf5, input_hdf5
 !
-      real :: zstar,rmin,rmax,a_ell,anum,adenom,jlm_ff,ylm_ff,alphar,Balpha,RYlm,IYlm,intv_rotang
+      real :: zstar,rmin,rmax,a_ell,anum,adenom,jlm_ff,ylm_ff,alphar,Balpha,RYlm,IYlm
       real :: ang_intv,sthphase,cthphase,costhprime,phprime
 
       integer :: l,m,n,i,ilread,ilm,ckno,ilist,emm,aindex,Legendrel,iangle
-      logical :: lk_dot_dat_exists
+      integer :: ix, iy, iz, iv, ix_local, iy_local, iz_local
+      logical :: lk_dot_dat_exists, llocal_x, llocal_y, llocal_z
+      character (len=labellen) :: tmp
+      real, dimension(3) :: fcont_from_file_read_input
+      character (len=fnlen) :: filename
 
       cs0=sqrt(cs20)
 !
@@ -956,13 +966,13 @@ module Forcing
             enddo
           enddo
         endif 
- 
+!
       elseif (iforce=='chandra_kendall'.or.iforce=='cktest') then 
 !
         if (.not. lspherical_coords) call fatal_error('initialize_forcing', &
                         'Chandrasekhar-Kendall forcing works only in spherical coordinates!')
 !
-        if (abs(helsign)/=1) call fatal_error("initialize_forcing", "CK forcing: helsign must be ±1")
+        if (abs(helsign)/=1) call fatal_error("initialize_forcing", "CK forcing: helsign must be +-1")
 !
         if (iforce=='cktest') then
           lhelical_test=.true.
@@ -1019,10 +1029,22 @@ module Forcing
               enddo
             enddo
           enddo
-
         endif 
+!
       elseif (iforce=='twist') then
         if (r_ff==0.) call fatal_error('initialize_forcing',"for iforce='twist', r_ff=0 impossible")
+!
+      elseif (iforce=='2drandom_xy') then
+        if (lroot) print*,'forcing_2drandom_xy: selecting k vectors'
+        call get_2dmodes (.true.)
+        allocate(random2d_kmodes (2,random2d_nmodes))
+        call get_2dmodes (.false.)
+        if (lroot) then
+          open(unit=10,file=trim(datadir)//'/2drandomk.out',status='unknown')
+          do i = 1, random2d_nmodes
+            write(10,*) random2d_kmodes(1,i),random2d_kmodes(2,i)
+          enddo
+        endif
       endif
 
       if (lff_as_aux) call register_report_aux('ff', iff, ifx, ify, ifz)
@@ -1197,40 +1219,77 @@ module Forcing
           siny(:,i)=sin(2.*pi*y/Lxyz(2))
        elseif (iforcing_cont(i)=='from_file') then
           if (allocated(fcont_from_file)) deallocate(fcont_from_file)
-          allocate(fcont_from_file_read_input(3,nxgrid,nygrid,nzgrid))
           allocate(fcont_from_file(nx,ny,nz,3))
-          
-          ! To create forcing_cont.dat, see function pc.util.write_forcing_cont in the Python module.
+!
+!         To create forcing_cont.dat, see function pc.tool_kit.write_forcing_cont
+!         in the Python module.
+!
           if (lroot.and.ip<14) print*,'initialize_forcing: opening forcing_cont.dat'
           open(1,file='forcing_cont.dat',status='old')
-          read(1,*) fcont_from_file_read_input
+!
+!         Since having an array of size (nxgrid,nygrid,nzgrid) is a problem in
+!         large simulations, we read forcing_cont.dat in chunks of 3 elements.
+!
+          do iz=1,nzgrid
+            iz_local = iz - ipz*nz
+            llocal_z = (iz_local > 0 .and. iz_local <= nz)
+            do iy=1,nygrid
+              iy_local = iy - ipy*ny
+              llocal_y = (iy_local > 0 .and. iy_local <= ny)
+              do ix=1,nxgrid
+                ix_local = ix - ipx*nx
+                llocal_x = (ix_local > 0 .and. ix_local <= nx)
+!
+!               It would be better to seek rather than read when (ix,iy,iz) is
+!               outside the current processor, but that does not seem possible
+!               with the input format chosen here.
+!
+                read(1,*) fcont_from_file_read_input
+                if (llocal_x .and. llocal_y .and. llocal_z) then
+                  do iv=1,3
+                    fcont_from_file(ix_local,iy_local,iz_local,iv) = fcont_from_file_read_input(iv)
+                  enddo
+                endif
+              enddo
+            enddo
+          enddo
           close(1)
-          fcont_from_file(:,:,:,1) = fcont_from_file_read_input(1,l1-nghost+ipx*nx:l2-nghost+ipx*nx, &
-            m1-nghost+ipy*ny:m2-nghost+ipy*ny,n1-nghost+ipz*nz:n2-nghost+ipz*nz)
-          fcont_from_file(:,:,:,2) = fcont_from_file_read_input(2,l1-nghost+ipx*nx:l2-nghost+ipx*nx, &
-            m1-nghost+ipy*ny:m2-nghost+ipy*ny,n1-nghost+ipz*nz:n2-nghost+ipz*nz)
-          fcont_from_file(:,:,:,3) = fcont_from_file_read_input(3,l1-nghost+ipx*nx:l2-nghost+ipx*nx, &
-            m1-nghost+ipy*ny:m2-nghost+ipy*ny,n1-nghost+ipz*nz:n2-nghost+ipz*nz)
-          deallocate(fcont_from_file_read_input)
+        elseif (iforcing_cont(i)=='from_file_h5') then
+!
+!         More HPC-friendly variant of from_file (each process no longer reads
+!         the entire file). Requires HDF5 IO.
+!
+          if (allocated(fcont_from_file)) deallocate(fcont_from_file)
+          allocate(fcont_from_file(nx,ny,nz,3))
+!
+          filename = 'forcing_cont.h5'
+          if (lroot.and.ip<14) print*,'initialize_forcing: opening '//trim(filename)
+          call file_open_hdf5(filename, read_only=.true.)
+!
+          call input_hdf5('forcing_cont/x', fcont_from_file(:,:,:,1), lghost=.false.)
+          call input_hdf5('forcing_cont/y', fcont_from_file(:,:,:,2), lghost=.false.)
+          call input_hdf5('forcing_cont/z', fcont_from_file(:,:,:,3), lghost=.false.)
+!
+          call file_close_hdf5
         endif
       enddo
       if (n_forcing_cont==0) call warning('forcing','no valid continuous iforcing_cont specified')
+!
+!  Note: this must come after the code above that sets n_forcing_cont.
+!
+      if (lfcont_as_comaux) then
+        do i=1,n_forcing_cont
+!  n_forcing_cont_max==2, so a width-1 field should be enough
+          write(tmp,"(I1)") i
+          call register_report_aux('fcont'//trim(tmp), ifcont_aux(i), ix, iy, iz, communicated=.true.)
+        enddo
+      endif
 !
 !  minimal wavenumbers
 !
       where( Lxyz/=0.) k1xyz=2.*pi/Lxyz
 !
       if (r_ff /=0. .or. rcyl_ff/=0.) profz_k = tanh(z/width_ff)
-!
-!  Useful logicals for GPU
-!
-    select case(iforce)
-      case ('helical', '2'); lforce_helical(1) = .true.
-    endselect
-    select case(iforce2)
-      case ('helical', '2'); lforce_helical(2) = .true.
-    endselect
-    lsecond_force = iforce2 /= 'zero'
 !
     endsubroutine initialize_forcing
 !***********************************************************************
@@ -1330,34 +1389,17 @@ module Forcing
 !  in space.
 !
 !  14-feb-2011/ dhruba : coded
+!  22-Sep-2025/kishore: moved initialization of random2d_kmodes to initialize_forcing (to ensure it is done properly while reloading)
 !
       use General, only: random_number_wrapper
       use EquationOfState, only: cs20
 !
       real, dimension (mx,my,mz,mfarray) :: f
-      logical, save :: lfirst_call=.true.
-      integer :: ikmodes,iran1,iran2,kx1,ky1,kx2,ky2
+      integer :: iran1,iran2,kx1,ky1,kx2,ky2
       real, dimension(nx,3) :: forcing_rhs
       real, dimension(nx) :: xkx1,xkx2
       real,dimension(4) :: fran
       real :: phase1,phase2,pi_over_Lx,force_norm
-!
-      if (lfirst_call) then
-! If this is the first time this routine is being called select a set of
-! k-vectors in two dimensions according to inputparameters:
-        if (lroot) print*,'forcing_2drandom_xy: selecting k vectors'
-        call get_2dmodes (.true.)
-        allocate(random2d_kmodes (2,random2d_nmodes))
-        call get_2dmodes (.false.)
-        if (lroot) then
-! The root processors also write out the forced modes.
-          open(unit=10,file=trim(datadir)//'/2drandomk.out',status='unknown')
-          do ikmodes = 1, random2d_nmodes
-            write(10,*) random2d_kmodes(1,ikmodes),random2d_kmodes(2,ikmodes)
-          enddo
-        endif
-        lfirst_call=.false.
-      endif
 !
 ! force = xhat [ cos (k_1 x + \phi_1 ) + cos (k_2 y + \phi_1) ] +
 !         yhat [ cos (k_3 x + \phi_2 ) + cos (k_4 y + \phi_2) ]
@@ -1418,9 +1460,10 @@ module Forcing
 !***********************************************************************
     subroutine get_2dmodes (lonly_total)
 !
+      logical, intent(in) :: lonly_total
+!
       integer :: ik1,ik2,modk
       integer :: imode=1
-      logical :: lonly_total
 !
 !  15-feb-2011/dhruba: coded
 !
@@ -5500,14 +5543,15 @@ module Forcing
 !  24-mar-08/axel: adapted from density.f90
 !   6-feb-09/axel: added epsilon factor in ABC flow (eps_fcont=1. -> nocos)
 !
-      use Sub, only: multsv_mn
+      use Sub, only: multsv_mn, gij, curl_mn
 !
       real, dimension (mx,my,mz,mfarray) :: f
       type (pencil_case) :: p
 !
       intent(inout) :: f,p
 !
-      integer :: i
+      integer :: i,j
+      real, dimension(nx,3,3) :: fij
 !
 !  calculate forcing
 !
@@ -5525,12 +5569,31 @@ module Forcing
             endif
           endif
 !
+          if (lfcont_as_comaux) then
+            j = ifcont_aux(i)
+            f(l1:l2,m,n,j:j+2) = p%fcont(:,:,i)
+          endif
+!
 !  divide by rho if lmomentum_ff=T
 !  MR: better to place it in hydro
 !
           if (i==1 .and. lmomentum_ff) call multsv_mn(p%rho1,p%fcont(:,:,1),p%fcont(:,:,1))
         enddo
       endif
+!
+    if (lpencil(i_curlfcont)) then
+      do i=1,n_forcing_cont
+        if (ifcont_aux(i)/=0) then
+          call gij(f, ifcont_aux(i), fij, 1)
+          call curl_mn(fij, p%curlfcont(:,:,i))
+        else
+!
+!  lfcont_as_comaux is tested for here (and not in, say, initialize_forcing or pencil_interdep_forcing) to prevent out-of-bounds access during the pencil check.
+!
+          call fatal_error('calc_pencils_forcing', 'calculation of pencil curlfcont requires lfcont_as_comaux=T')
+        endif
+      enddo
+    endif
 !
     endsubroutine calc_pencils_forcing
 !***********************************************************************
@@ -6282,7 +6345,7 @@ module Forcing
 !   Read forcing profile from file. Currently can be used only for one variable
 !   (e.g. either uu or aa).
 !
-      case('from_file')
+      case('from_file','from_file_h5')
         force(:,1) = fcont_from_file(:,m-nghost,n-nghost,1)
         force(:,2) = fcont_from_file(:,m-nghost,n-nghost,2)
         force(:,3) = fcont_from_file(:,m-nghost,n-nghost,3)
@@ -6525,6 +6588,18 @@ module Forcing
     integer, parameter :: n_pars=100
     integer :: i
     integer(KIND=ikind8), dimension(n_pars) :: p_par
+    logical, dimension(2), save :: lforce_helical
+    logical, save :: lsecond_force
+!
+!  Useful logicals for GPU
+!
+    select case(iforce)
+      case ('helical', '2'); lforce_helical(1) = .true.
+    endselect
+    select case(iforce2)
+      case ('helical', '2'); lforce_helical(2) = .true.
+    endselect
+    lsecond_force = iforce2 /= 'zero'
 
     call copy_addr(k1_ff,p_par(1))
     call copy_addr(tforce_stop,p_par(2))
@@ -6613,6 +6688,8 @@ module Forcing
     call copy_addr(lforce_helical,p_par(80)) ! bool (2)
     call copy_addr(lsecond_force,p_par(81)) ! bool
     call copy_addr(torus,p_par(82)) ! torus_rect
+    call copy_addr(lfcont_as_comaux,p_par(83)) ! bool
+    call copy_addr(ifcont_aux,p_par(84)) ! int (n_forcing_cont_max)
 
     endsubroutine pushpars2c
 !*******************************************************************

@@ -25,7 +25,6 @@
 module Particles
 !
   use Cdata
-  use Cparam
   use General, only: keep_compiler_quiet, indgen
   use Messages
   use Particles_cdata
@@ -99,7 +98,7 @@ module Particles
   integer :: l_hole=0, m_hole=0, n_hole=0
   integer :: iffg=0, ifgx=0, ifgy=0, ifgz=0, ibrtime=0
   integer :: istep_dragf=3, istep_pass=3
-  integer :: it_insert_nuclei=1
+  integer :: it_insert_nuclei=1, ntau=-1
   integer :: nucl_thr_inc_pow=0
   logical, target :: ldragforce_gas_par=.false.
   logical :: ldragforce_dust_par=.false.
@@ -150,7 +149,7 @@ module Particles
   logical :: lnpmin_exclude_zero = .false.
   logical :: ltauascalar = .false., lfollow_gas=.false.
   logical :: lset_df_insert_nucleii=.false.
-  logical, pointer :: lramp_mass, lsecondary_wait
+  logical, pointer :: lramp_mass, lsecondary_wait, lnucl_dynamic
 !
   character(len=labellen) :: interp_pol_uu ='ngp'
   character(len=labellen) :: interp_pol_oo ='ngp'
@@ -193,12 +192,15 @@ module Particles
   real, target :: G_condensation=0.0
   real :: nucleation_threshold
   logical :: ascalar_ngp=.false., ascalar_cic=.false.
+  real :: diffusion_coefficient=0.0
+  real :: rpinit_int=-impossible, rpinit_ext=-impossible
 !
   namelist /particles_init_pars/ &
       initxxp, initvvp, xp0, yp0, zp0, vpx0, vpy0, vpz0, delta_vp0, &
       ldragforce_gas_par, ldragforce_dust_par, bcpx, bcpy, bcpz, tausp, &
       beta_dPdr_dust, np_swarm, mp_swarm, mpmat, rhop_swarm, eps_dtog, &
-      nu_epicycle, rp_int, rp_ext, rp_ext_width, gravx_profile, gravz_profile, &
+      nu_epicycle, rp_int, rp_ext, rpinit_int, rpinit_ext, &
+      rp_ext_width, gravx_profile, gravz_profile, &
       gravr_profile, gravx, gravz, gravr, gravsmooth, kx_gg, kz_gg, Ri0, &
       eps1, lmigration_redo, ldragforce_equi_global_eps, coeff, kx_vvp, &
       ky_vvp, kz_vvp, amplvvp, kx_xxp, ky_xxp, kz_xxp, amplxxp, kx_vpx, &
@@ -245,7 +247,7 @@ module Particles
       remove_particle_criteria_size, remove_particle_criteria_edtog, &
       lnocollapse_xdir_onecell, lnocollapse_ydir_onecell, &
       lnocollapse_zdir_onecell, qgaussz, r0gaussz, lnp_ap_as_aux,&
-      lpartnucleation
+      lpartnucleation,lcondspec_details
 !
   namelist /particles_run_pars/ &
       bcpx, bcpy, bcpz, tausp, dsnap_par_minor, beta_dPdr_dust, &
@@ -298,7 +300,8 @@ module Particles
       ascalar_ngp, ascalar_cic, rp_int, rp_ext, rp_ext_width, lnpmin_exclude_zero, &
       lcondensation_rate, vapor_mixing_ratio_qvs, lfollow_gas, &
       ltauascalar, rhoa, G_condensation, lpartnucleation, nucleation_threshold, &
-      redfrac, lset_df_insert_nucleii, it_insert_nuclei, nucl_thr_inc_pow
+      redfrac, lset_df_insert_nucleii, it_insert_nuclei, nucl_thr_inc_pow, &
+      Ntau,diffusion_coefficient
 !
   integer :: idiag_xpm=0, idiag_ypm=0, idiag_zpm=0      ! DIAG_DOC: $x_{part}$
   integer :: idiag_xpmin=0, idiag_ypmin=0, idiag_zpmin=0      ! DIAG_DOC: $x_{part}$
@@ -410,14 +413,27 @@ module Particles
         iupz = iuup+2
       endif
 !
-!  Register nucleation radius
+!  Register extra slots in the f and p arrays for nucleation purposes
 !
       if (lpartnucleation) then
         call farray_register_auxiliary('nucl_rmin',inucl,communicated=.false.)
         call farray_register_auxiliary('nucl_rate',inucrate,communicated=.false.)
         call farray_register_auxiliary('supersat',isupsat,communicated=.false.)
         call append_npvar('born',iborn)
-     endif
+      endif
+!
+!  Register extra slots in the p-array for more details about the nucleation
+!  and condensation processes
+!
+      if (lcondensing_species .and. lcondspec_details) then
+        call append_npvar('inucl_Se',inucl_Se)
+        call append_npvar('inucl_T',inucl_T)
+        call append_npvar('inucl_mix_frac',inucl_mix_frac)
+        call append_npvar('incol',incol)
+        call append_npvar('iint_Se',iint_Se)
+        call append_npvar('iint_T',iint_T)
+        call append_npvar('iint_mix_frac',iint_mix_frac)
+      endif
 !
 !  Special variable for stiff drag force equations.
 !
@@ -479,6 +495,10 @@ module Particles
 !
       if (lchemistry) then
         call put_shared_variable('lpartnucleation',lpartnucleation)
+        call put_shared_variable('it_insert_nuclei',it_insert_nuclei)
+        if (Ntau == -1) Ntau=it_insert_nuclei
+        call put_shared_variable('Ntau',Ntau)
+        call put_shared_variable('redfrac',redfrac)
       endif
 !
       if (lascalar) call put_shared_variable('G_condensation',G_condensation)
@@ -1003,6 +1023,7 @@ module Particles
                call fatal_error("initialize_particles",&
                "Can not set rhopmat if true_density_cond_spec is given.")
           rhopmat=true_density_cond_spec
+          call get_shared_variable('lnucl_dynamic',lnucl_dynamic)
         endif
       endif
 !
@@ -1036,7 +1057,7 @@ module Particles
       real :: rpar_int, rpar_ext, tausp_par
       integer :: npar_loc_x, npar_loc_y, npar_loc_z
       integer :: l, j, k, ix0, iy0, iz0
-      logical :: lequidistant=.false.
+      logical :: lequidistant=.false., exists
 !     
       call get_shared_variable('beta_glnrho_global',beta_glnrho_global,caller='init_particles')
       call get_shared_variable('beta_glnrho_scaled',beta_glnrho_scaled)
@@ -1389,6 +1410,9 @@ module Particles
               call fatal_error("init_particles","unsupported coordinate system")
             endif
 !
+! WL: This if Cartesian loop is probably not needed anymore -- the nprocx==1 construction
+! is pre-parallelization in x, which is ancient at this point. 
+!
             if (lcartesian_coords) then
               if (nprocx==1) then
                 rpar_int=rp_int
@@ -1398,8 +1422,21 @@ module Particles
                                      "random-cyl for nprocx/=1 in Cartesian. Parallelize in y or z")
               endif
             else
-              rpar_int = xyz0_loc(1)
-              rpar_ext = xyz1_loc(1)
+!
+! Allow for initializing the particles at a different range (rpinit_[int/ext]) than
+! the migration/removal range (rp_[int/ext])
+!               
+              if (rpinit_int==-impossible) then
+                !default values
+                rpar_int = xyz0_loc(1)              
+              else
+                rpar_int = rpinit_int
+              endif
+              if (rpinit_ext==-impossible) then
+                rpar_ext = xyz1_loc(1)
+              else
+                rpar_ext = rpinit_ext                 
+              endif
             endif
             call random_number_wrapper(rad_scl)
             rad_scl = rpar_int**tmp + rad_scl*(rpar_ext**tmp-rpar_int**tmp)
@@ -1788,9 +1825,18 @@ module Particles
             endif
           endif
           if (nzgrid /= 0) call warning('init_particles',"birthring only implemented for 2D(xy)")
-!
         case default
-          call fatal_error('init_particles','no such initxxp: "'//trim(initxxp(j))//'"')
+!
+!  Read from file, and do fatal_error if it doesn't exist.
+!
+          inquire(FILE=initxxp(j),EXIST=exists)
+          if (exists) then
+            open(1,file=initxxp(j),form='unformatted')
+            read(1) fp(:,ixp:izp)
+            close(1)
+          else
+            call fatal_error('init_particles','no such initxxp: "'//trim(initxxp(j))//'"')
+          endif
 !
         endselect
 !
@@ -2084,9 +2130,19 @@ module Particles
             fp(k,ivpy) = delta_vp0*fp(k,iyp)/rp_ext
             fp(k,ivpz) = delta_vp0*fp(k,izp)/rp_ext
           enddo
-!
         case default
-          call fatal_error('init_particles','no such initvvp: "'//trim(initvvp(j))//'"')
+!
+!  Read from file, and do fatal_error if it doesn't exist.
+!
+          inquire(FILE=initvvp(j),EXIST=exists)
+          if (exists) then
+            open(1,file=initvvp(j),form='unformatted')
+            read(1) fp(:,ivpx:ivpz)
+            close(1)
+          else
+            call fatal_error('init_particles','no such initvvp: "'//trim(initvvp(j))//'"')
+          endif
+!
         endselect
 !
       enddo ! do j=1,ninit
@@ -2470,6 +2526,7 @@ module Particles
       use Particles_diagnos_state, only: insert_particles_diagnos_state
       use Mpicomm, only: mpireduce_sum_int, mpibarrier, mpisend_int, mpirecv_int
       use Particles_number, only: set_particle_number
+      use Chemistry, only: lnucleii_generated
 !
       real, dimension(mx,my,mz,mfarray) :: f
       real, dimension(mx,my,mz,mvar), intent(inout) :: df
@@ -2483,6 +2540,8 @@ module Particles
       integer :: j, k, n_insert, npar_loc_old, iii
       integer :: ii,jj,kk
       integer :: jproc,tag_id,tag0=283
+!
+      if (lnucl_dynamic) lnucleii_generated=.false.
 !
 ! In this subroutine we loop over all processors one-by-one. This takes
 ! time. It may therefore be beneficial not to do this at every timestep.
@@ -2582,7 +2641,12 @@ module Particles
                                  !  Initialize particle radius
                                  !
                                  if (lparticles_radius) then
-                                    fp(k,iap)=f(ii,jj,kk,icc+1)/f(ii,jj,kk,icc)
+                                   ! Must set radius based on current nucleation diamter for lnucl_dynamic
+                                   if (lnucl_dynamic) then
+                                     fp(k,iap)=f(ii,jj,kk,inucl)
+                                   else
+                                     fp(k,iap)=f(ii,jj,kk,icc+1)/f(ii,jj,kk,icc)
+                                   endif
                                     if (lparticles_number) then
                                        part_mass=4.*pi*fp(k,iap)**3/3.*true_density_cond_spec
                                        fp(k,inpswarm)=mass_nucleii*redfrac/part_mass
@@ -2599,7 +2663,23 @@ module Particles
                                        TTp=exp(TTp)
                                     endif
                                     fp(k,iTp) = TTp
-                                 endif
+                                  endif
+                                  !
+                                  !  Save more data about the conditions surrounding the nucleating particle
+                                  !
+                                  if (lcondensing_species .and. lcondspec_details) then
+                                    fp(k,inucl_Se)=log(f(ii,jj,kk,isupsat))
+                                    if (lparticles_temperature) then
+                                      fp(k,inucl_T)=fp(k,iTp)
+                                    endif
+                                    fp(k,inucl_mix_frac)=f(ii,jj,kk,imixfrac)
+                                    fp(k,incol)=0
+                                    if (lparticles_radius .and. lparticles_number) then
+                                      fp(k,iint_Se)=fp(k,inucl_Se)*part_mass
+                                      fp(k,iint_T)=fp(k,inucl_T)*part_mass
+                                      fp(k,iint_mix_frac)=fp(k,inucl_mix_frac)*part_mass
+                                    endif
+                                  endif                                  
 !
 !  Particles are not allowed to be present in non-existing dimensions.
 !  This would give huge problems with interpolation later.
@@ -2614,11 +2694,23 @@ module Particles
                                  ! particle phase
                                  !
                                  if (lset_df_insert_nucleii) then
+                                   if (lnucl_dynamic) call fatal_error("insert_nucleii",&
+                                        "lnucl_dynamic not implemented for lset_df_insert_nucleii!")
                                     df(ii,jj,kk,icc) = df(ii,jj,kk,icc) - redfrac*f(ii,jj,kk,icc)/dt
                                     df(ii,jj,kk,icc+1) = df(ii,jj,kk,icc+1) - redfrac*f(ii,jj,kk,icc+1)/dt
                                  else
-                                    f(ii,jj,kk,icc)   = (1.-redfrac)*f(ii,jj,kk,icc)
-                                    f(ii,jj,kk,icc+1) = (1.-redfrac)*f(ii,jj,kk,icc+1)
+!
+!  The icc+2 corresponds to phi. The removal rate is given by f(icc)/dt, while tau=Ntau*dt,
+!  which together gives the quadratic dependency on dt.
+!
+                                   if (lnucl_dynamic) then
+                                     lnucleii_generated(ii-nghost,jj-nghost,kk-nghost)=.true.
+                                     ! For lnucl_dynamic the df array is modified in chemistry for
+                                     ! those cells where lnucleii_generated is true.
+                                    else
+                                      f(ii,jj,kk,icc)   = (1.-redfrac)*f(ii,jj,kk,icc)
+                                      f(ii,jj,kk,icc+1) = (1.-redfrac)*f(ii,jj,kk,icc+1)
+                                    endif
                                  endif
                               endif
                            endif
@@ -6647,7 +6739,7 @@ endif
 !      
 !  See A. Li and G. Ahmadi. "Dispersion and Deposition of Spherical
 !      Particles from Point Sources in a Turbulent Channel Flow".
-!      Aerosol Science and Technology. 16. 209–226. 1992.
+!      Aerosol Science and Technology. 16. 209-226. 1992.
 !
 !  28-jul-08/kapelrud: coded
 !  13-nov-24/axel+nils: renamed
@@ -6868,6 +6960,45 @@ endif
       enddo
 !
     endsubroutine calc_thermophoretic_force
+!***********************************************************************
+    subroutine particles_diffusion(fp)
+!
+!  Add a random walk drift due to turbulence
+!
+!  14-nov-25/wlyra: coded
+!
+      use General, only: random_number_wrapper
+
+      real, dimension(mpar_loc,mparray), intent(inout) :: fp
+!
+      real :: diffusion_displacement
+      real :: Rx,Ry,Rz
+      integer :: k
+!
+      if (diffusion_coefficient/=0.0) then
+!         
+        diffusion_displacement = sqrt(diffusion_coefficient*dt_beta_ts(itsub))
+!
+        do k=1,npar_loc
+          if (nxgrid/=1) then
+            call random_number_wrapper(Rx)
+            fp(k,ixp) = fp(k,ixp) + (2*Rx-1)*diffusion_displacement
+          endif
+!
+          if (nygrid/=1) then
+            call random_number_wrapper(Ry)
+            fp(k,iyp) = fp(k,iyp) + (2*Ry-1)*diffusion_displacement
+          endif
+!
+          if (nzgrid/=1) then
+            call random_number_wrapper(Rz)
+            fp(k,izp) = fp(k,izp) + (2*Rz-1)*diffusion_displacement
+          endif
+        enddo
+!
+      endif
+!      
+    endsubroutine particles_diffusion
 !***********************************************************************
     subroutine read_particles_init_pars(iostat)
 !

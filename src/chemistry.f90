@@ -59,11 +59,11 @@ module Chemistry
   real :: Cv_const=impossible
   logical :: lfix_Sc=.false., lfix_Pr=.false.
   logical :: init_from_file, reinitialize_chemistry=.false.
-  logical :: lnucleation, lcorr_vel=.false.
+  logical :: lnucleation, lcorr_vel=.false., lnucl_dynamic=.false.
   logical :: lchem_detailed=.true.
   logical :: lgradP_terms=.true.
   character(len=30) :: reac_rate_method = 'chemkin'
-  character(len=1) :: mixture_fraction_element
+  character(len=2) :: mixture_fraction_element
 ! --AB--  character(len=30) :: inucl_pre_exp="const"
 ! parameters for initial conditions
   real :: init_x1=-0.2, init_x2=0.2
@@ -113,6 +113,8 @@ module Chemistry
   character(len=5) :: flameind_spec2="CO2"
 !
   integer :: mreactions, iadv=0
+  real, allocatable, dimension(:,:) :: vreactions_p,vreactions_m
+  !$omp threadprivate(vreactions_p,vreactions_m)
 !
 !  The stociometric factors need to be reals for arbitrary reaction orders
 !
@@ -120,6 +122,7 @@ module Chemistry
   real, allocatable, dimension(:,:) :: kreactions_z
   real, allocatable, dimension(:) :: kreactions_m, kreactions_p
   logical, allocatable, dimension(:) :: back
+  logical, allocatable, dimension(:,:,:) :: lnucleii_generated
   character(len=30), allocatable, dimension(:) :: reaction_name
   character (len=labellen) :: self_collisions='nothing',condensing_species='nothing'
   logical :: lT_tanh=.false.
@@ -172,7 +175,9 @@ module Chemistry
   ! Condensing species parameters
   !
   integer :: i_cond_spec,ichem_cond_spec
-  integer :: imassH=19, imassO=20, imassC=21, imassN=22, imassS=23
+  integer :: imassH=19, imassO=20, imassC=21, imassN=22, imassS=23, imassTI=24
+  integer, pointer :: it_insert_nuclei, Ntau
+  real, pointer :: redfrac
   real :: true_density_cond_spec_cgs=2.196, true_density_cond_spec
   real :: gam_surf_energy_cgs=32.
   real :: nucleation_rate_coeff_cgs=1e19
@@ -180,7 +185,7 @@ module Chemistry
   real :: deltaH_cgs = 7.07e12 ! in erg/mol
   !real :: deltaH_cgs = 3.55e12 ! in erg/mol (based on Tboil and 1025C)
   real :: gam_surf_energy_mul_fac=1.0
-  real :: conc_sat_spec_cgs=1e-8 !units of mol/cmˆ3
+  real :: conc_sat_spec_cgs=1e-8 !units of mol/cm^3
   real :: min_nucl_radius_cgs=1e-8 ! units of cm
   logical, pointer :: ldustnucleation, lpartnucleation, lcondensing_species
   character(len=labellen) :: isurf_energy="const"
@@ -201,7 +206,7 @@ module Chemistry
 !
 !   Species constants
 !
-  real, dimension(nchemspec,23), target :: species_constants
+  real, dimension(nchemspec,24), target :: species_constants
 !
 !   Lewis coefficients
 !
@@ -249,7 +254,8 @@ module Chemistry
       lhotspot, lchem_detailed, condensing_species, conc_sat_spec_cgs, &
       true_density_cond_spec_cgs, delta_chem, press, init_premixed_fuel, &
       init_fuel_molar_ratio,init_fuel_O2_demand,init_temp_fuel, init_temp_oxidizer, init_phi, &
-      lFlame_index_as_aux, lmixture_fraction_as_aux, mixture_fraction_element, ifuel_flow, flameind_spec1, flameind_spec2
+      lFlame_index_as_aux, lmixture_fraction_as_aux, mixture_fraction_element, ifuel_flow, &
+      flameind_spec1, flameind_spec2, lnucl_dynamic
 !
 !
 ! run parameters
@@ -331,7 +337,7 @@ module Chemistry
       use FArrayManager
       use SharedVariables, only: put_shared_variable
 !
-      integer :: k, ichemspec_tmp
+      integer :: k, ichemspec_tmp, stat
       character(len=fnlen) :: input_file
       logical ::  chemin, cheminp
 !
@@ -384,6 +390,18 @@ module Chemistry
       call put_shared_variable('species_constants',species_constants,caller='register_chemistry')
       if (lparticles) then
         call put_shared_variable('true_density_cond_spec',true_density_cond_spec)
+        call put_shared_variable('lnucl_dynamic',lnucl_dynamic,caller='register_chemistry')
+        if (lnucl_dynamic .and. npscalar < 3) then
+          call fatal_error("register_chemistry",&
+               "npscalar must be at least 3 if lnucl_dynamic is true.")
+        endif
+        if (lnucl_dynamic) then
+          if (.not. allocated(lnucleii_generated)) then
+            allocate(lnucleii_generated(nx,ny,nz),STAT=stat)
+            if (stat > 0) call fatal_error("register_chemistry","Couldn't allocate lnucleii_generated!")
+          endif
+!          call put_shared_variable('lnucleii_generated',lnucl_dynamic,caller='register_chemistry')
+        endif
       endif
 !
     endsubroutine register_chemistry
@@ -639,8 +657,11 @@ module Chemistry
         case ("O")
           imass_spec=imassO
         case ("S")
-          imass_spec=imassS
+           imass_spec=imassS
+        case ("TI")
+           imass_spec=imassTI
         case default
+          print*,"mixture_fraction_element=",mixture_fraction_element
           call fatal_error("make_mixture_fraction","No such mixture_fraction_element")
         end select
         do ichem=1,nchemspec
@@ -685,6 +706,9 @@ module Chemistry
         if  (lparticles_radius) then
           true_density_cond_spec=true_density_cond_spec_cgs/unit_density
         endif
+        call get_shared_variable('it_insert_nuclei',it_insert_nuclei)
+        call get_shared_variable('Ntau',Ntau)
+        call get_shared_variable('redfrac',redfrac)
       endif
 !
 ! Define some constants used for condensing species
@@ -709,7 +733,18 @@ module Chemistry
     if(allocated(low_coeff))  low_coeff_abs_max = maxval(abs(low_coeff),1)
     if(allocated(high_coeff)) high_coeff_abs_max = maxval(abs(high_coeff),1)
     if(allocated(troe_coeff)) troe_coeff_abs_max = maxval(abs(troe_coeff),1)
+    if(.not. lmultithread) call chemistry_allocate_rhs_arrays
+    if (lgpu .and. (l1step_test .or. reac_rate_method=='1step_test')) &
+          call warning('initialize_chemistry','1step test will not be correct on the GPU')
+
     endsubroutine initialize_chemistry
+!***********************************************************************
+    subroutine chemistry_allocate_rhs_arrays
+
+    if(.not. allocated(vreactions_p)) allocate(vreactions_p(nx,mreactions))
+    if(.not. allocated(vreactions_m)) allocate(vreactions_m(nx,mreactions))
+
+    endsubroutine chemistry_allocate_rhs_arrays
 !***********************************************************************
     subroutine init_chemistry(f)
 !
@@ -1421,10 +1456,7 @@ module Chemistry
       endif
 !
       if (lpencil(i_cs2) .and. lcheminp) then
-        if (any(p%cv == 0.0)) then
-        else
-          p%cs2 = p%cp*p%cv1*p%mu1*p%TT*Rgas
-        endif
+        where(p%cv /= 0.0)  p%cs2 = p%cp*p%cv1*p%mu1*p%TT*Rgas
       endif
 !
       if (lpencil(i_ppwater) .and. .not. lchemonly) then
@@ -3293,6 +3325,24 @@ module Chemistry
       enddo
      endsubroutine
 !***********************************************************************
+     subroutine get_1step_test_sum_DYDts(f,p,sum_DYDt)
+!
+!  26-oct-25/TP: carved from dchemistry_dt
+!
+      real, dimension(mx,my,mz,mfarray) :: f
+      type(pencil_case), intent(IN) :: p
+      real, dimension(nx), intent(OUT) :: sum_DYDt
+
+      integer :: i
+
+      sum_DYDt = 0.
+      !TP: cannot access 1 on the GPU
+      do i = 1,nx
+        sum_DYDt(i) = -p%rho(1)*(p%TT(i)-Tinf)*p%TT1(i) &
+            *Cp_const/lambda_const*beta*(beta-1.)*f(l1,m,n,iux)*f(l1,m,n,iux)
+      enddo
+     endsubroutine get_1step_test_sum_DYDts
+!***********************************************************************
     subroutine dchemistry_dt(f,df,p)
 !
 !  calculate right hand side of ONE OR MORE extra coupled PDEs
@@ -3448,11 +3498,7 @@ module Chemistry
       if (ldensity .and. lcheminp) then
 !
         if (l1step_test) then
-          sum_DYDt = 0.
-          do i = 1,nx
-            sum_DYDt(i) = -p%rho(1)*(p%TT(i)-Tinf)*p%TT1(i) &
-                *Cp_const/lambda_const*beta*(beta-1.)*f(l1,m,n,iux)*f(l1,m,n,iux)
-          enddo
+          call get_1step_test_sum_DYDts(f,p,sum_DYDt)
         else
           sum_dk_ghk = 0.
           call get_sum_DYDts(p,sum_DYDt,sum_hhk_DYDt_reac)
@@ -3615,8 +3661,17 @@ module Chemistry
       type (pencil_case) :: p
       real, dimension(nx) :: ff_condm,sum_DYDt,sum_hhk_DYDt_reac
 
-      integer :: ii
+      integer :: ii,k,j
 !
+      if (ldiagnos.and.lchemistry_diag) then
+        do k = 1,nchemspec
+          do j = 1,nreactions
+            net_react_p(k,j) = net_react_p(k,j)+stoichio(k,j)*sum(vreactions_p(:,j))
+            net_react_m(k,j) = net_react_m(k,j)+stoichio(k,j)*sum(vreactions_m(:,j))
+          enddo
+        enddo
+      endif
+
       if (lreactions .and. ireac /= 0 .and. ((.not. llsode).or. lchemonly)) then
         !TP: sum_hhk_DYDt_reac is needed only if maux == nchemspec+1
         if (maux == nchemspec+1) call get_sum_DYDts(p,sum_DYDt,sum_hhk_DYDt_reac)
@@ -4765,6 +4820,29 @@ module Chemistry
 1001 format(i2,20f6.1)
     endsubroutine write_matrices
 !***********************************************************************
+    subroutine get_1step_test_reaction_rate(f,vreact_p,vreact_m,p,reac)
+!
+!  26-oct-25/TP: carved from get_reaction_rate
+!
+      real, dimension(mx,my,mz,mfarray), intent(in) :: f
+      type (pencil_case), intent(in) :: p
+      real, dimension(nx,nreactions), intent(out) :: vreact_p, vreact_m
+      integer, intent(in) :: reac
+
+      integer :: i
+
+      do i = 1,nx
+        !TP: cannot access 1 on GPU
+        if (p%TT(i) > Tc) then
+          vreact_p(i,reac) = f(l1,m,n,iux)*f(l1,m,n,iux)*p%rho(1)*Cp_const &
+              /lambda_const*beta*(beta-1.)*(1.-f(l1-1+i,m,n,ichemspec(ipr)))
+        else
+          vreact_p(i,reac) = 0.
+        endif
+      enddo
+      vreact_m(:,reac) = 0.
+    endsubroutine get_1step_test_reaction_rate
+!***********************************************************************
     subroutine get_reaction_rate(f,vreact_p,vreact_m,p)
 !
 !  This subroutine calculates forward and reverse reaction rates,
@@ -4978,15 +5056,7 @@ module Chemistry
 ! For more details see Doom, et al., J. Comp. Phys., 226, 2007
 !
       elseif (reac_rate_method == '1step_test') then
-        do i = 1,nx
-          if (p%TT(i) > Tc) then
-            vreact_p(i,reac) = f(l1,m,n,iux)*f(l1,m,n,iux)*p%rho(1)*Cp_const &
-                /lambda_const*beta*(beta-1.)*(1.-f(l1-1+i,m,n,ichemspec(ipr)))
-          else
-            vreact_p(i,reac) = 0.
-          endif
-        enddo
-        vreact_m(:,reac) = 0.
+        call get_1step_test_reaction_rate(f,vreact_p,vreact_m,p,reac)
 !
 !  Add alternative method for finding the reaction rates based on work by
 !  Roux et al. (2009)
@@ -5085,7 +5155,7 @@ module Chemistry
 !
       real :: alpha, eps
       real, dimension(mx,my,mz,mfarray), intent(in) :: f
-      real, dimension(nx,mreactions) :: vreactions, vreactions_p, vreactions_m
+      real, dimension(nx,mreactions) :: vreactions
       real, dimension(nx,nchemspec) :: xdot
       real, dimension(nx) :: rho1
       real, dimension(nx,nchemspec) :: molm
@@ -5149,17 +5219,7 @@ module Chemistry
         enddo
       enddo
       p%DYDt_reac = xdot*unit_time
-!
-!  For diagnostics
-!
-      if (ldiagnos.and.lchemistry_diag) then
-        do k = 1,nchemspec
-          do j = 1,nreactions
-            net_react_p(k,j) = net_react_p(k,j)+stoichio(k,j)*sum(vreactions_p(:,j))
-            net_react_m(k,j) = net_react_m(k,j)+stoichio(k,j)*sum(vreactions_m(:,j))
-          enddo
-        enddo
-      endif
+
 
 !
 ! NH:
@@ -6774,6 +6834,8 @@ module Chemistry
 !
       if (allocated(Bin_diff_coef))  deallocate(Bin_diff_coef)
       if (allocated(stoichio))       deallocate(stoichio)
+      if (allocated(vreactions_p))   deallocate(vreactions_p)
+      if (allocated(vreactions_m))   deallocate(vreactions_m)
       if (allocated(Sijm))           deallocate(Sijm)
       if (allocated(Sijp))           deallocate(Sijp)
       if (allocated(kreactions_z))   deallocate(kreactions_z)
@@ -7061,10 +7123,10 @@ module Chemistry
       real, dimension (mx,my,mz,mvar) :: df
       type (pencil_case) :: p
 !
-      integer :: ichem, kkk,i
+      integer :: ichem, kkk,i,ii
       real, dimension(nx) :: Q_nucl
       !
-      if (lnucleation) then
+      if (lnucleation .and. dt>0) then
         !
         ! Calculate mass flux of nucleii
         !
@@ -7075,7 +7137,22 @@ module Chemistry
         !
         ! The mass of the nucleii is added to the passive scalar equation
         !
-        df(l1:l2,m,n,icc) = df(l1:l2,m,n,icc) + p%ff_nucl*(1+p%cc(:,1))*p%rho1
+        if (lnucl_dynamic) then
+          df(l1:l2,m,n,icc+2) = df(l1:l2,m,n,icc+2) &
+            + (p%ff_nucl*(1+f(l1:l2,m,n,icc))*p%rho1 - f(l1:l2,m,n,icc+2))/(Ntau*dt)
+          df(l1:l2,m,n,icc) = df(l1:l2,m,n,icc) + f(l1:l2,m,n,icc+2)
+          !
+          ! Check if nucleii have just be added in particles_dust
+          !
+          do ii=l1,l2
+            if (lnucleii_generated(ii-nghost,m-nghost,n-nghost)) then
+              df(ii,m,n,icc+2) = df(ii,m,n,icc+2) &
+                   - redfrac*f(ii,m,n,icc)/(Ntau*dt**2)
+            endif
+          enddo
+        else
+          df(l1:l2,m,n,icc) = df(l1:l2,m,n,icc) + p%ff_nucl*(1+p%cc(:,1))*p%rho1
+        endif
         df(l1:l2,m,n,icc+1) = df(l1:l2,m,n,icc+1) + p%nucl_rmin*p%ff_nucl*(1+p%cc(:,2))*p%rho1
         !
         !  Generating the nucleii consumes the condensing species
@@ -7325,7 +7402,7 @@ module Chemistry
     call copy_addr(high_coeff,p_par(98)) ! (3) (nreactions)
     call copy_addr(troe_coeff,p_par(99)) ! (3) (nreactions)
     call copy_addr(a_k4,p_par(100)) ! (nchemspec) (nreactions)
-    call copy_addr(mplus_case,p_par(101)) ! bool (nreactions)
+    if(allocated(mplus_case)) call copy_addr(mplus_case,p_par(101)) ! bool (nreactions)
     call copy_addr(lewis_coef1,p_par(102)) ! (nchemspec)
     call string_to_enum(enum_reac_rate_method,reac_rate_method)
     call copy_addr(enum_reac_rate_method,p_par(103)) ! int
@@ -7414,9 +7491,12 @@ subroutine make_mixture_fraction(f)
   case ("O")
     imass_spec=imassO
   case ("S")
-    imass_spec=imassS
-  case default
-    call fatal_error("make_mixture_fraction","No such mixture_fraction_element")
+     imass_spec=imassS
+  case ("TI")
+     imass_spec=imassTI
+   case default
+     print*,"mixture_fraction_element=",mixture_fraction_element
+     call fatal_error("make_mixture_fraction","No such mixture_fraction_element")
   end select
   !
   ! Loop over all pencils

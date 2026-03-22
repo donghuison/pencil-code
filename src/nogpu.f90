@@ -8,11 +8,13 @@
 !
 module GPU
 !
-  use Cdata
+  use Cparam
   use General, only: keep_compiler_quiet, lpointer, keep_compiler_quiet_dble
 
   implicit none
 
+  logical :: ltest_bcs,ltest_rhs
+  integer :: it_test_rhs
   include 'gpu.h'
 
 contains
@@ -76,8 +78,8 @@ contains
 !
     endsubroutine before_boundary_gpu
 !**************************************************************************
-    subroutine after_timestep_gpu
-    endsubroutine after_timestep_gpu
+    subroutine update_after_substep_gpu
+    endsubroutine update_after_substep_gpu
 !**************************************************************************
     function get_ptr_GPU(ind1,ind2,lout) result(pFarr)
 
@@ -152,36 +154,45 @@ contains
 
     endsubroutine infer_gpu
 !**************************************************************************
-    subroutine train_gpu(f)
+    subroutine train_gpu(f, itsub, t)
 
     real :: f
+    real :: itsub
+    real(KIND=rkind8), intent(IN) :: t
 
     call keep_compiler_quiet(f)
+    call keep_compiler_quiet(itsub)
+    call keep_compiler_quiet_dble(t)
 
     endsubroutine train_gpu
 !**************************************************************************
-    subroutine calcQ_gpu(idir, dir, stop, dlength, unit_vec, lperiodic)
-
-      integer :: idir
-      integer, dimension(3) :: dir, stop
-      real, dimension(mx) :: dlength
-      real, dimension(3) :: unit_vec
-      logical :: lperiodic
-
-      call keep_compiler_quiet(dir,stop)
-      call keep_compiler_quiet(dlength)
-      call keep_compiler_quiet(unit_vec)
-
-    endsubroutine calcQ_gpu
-!**************************************************************************
-    subroutine source_function_and_opacity_gpu(inu)
-      integer :: inu
-      call keep_compiler_quiet(inu)
+    subroutine radtransfer_gpu
     endsubroutine
 !**************************************************************************
     subroutine get_gpu_reduced_vars(dst)
-      real, dimension(10) :: dst
+
+      real, dimension(:) :: dst
       call keep_compiler_quiet(dst)
+
     endsubroutine get_gpu_reduced_vars
+!**************************************************************************
+    subroutine test_gpu_bcs
+    endsubroutine test_gpu_bcs
+!**************************************************************************
+    subroutine split_update_gpu(f)
+
+    real, dimension(:,:,:,:) :: f
+    call keep_compiler_quiet(f)
+
+    endsubroutine split_update_gpu
+!**************************************************************************
+    subroutine pushpars2c(p_par)
+
+    integer, parameter :: n_pars=1
+    integer(KIND=ikind8), dimension(n_pars) :: p_par
+
+    call keep_compiler_quiet(p_par)
+
+    endsubroutine pushpars2c
 !**************************************************************************
 endmodule GPU

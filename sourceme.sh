@@ -13,16 +13,20 @@ if [ -z $PENCIL_HOME ]; then
   unset _sourceme		# tabula rasa without PENCIL_HOME
   #
   # Try to identify position of the code's home directory:
+  # "$(dirname "${BASH_SOURCE[0]}")" should always work in bash. The other
+  # directories below are needed in case the user is using some other shell
+  # (zsh, ash, dash, ...).
   #
-  for _dir in   . .. ../.. ../../.. ../../../.. \
-                pencil pencil-code \
-		f90/pencil f90/pencil-code \
-		pencil_modular f90/pencil_modular ; do
+  for _dir in "$(dirname "${BASH_SOURCE[0]}")" \
+      . .. ../.. ../../.. ../../../.. \
+      pencil pencil-code \
+      f90/pencil f90/pencil-code \
+      pencil_modular f90/pencil_modular ; do
     if ( [ -e $_dir/sourceme.csh ] && \
          [ -d $_dir/bin ]          && \
-	 [ -d $_dir/doc ]          && \
-	 [ -d $_dir/src ]          && \
-	 [ -d $_dir/samples ]         \
+         [ -d $_dir/doc ]          && \
+         [ -d $_dir/src ]          && \
+         [ -d $_dir/samples ]         \
        ); then
       unset cd   # some people are crazy enough to overload cd
       PENCIL_HOME=`cd $_dir; echo $PWD`
@@ -48,10 +52,10 @@ if [ -z $_sourceme ]; then	# called for the first time?
     if [ -z $_sourceme_quiet ]; then echo "Adding $PENCIL_HOME/{bin,utils{,/axel},remesh/bin} to PATH"; fi
     # PATH=${PATH}:$PENCIL_HOME/bin:$PENCIL_HOME/utils:$PENCIL_HOME/utils/axel:$PENCIL_HOME/remesh/bin
     # remove first all paths, which contain "pencil-code" from PATH, then add (new) PC paths
-    PATH=`echo $PATH | sed -e's/[^:]*pencil-code[^:]*://g' -e's/[^:]*pencil-code[^:]* *$//' -e's/:$//'`:$PENCIL_HOME/bin:$PENCIL_HOME/utils:$PENCIL_HOME/utils/axel:$PENCIL_HOME/utils/xiangyu:$PENCIL_HOME/remesh/bin:$PENCIL_HOME/src/scripts
+    PATH=`echo $PATH | sed -e's/[^:]*pencil-code[^:]*://g' -e's/[^:]*pencil-code[^:]* *$//' -e's/:$//'`:$PENCIL_HOME/bin:$PENCIL_HOME/utils:$PENCIL_HOME/utils/axel:$PENCIL_HOME/utils/xiangyu:$PENCIL_HOME/remesh/bin:$PENCIL_HOME/src/scripts:./src/pre_and_post_processing
 
+    export AC_HOME=$PENCIL_HOME/src/astaroth/submodule
     if ([ -d $PENCIL_HOME/src/astaroth/submodule/scripts ]); then
-      export AC_HOME=$PENCIL_HOME/src/astaroth/submodule
       PATH=${PATH}:$AC_HOME/scripts/
     fi
 
@@ -91,4 +95,21 @@ if [ -z $_sourceme ]; then	# called for the first time?
       echo "Not adding $PENCIL_HOME/bin to PATH: not a directory"
     fi
   fi
+fi
+
+if [ -d .git ]; then
+# 2025-Nov-11/Kishore: Matthias, I think it would be cleaner to check the config
+# value by running
+# `git config get pull.rebase` and checking that it does not return "false"
+# I think the above has the advantage of also checking the value inherited from
+# the global config, if any.
+	if [[ `grep '^\srebase *= *false' .git/config` != "" ]]; then
+	echo !!!WARNING - you have \"rebase = false\" settings in your .git/config!!!
+	echo !!!Pull strategy should always be \"--rebase\" on all branches!!!
+    fi
+#
+# Enforce basic pull policy to "rebase".
+#
+# Added -C flag to change the directory of the git command to $PENCIL_HOME
+    git -C $PENCIL_HOME config pull.rebase true
 fi

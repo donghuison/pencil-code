@@ -75,6 +75,9 @@ module Register
       use Solid_Cells,      only: register_solid_cells
 !
       integer :: ierr
+
+      if (maux_com > maux) call fatal_error('register_modules', &
+        'maux_com > maux: you may have forgotten to set both MAUX and COMMUNICATED AUXILIARIES properly in cparam.local')
 !
 !  Overwrite datadir from datadir.in, if that exists.
 !
@@ -225,7 +228,7 @@ module Register
       use Hydro,            only: initialize_hydro
       use InitialCondition, only: initialize_initial_condition
       use Interstellar,     only: initialize_interstellar
-      use Magnetic,         only: initialize_magnetic, initialize_magnetic_after_special
+      use Magnetic,         only: initialize_magnetic
       use Lorenz_gauge,     only: initialize_lorenz_gauge
       use Polymer,          only: initialize_polymer
       use Power_spectrum,   only: initialize_power_spectrum
@@ -430,8 +433,7 @@ module Register
       call initialize_implicit_physics(f)
       call initialize_heatflux(f)
       call initialize_pointmasses(f)
-      if (lrun) call initialize_training
-      call initialize_magnetic_after_special
+      if (lrun) call initialize_training(f)
 !
 !  Check if MAUX is consistent with what is required.
 !
@@ -1078,7 +1080,7 @@ module Register
       use General, only: loptest
       use FArrayManager, only: farray_index_append
 !
-      integer :: iname,irz
+      integer :: iname,irz,inamez
       logical :: lreset,lwr
       logical, optional :: lwrite
 !
@@ -1094,6 +1096,7 @@ module Register
         idiag_rcylmphi=0; idiag_phimphi=0; idiag_zmphi=0; idiag_rmphi=0
         idiag_dtv=0; idiag_dtdiffus=0; idiag_dtdiffus2=0; idiag_dtdiffus3=0; idiag_Rmesh=0; idiag_Rmesh3=0
         idiag_maxadvec=0
+        idiag_dtvmaxz=0
       endif
 !
 !  iname runs through all possible names that may be listed in print.in.
@@ -1129,6 +1132,12 @@ module Register
         enddo
 !
       endif
+!
+!  xy-averages
+!
+      do inamez=1,nnamez
+        call parse_name(inamez,cnamez(inamez),cformz(inamez),'dtvmaxz',idiag_dtvmaxz)
+      enddo
 !
 !  For compatibility with older IDL scripts.
 !

@@ -1,5 +1,9 @@
 ! $Id$
 !
+!** AUTOMATIC CPARAM.INC GENERATION ****************************
+! CPARAM logical, parameter :: lcourant_dt = .true.
+!***************************************************************
+!
 ! Module for the super-time-stepping scheme (STS)
 ! for diffusive terms (Alexiades, V., Amiez, G., &
 ! Gremaud, P. 1996, Commun. Num. Meth. Eng.,  12, 31)
@@ -24,7 +28,6 @@ module Timestep
 
       if (dt0 < 0.) dt = 0
       ldt = (dt==0.)
-      lcourant_dt = .true.
       num_substeps = itorder
 
     endsubroutine initialize_timestep
@@ -42,7 +45,7 @@ module Timestep
 !
       use BorderProfiles, only: border_quenching
       use Equ, only: pde
-      use Mpicomm, only: mpiallreduce_max,MPI_COMM_WORLD
+      use Mpicomm, only: mpiallreduce_max,MPI_COMM_PENCIL
       use Special, only: special_after_timestep
 !
       real, dimension (mx,my,mz,mfarray), intent(inout) :: f
@@ -71,7 +74,7 @@ module Timestep
           dt1_local=maxval(dt1_max(1:nx))
 !  Timestep growth limiter
           if (ddt > 0.) dt1_local=max(dt1_local,dt1_last)
-          call mpiallreduce_max(dt1_local,dt1,MPI_COMM_WORLD)
+          call mpiallreduce_max(dt1_local,dt1,MPI_COMM_PENCIL)
           dt=1.0/dt1
           if (ddt/=0.) dt1_last=dt1_local/ddt
 !

@@ -1,7 +1,6 @@
 /*                             gpu_astaroth_ansi.c
                               --------------------
 */
-
 /* Date:   8-Feb-2017
    Author: M. Rheinhardt
    Description:
@@ -21,16 +20,16 @@
 
 #include "headers_c.h"
 
-void torch_train_c_api(REAL*); 
+void torch_train_c_api(REAL*, int, double); 
 void torch_infer_c_api(int);
 void registerGPU();
-void initializeGPU(REAL*, FINT, double);
+void initializeGPU(REAL*, FINT, double, FINT, FINT, FINT);
 void finalizeGPU();
 void getFArrayIn(REAL **);
 void substepGPU(int, double);
 void beforeBoundaryGPU(bool, int, double);
-void afterTimeStepGPU();
-void sourceFunctionAndOpacity(int);
+void afterSubStepGPU();
+void radTransfer();
 void copyFarray(REAL*);
 void loadFarray();
 void reloadConfig();
@@ -42,6 +41,8 @@ void testRHS(REAL*,REAL*);
 void gpuSetDt(double t);
 void random_initial_condition(void);
 void getGPUReducedVars(REAL* dst);
+void testBCs(void);
+void splitUpdate(const REAL,const FINT);
 
 // for Gnu Compiler
 extern char *__cparam_MOD_coornames;
@@ -57,9 +58,9 @@ typedef struct int3{
 } int3;
 
 /* ---------------------------------------------------------------------- */
-void FTNIZE(torchtrain_c)(REAL* loss_val)
+void FTNIZE(torchtrain_c)(REAL* loss_val, FINT* itsub, double* t)
 {
-	torch_train_c_api(loss_val);
+	torch_train_c_api(loss_val, *itsub, *t);
 }
 /* ---------------------------------------------------------------------- */
 void FTNIZE(torchinfer_c)(FINT* itsub)
@@ -67,7 +68,10 @@ void FTNIZE(torchinfer_c)(FINT* itsub)
 	torch_infer_c_api(*itsub);
 }
 /* ---------------------------------------------------------------------- */
-void FTNIZE(initialize_gpu_c)(REAL* f, FINT* comm_fint, double* t)
+void FTNIZE(initialize_gpu_c)(REAL* f, FINT* comm_fint, double* t, FINT* nt,
+				FINT* lread_all_vars_from_device_,
+				FINT* lcpu_timestep_on_gpu_
+				)
 {
 // Initializes GPU.  
   /*
@@ -81,7 +85,8 @@ void FTNIZE(initialize_gpu_c)(REAL* f, FINT* comm_fint, double* t)
   //printf("dy = %f\n", __cdata_MOD_dy);
   //printf("dz = %f\n", __cdata_MOD_dz);
 
-  initializeGPU(f, *comm_fint,*t);
+  initializeGPU(f, *comm_fint,*t,*nt,*lread_all_vars_from_device_,
+		  *lcpu_timestep_on_gpu_);
 /*
   printf("xmin = %e\n", x[4]);
   printf("xmax = %e\n", x[nx-1+3]);
@@ -118,9 +123,9 @@ void FTNIZE(before_boundary_gpu_c)(FINT *lrmv, FINT *isubstep, double *t)
 		  *isubstep,*t);
 }
 /* ---------------------------------------------------------------------- */
-void FTNIZE(after_timestep_gpu_c)()
+void FTNIZE(update_after_substep_gpu_c)()
 {
-	afterTimeStepGPU();
+	afterSubStepGPU();
 }
 /* ---------------------------------------------------------------------- */
 void FTNIZE(rhs_gpu_c)(FINT *isubstep, double* t)
@@ -212,18 +217,22 @@ void FTNIZE(gpu_set_dt_c)(double* t)
   gpuSetDt(*t);
 }
 /* ---------------------------------------------------------------------- */
-void FTNIZE(calcq_gpu_c)(int *idir, int3 *dir, int3 *stop, real3 *unit_vec, int *lperiodic){
- // performs ray integration along direction dir for all possible starting points in subdomain,
- // communication and final correction of Q 
-
-}
-/* ---------------------------------------------------------------------- */
-void FTNIZE(source_function_and_opacity_gpu_c)(int *inu){
-	sourceFunctionAndOpacity(*inu);
+void FTNIZE(radtransfer_gpu_c)(){
+	radTransfer();
 }
 /* ---------------------------------------------------------------------- */
 void FTNIZE(get_gpu_reduced_vars_c)(REAL* dst)
 {
 	getGPUReducedVars(dst);
+}
+/* ------------------------------------------------------------------- */
+void FTNIZE(test_bcs_c)(void)
+{
+	testBCs();
+}
+/* ------------------------------------------------------------------- */
+void FTNIZE(split_update_gpu_c)(void)
+{
+	splitUpdate(1e-15,1000000);
 }
 /* ------------------------------------------------------------------- */

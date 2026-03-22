@@ -1,0 +1,26 @@
+!
+!  Initialisation parameters for dust particles moving in a random 
+!  velocity field.
+!
+&run_pars
+  cvsid='$Id$',
+  nt=40, it1=5, isave=50, itorder=3
+  dsnap=100., d2davg=1., dvid=.5, ip=20
+  dspec=10., np_spec=T
+  lpencil_check=T
+/
+&eos_run_pars
+/
+&selfgrav_run_pars
+/
+&poisson_run_pars
+/
+&particles_run_pars
+  ldragforce_dust_par=F, ldragforce_gas_par=F
+/
+&particles_selfgrav_run_pars
+/
+&special_run_pars
+/
+&power_spectrum_run_pars
+/

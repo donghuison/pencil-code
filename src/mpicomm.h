@@ -9,7 +9,7 @@
 
   public :: update_neighbors, index_to_iproc_comm
 
-  public :: mpicomm_init, initialize_mpicomm, mpifinalize, yyinit
+  public :: mpicomm_init, mpicomm_init_min, initialize_mpicomm, mpifinalize, mpifinalize_min, yyinit
   public :: mpibarrier
   public :: stop_it, stop_it_if_any
   public :: die_gracefully, die_immediately
@@ -30,6 +30,7 @@
   public :: mpibcast_double
   public :: mpibcast_int, mpibcast_char, mpireduce_max_scl_int
   public :: mpiscatter
+  public :: mpigather
   public :: mpigather_scl_str, mpigather_xy, mpimerge_1d, mpigather_z, mpigather_z_1D, &
             mpigather_and_out_cmplx, mpigather_and_out_real
   public :: mpiscatterv, mpiscatterv_real_plain, scatter_snapshot
@@ -85,8 +86,6 @@
   public :: MPI_COMM_WORLD, MPI_COMM_GRID, MPI_COMM_PENCIL, MPI_COMM_XYPLANE, MPI_COMM_XZPLANE, MPI_COMM_YZPLANE, &
             MPI_COMM_XBEAM,MPI_COMM_YBEAM,MPI_COMM_ZBEAM, MPI_COMM_RSLICE, &
             MPI_INFO_NULL, MPI_ANY_TAG, lyang
-
-
 
   public :: size_of_int, size_of_real, size_of_double
 !
@@ -247,6 +246,7 @@
   interface mpireduce_max
     module procedure mpireduce_max_scl
     module procedure mpireduce_max_arr
+    module procedure mpireduce_max_arr2
     module procedure mpireduce_max_scl_int
     module procedure mpireduce_max_arr_int
   endinterface
@@ -418,7 +418,6 @@
   integer :: MPI_COMM_XBEAM,MPI_COMM_YBEAM,MPI_COMM_ZBEAM
   integer :: MPI_COMM_XYPLANE,MPI_COMM_XZPLANE,MPI_COMM_YZPLANE,MPI_COMM_RSLICE
   integer :: root_rslice
-
 !
 ! for protecting MPI_COMM_WORLD to be redefined by preprocessor
 ! 
@@ -431,5 +430,6 @@
   character(LEN=4), public :: cyinyang=' '
 
   integer :: mpi_precision, MPI_CMPLX
+
 !$omp threadprivate(MPI_COMM_GRID, MPI_COMM_PENCIL, MPI_COMM_XBEAM, MPI_COMM_YBEAM, MPI_COMM_ZBEAM, &
 !$omp MPI_COMM_XYPLANE, MPI_COMM_XZPLANE, MPI_COMM_YZPLANE, MPI_COMM_RSLICE)

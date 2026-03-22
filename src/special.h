@@ -41,13 +41,11 @@
   public :: set_init_parameters
   public :: input_persistent_special, output_persistent_special
 
-  public :: scale_height_init_z
-  real, dimension(:), allocatable :: scale_height_init_z
-  
   public :: calc_diagnostics_special
   public :: calc_ode_diagnostics_special
   public :: pushpars2c
   public :: prep_rhs_special
+  public :: load_variables_to_gpu_special
 
   interface input_persistent_special
      module procedure input_persist_special_id

@@ -349,8 +349,8 @@ program start
 !  pre-timestepping setup (must be done before need_XXXX can be used, for
 !  example).
 !
-  call initialize_boundcond
   call initialize_modules(f)
+  call initialize_boundcond(f)
   if (lparticles) call particles_initialize_modules(f)
 !
 !  Initial conditions: by default, we put f=0 (ss=lnrho=uu=0, etc).
@@ -420,7 +420,7 @@ program start
 ! so this is just a caution : Please do not modify the sequence of
 ! calls to 'init' routines below.
 !
-    if (lanelastic) then
+    if (lanelastic .or. lswap_init_lnrho_uu) then
       call init_lnrho(f)
       call init_uu(f)
     else

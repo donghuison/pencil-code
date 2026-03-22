@@ -79,7 +79,6 @@
 !
 module Special
 !
-  use Cparam
   use Cdata
   use General, only: keep_compiler_quiet
   use Messages, only: svn_id, fatal_error
@@ -264,6 +263,7 @@ module Special
 !  give eta out as shared_variable
 !
       if (lmagnetic.and.lrun) call get_shared_variable('eta',eta,caller="initialize_special")
+      if (.not. ldiffmu5_tdep) diffmu5_ = diffmu5
 !
     endsubroutine initialize_special
 !***********************************************************************
@@ -516,7 +516,7 @@ module Special
       intent(in) :: f,p
       intent(inout) :: df
 !
-      real, dimension (nx) :: EB, uujj, bdotgmuS, bdotgmu5
+      real, dimension (nx) :: dmu5, dmuS, uujj, bdotgmuS, bdotgmu5
       real, dimension (nx) :: muSmu5, oobb, oogmuS, oogmu5
       real, dimension (nx,3) :: mu5bb, muSmu5oo
 !
@@ -525,35 +525,106 @@ module Special
       if (headtt.or.ldebug) print*,'dspecial_dt: SOLVE dspecial_dt'
 !!    if (headtt) call identify_bcs('mu5',imu5)
 !
-!  Compute E.B
+! Removed E.B and collect all changes in mu5 and muS to avoid calling df multiple times
 !
-      EB=eta*(p%jb-p%mu5*p%b2)
+! set dmu5 and dmuS to zero at the beginning of each execution of this routine
 !
-!  Evolution of mu5
+      dmu5=0.
+      dmuS=0.
 !
-      df(l1:l2,m,n,imu5) = df(l1:l2,m,n,imu5) +lambda5*EB-gammaf5*p%mu5+source5
+!
+!**  Evolution of mu5  **
+!  source + gammaf5 (chirality flipping) term
+!
+      dmu5 = dmu5 -gammaf5*p%mu5 + source5
 !
 !  Different diffusion operators.
 !
       if (ldiffmu5_hyper2_simplified) then
-         df(l1:l2,m,n,imu5) = df(l1:l2,m,n,imu5) - diffmu5_hyper2*p%del4mu5
+         dmu5 = dmu5 - diffmu5_hyper2*p%del4mu5
       else if (ldiffmu5_hyper3_simplified) then
-         df(l1:l2,m,n,imu5) = df(l1:l2,m,n,imu5) + diffmu5_hyper3*p%del6mu5
+         dmu5 = dmu5 + diffmu5_hyper3*p%del6mu5
       else
-        df(l1:l2,m,n,imu5) = df(l1:l2,m,n,imu5) + diffmu5_*p%del2mu5 
+        dmu5 = dmu5 + diffmu5_*p%del2mu5 
       endif
-! 
-      if (lmu5adv) df(l1:l2,m,n,imu5) = df(l1:l2,m,n,imu5) - p%ugmu5 
+!
+!  Advection of mu5
+
+      if (lmu5adv) dmu5 = dmu5 - p%ugmu5 
 !
 !  Set lmu5divu_term=T to obey total chirality conservation in the compressible case.
 !  This is not the default and was only used since Brandenburg (2021, ApJ 911, 110).
 !
-      if (lmu5divu_term) df(l1:l2,m,n,imu5) = df(l1:l2,m,n,imu5) - p%mu5*p%divu
+      if (lmu5divu_term) dmu5 = dmu5 - p%mu5*p%divu
 !
+!  E.B terms: J.B and CME term
+      dmu5 = dmu5 + lambda5*eta*(p%jb-p%mu5*p%b2)
+!
+!  muS-independent part of AVE term
       if (lCVE) then
         call get_oogmu5(p,oogmu5)
-        df(l1:l2,m,n,imu5) = df(l1:l2,m,n,imu5) - 2.*Cw*p%mu5*oogmu5
+        dmu5 = dmu5 - 2.*Cw*p%mu5*oogmu5
       endif
+!
+!
+!
+      if (lmuS) then
+!      
+        muSmu5 = p%muS*p%mu5
+        call dot(p%bb,p%gmu5,bdotgmu5)
+        call dot(p%bb,p%gmuS,bdotgmuS)
+!
+!  CSE term in mu5 evolution
+        dmu5 = dmu5 - coef_mu5*bdotgmuS
+!
+!  CVE term and muS-dependent AVE term in mu5 evolution
+        if (lCVE) then   
+          call dot(p%oo,p%bb,oobb)
+          call get_oogmuS(p,oogmuS)
+          call get_oogmu5(p,oogmu5)
+!
+          dmu5 = dmu5 - lambda5*eta*muSmu5*oobb - 2.*Cw*p%muS*oogmuS
+!
+!**  Evolution of muS  **
+!  CVE term in muS evolution
+          dmuS = dmuS - Cw*p%mu5*oogmuS - Cw*p%muS*oogmu5
+        endif
+!
+!  Advection of muS
+        if (lmuSadv) dmuS = dmuS - p%ugmuS
+
+!  Compressibility term similar to the one introduced above for mu5 for total chirality conservation
+        if (lmuSdivu_term) dmuS = dmuS - p%muS*p%divu
+!
+!  Diffusion of muS
+        if (ldiffmuS_hyper2_simplified) then
+           dmuS = dmuS - diffmuS_hyper2*p%del4muS
+        else if (ldiffmuS_hyper3_simplified) then
+           dmuS = dmuS + diffmuS_hyper3*p%del6muS
+        else
+           dmuS = dmuS + diffmuS*p%del2muS
+        endif
+!
+!  CME term
+        dmuS = dmuS - coef_muS*bdotgmu5
+! 
+!
+!  Update df array 
+        df(l1:l2,m,n,imuS) = df(l1:l2,m,n,imuS) + dmuS
+!
+! 
+!  Contributions to timestep from muS equation
+        dt1_CMW = sqrt(coef_mu5*coef_muS)*sqrt(p%b2)*sqrt(dxyz_2)
+        if (ldiffmuS_hyper2_simplified) then
+          dt1_Dmu = diffmuS_hyper2*dxyz_4
+        else
+          dt1_Dmu = diffmuS*dxyz_2
+        endif
+      endif
+!
+!
+!  Update df array 
+      df(l1:l2,m,n,imu5) = df(l1:l2,m,n,imu5) + dmu5
 !
 !  Contributions to timestep from mu5 equation
       dt1_lambda5 = lambda5*eta*p%b2
@@ -566,44 +637,8 @@ module Special
          dt1_D5 = diffmu5*dxyz_2
       endif
       dt1_gammaf5 = gammaf5
+!      
 !
-!  Evolution of muS
-!
-      if (lmuS) then
-        muSmu5 = p%muS*p%mu5
-        call dot(p%bb,p%gmu5,bdotgmu5)
-        call dot(p%bb,p%gmuS,bdotgmuS)
-        df(l1:l2,m,n,imuS) = df(l1:l2,m,n,imuS) - coef_muS*bdotgmu5
-! 
-        if (lmuSdivu_term) df(l1:l2,m,n,imuS) = df(l1:l2,m,n,imuS) - p%muS*p%divu
-!
-        if (ldiffmuS_hyper2_simplified) then
-           df(l1:l2,m,n,imuS) = df(l1:l2,m,n,imuS) - diffmuS_hyper2*p%del4muS
-        else if (ldiffmuS_hyper3_simplified) then
-           df(l1:l2,m,n,imuS) = df(l1:l2,m,n,imuS) + diffmuS_hyper3*p%del6muS
-        else
-           df(l1:l2,m,n,imuS) = df(l1:l2,m,n,imuS) + diffmuS*p%del2muS
-        endif
-! 
-        if (lmuSadv) df(l1:l2,m,n,imuS) = df(l1:l2,m,n,imuS) - p%ugmuS
-
-        df(l1:l2,m,n,imu5) = df(l1:l2,m,n,imu5) - coef_mu5*bdotgmuS  
-        if (lCVE) then   
-          call dot(p%oo,p%bb,oobb)
-          call get_oogmuS(p,oogmuS)
-          call get_oogmu5(p,oogmu5)
-          df(l1:l2,m,n,imu5) = df(l1:l2,m,n,imu5) - lambda5*eta*muSmu5*oobb - 2.*Cw*p%muS*oogmuS
-          df(l1:l2,m,n,imuS) = df(l1:l2,m,n,imuS) - Cw*p%mu5*oogmuS -Cw*p%muS*oogmu5
-        endif
-!  Contributions to timestep from muS equation
-        dt1_CMW = sqrt(coef_mu5*coef_muS)*sqrt(p%b2)*sqrt(dxyz_2)
-        if (ldiffmuS_hyper2_simplified) then
-          dt1_Dmu = diffmuS_hyper2*dxyz_4
-        else
-          dt1_Dmu = diffmuS*dxyz_2
-        endif
-      endif
-!                          
 !  Additions to evolution of bb
 !
       if (lmagnetic) then
@@ -1002,13 +1037,13 @@ module Special
     call copy_addr(diffmus_hyper2,p_par(4))
     call copy_addr(diffmu5_hyper3,p_par(5))
     call copy_addr(diffmus_hyper3,p_par(6))
-    call copy_addr(gammaf5,p_par(7))
-    call copy_addr(source5,p_par(8))
+    call copy_addr(gammaf5,p_par(7)) ! real dconst
+    call copy_addr(source5,p_par(8)) ! real dconst
     call copy_addr(t1_gammaf5,p_par(9))
     call copy_addr(coef_mus,p_par(10))
     call copy_addr(coef_mu5,p_par(11))
     call copy_addr(cw,p_par(12))
-    call copy_addr(diffmu5_,p_par(13))
+    call copy_addr(diffmu5_,p_par(13)) ! real dconst
     call copy_addr(cdtchiral,p_par(14))
     call copy_addr(imu5,p_par(15)) ! int
     call copy_addr(imus,p_par(16)) ! int

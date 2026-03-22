@@ -51,7 +51,6 @@
 !--------------------------------------------------------------------
 module Special
 !
-  use Cparam
   use Cdata
   use General, only: keep_compiler_quiet
   use Messages
@@ -870,9 +869,6 @@ module Special
          endselect
          bc%done=.true.
       endselect
-!
-      call keep_compiler_quiet(f)
-      call keep_compiler_quiet(bc%bcname)
 !
     endsubroutine special_boundconds
 !***********************************************************************

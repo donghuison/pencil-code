@@ -24,8 +24,7 @@ class SliceSeries(object):
         self.t = np.array([])
 
     def keys(self):
-        for i in self.__dict__.keys():
-            print(i)
+        return list(self.__dict__.keys())
 
     def read(
         self,
@@ -264,7 +263,14 @@ class SliceSeries(object):
             if proc < 0:
                 slice_dir = datadir
             else:
-                slice_dir = os.path.join(datadir, "proc{0}".format(proc))
+                if param.io_strategy == "dist":
+                    slice_dir = os.path.join(datadir, "proc{0}".format(proc))
+                else:
+                    if param.io_strategy == "collect":
+                        proc=-1
+                        warnings.warn("proc>=0 not meaningful for param.io_strategy = 'collect'; ignored")
+                    else:
+                        raise ValueError("proc>=0 not implemented for param.io_strategy = 'collect_xy*'")
 
             # Initialize the fields list.
             if field:
@@ -318,15 +324,26 @@ class SliceSeries(object):
             pos_object = _Foo()
             ind_object = _Foo()
             inds = list()
-            if not "r" in extension_list:
-                slicepos_fn = os.path.join(datadir, "slice_position.dat")
+            if proc < 0: 
+                slicepos_fn = os.path.join(datadir,"slice_position.dat")
+            else:
+                if param.io_strategy == "dist":
+                    slicepos_fn = os.path.join(datadir,"proc{0}".format(proc),"slice_position.dat")
+                else:
+                    raise ValueError("proc>=0 only meaningful for param.io_strategy = 'dist'")
+            try:
                 slicepos = open(slicepos_fn, 'r')
+            except FileNotFoundError:
+                print("slice position file '"+slicepos_fn+"' not found")
+                if param.io_strategy == "dist":
+                    print("    most likely because pc_read_*videofiles was not run")
+                return
+
+            if not "r" in extension_list:
                 for line in slicepos:
                     if line.strip().split()[0] == "T":
                         inds.append(int(line.strip().split()[1]))
             else:
-                slicepos_fn = os.path.join(datadir, "slice_position.dat")
-                slicepos = open(slicepos_fn, 'r')
                 for line in slicepos:
                     if line.strip().split()[0] == "T":
                         inds.append(0)
@@ -478,6 +495,9 @@ class _Foo(object): pass
 
 @copy_docstring(SliceSeries.read)
 def slices(*args, **kwargs):
+    """
+    Wrapper for :py:meth:`SliceSeries.read`
+    """
     slices_tmp = SliceSeries()
     slices_tmp.read(*args, **kwargs)
     return slices_tmp

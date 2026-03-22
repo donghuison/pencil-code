@@ -33,8 +33,10 @@ module Density
 !
   include 'density.h'
 !
-  real, dimension (ninit) :: ampllnrho=0.0, widthlnrho=0.1
-  real, dimension (ninit) :: rho_left=1.0, rho_right=1.0
+  real, dimension (ninit) :: ampllnrho=0.0  !PAR_DOC: amplitude for some types of initial densities
+  real, dimension (ninit) :: widthlnrho=0.1 !PAR_DOC: width for some types of initial densities
+  real, dimension (ninit) :: rho_left=1.0   !PAR_DOC: needed for \code{initlnrho='shock-tube'}
+  real, dimension (ninit) :: rho_right=1.0  !PAR_DOC: needed for \code{initlnrho='shock-tube'}
   real, dimension (ninit) :: amplrho=0.0, phase_lnrho=0.0, radius_lnrho=0.5
   real, dimension (ninit) :: xblob=0.0, yblob=0.0, zblob=0.0
   real, dimension (ninit) :: kx_lnrho=1.0, ky_lnrho=1.0, kz_lnrho=1.0
@@ -96,6 +98,7 @@ module Density
   real :: temp_coeff_out = 1.0
   real :: rss_coef1=1.0, rss_coef2=1.0
   real :: total_mass=-1.
+  logical :: lpositive_total_mass = .false.
   real :: rescale_rho=1.0
   real :: xjump_mid=0.0,yjump_mid=0.0,zjump_mid=0.0
   real :: kgaussian_lnrho=0., initpower_lnrho=2, kpeak_lnrho=1., cutoff_lnrho=0.
@@ -134,7 +137,38 @@ module Density
   real :: density_ceiling=-1.
   logical :: lreinitialize_lnrho=.false., lreinitialize_rho=.false.
   logical :: lsubtract_init_stratification=.false., lwrite_stratification=.false.
-  character (len=labellen), dimension(ninit) :: initlnrho='nothing'
+  real, dimension(:), allocatable :: rhobar
+  character (len=fnlen) :: rhobar_file
+  character (len=labellen), dimension(ninit) :: initlnrho='nothing' !PAR_DOC:
+    !PAR_DOC: initialization of density. Currently valid choices are
+    !PAR_DOC:  \begin{description}
+    !PAR_DOC:  \item[\code{`zero'}] ($\ln\rho=0$),
+    !PAR_DOC:  \item[\code{`isothermal'}] (isothermal stratification),
+    !PAR_DOC:  \item[\code{`polytropic\_simple'}] (polytropic stratification),
+    !PAR_DOC:  \item[\code{`hydrostatic-z-2'}] (hydrostatic vertical
+    !PAR_DOC:    stratification for isentropic atmosphere),
+    !PAR_DOC:  \item[\code{`xjump'}] (density jump in $x$ of width
+    !PAR_DOC:    \var{widthlnrho}),
+    !PAR_DOC:  \item[\code{`rho-jump-z'}] (density jump in $z$ of width
+    !PAR_DOC:    \var{widthlnrho}),
+    !PAR_DOC:  \item[\code{`piecew-poly'}] (piecewise polytropic vertical
+    !PAR_DOC:    stratification for solar convection),
+    !PAR_DOC:  \item[\code{`polytropic'}] (polytropic vertical
+    !PAR_DOC:    stratification),
+    !PAR_DOC:  \item[\code{`sound-wave'}] (sound wave),
+    !PAR_DOC:  \item[\code{`shock-tube'}] (polytropic standing shock),
+    !PAR_DOC:  \item[\code{`gaussian-noise'}] (Gaussian-distributed,
+    !PAR_DOC:    uncorrelated noise),
+    !PAR_DOC:  \item[\code{`gaussian-noise'}] (Gaussian-distributed,
+    !PAR_DOC:    uncorrelated noise in $x$, but uniform in $y$ and $z$),
+    !PAR_DOC:  \item[\code{`hydrostatic-r'}] (hydrostatic radial density
+    !PAR_DOC:    stratification for isentropic or isothermal sphere),
+    !PAR_DOC:  \item[\code{`sin-xy'}] (sine profile in $x$ and $y$),
+    !PAR_DOC:  \item[\code{`sin-xy-rho'}] (sine profile in $x$ and $y$, but
+    !PAR_DOC:    in $\rho$, not $\ln\rho$),
+    !PAR_DOC:  \item[\code{`linear'}] (linear profile in $\kv\cdot\xv$),
+    !PAR_DOC:  \item[\code{`planet'}] (planet solution; see \S\ref{S-planet}).
+    !PAR_DOC:  \end{description}
   character (len=labellen) :: strati_type='lnrho_ss'
   character (len=labellen), dimension(ndiff_max) :: idiff=''
   character (len=labellen) :: borderlnrho='nothing'
@@ -212,6 +246,7 @@ module Density
   integer :: idiag_rho2m=0      ! DIAG_DOC: $\left<\varrho^2\right>$
   integer :: idiag_rho4m=0      ! DIAG_DOC: $\left<\varrho^4\right>$
   integer :: idiag_rho6m=0      ! DIAG_DOC: $\left<\varrho^6\right>$
+  integer :: idiag_rho8m=0      ! DIAG_DOC: $\left<\varrho^8\right>$
   integer :: idiag_rho12m=0     ! DIAG_DOC: $\left<\varrho^{12}\right>$
   integer :: idiag_rhof2m=0     ! DIAG_DOC: $\left<\varrho'^2\right>$
   integer :: idiag_lnrho2m=0    ! DIAG_DOC:
@@ -295,11 +330,13 @@ module Density
   real, dimension(nx) :: diffus_diffrho
   real, dimension(nx) :: diffus_diffrho3
   real :: density_floor_log, density_ceiling_log, wdamp_rho
+  integer :: ihless
 !
   integer :: enum_ieos_profile = 0
   integer :: enum_mass_source_profile = 0
   integer :: enum_div_sld_dens = 0
   integer :: enum_borderlnrho = 0
+  integer :: enum_density_floor_profile = 0
 
   contains
 !***********************************************************************
@@ -326,10 +363,10 @@ module Density
         if (dimensionality<3) lisotropic_advection=.true.
         lslope_limit_diff = .true.
         if (isld_char == 0) then
-          call farray_register_auxiliary('sld_char',isld_char,communicated=.true.,on_gpu=lgpu)
+          call farray_register_auxiliary('sld_char',isld_char,communicated=.true.,rhs=.true.)
           if (lroot) write(15,*) 'sld_char = fltarr(mx,my,mz)*one'
           aux_var(aux_count)=',sld_char'
-          if (naux+naux_com <  maux+maux_com) aux_var(aux_count)=trim(aux_var(aux_count))//' $'
+          if (naux+naux_com < maux+maux_com) aux_var(aux_count)=trim(aux_var(aux_count))//' $'
           aux_count=aux_count+1
         endif
       endif
@@ -345,7 +382,7 @@ module Density
         endif
         if (lroot) write(15,*) 'rho_flucz = fltarr(mx,my,mz)*one'
         aux_var(aux_count)=',rho_flucz'
-        if (naux+naux_com <  maux+maux_com) aux_var(aux_count)=trim(aux_var(aux_count))//' $'
+        if (naux+naux_com < maux+maux_com) aux_var(aux_count)=trim(aux_var(aux_count))//' $'
         aux_count=aux_count+1
       endif
 !
@@ -432,9 +469,11 @@ module Density
       real, dimension (mx,my,mz,mfarray) :: f
       real :: tmp
       real, dimension (nzgrid) :: tmpz
+      real, dimension (nghost) :: dummy
 !
       integer :: i,j,m,n, stat
-      logical :: lnothing, exist
+      logical :: lnothing, exist, opend
+      character(LEN=11) :: formtd
       real :: rho_bot,sref
       real, dimension(:), pointer :: gravx_xpencil
       real :: gamma, gamma_m1
@@ -523,19 +562,26 @@ module Density
             case ('zprofile')
               inquire(file='zprof.txt',exist=exist)
               if (exist) then
-                open(31,file='zprof.txt')
+                inquire(file='zprof.txt',formatted=formtd)
+                inquire(file='zprof.txt',opened=opend)
+                if (.not.opend) open(31,file='zprof.txt',form=formtd)
               else
                 inquire(file=trim(directory)//'/zprof.ascii',exist=exist)
                 if (exist) then
                   open(31,file=trim(directory)//'/zprof.ascii')
                 else
-                  call fatal_error('reinitialize_rho','error - no zprof.txt input file')
+                  call fatal_error('reinitialize_rho','error - no zprof.* input file')
                 endif
               endif
-              do n=1,nzgrid
-                read(31,*,iostat=stat) tmpz(n)
-                if (stat<0) exit
-              enddo
+              if (formtd=='FORMATTED') then
+                do n=1,nzgrid
+                  read(31,*,iostat=stat) tmpz(n)
+                  if (stat<0) exit
+                enddo
+              else
+                read(31,iostat=stat) dummy,tmpz
+              endif
+              close(31)
               do n=n1,n2
                 f(:,:,n,irho)=f(:,:,n,irho)*rescale_rho*tmpz(n-nghost+nz*ipz)
               enddo
@@ -546,19 +592,28 @@ module Density
             case ('zprofile')
               inquire(file='zprof.txt',exist=exist)
               if (exist) then
-                open(31,file='zprof.txt')
+                inquire(file='zprof.txt',formatted=formtd)
+                inquire(file='zprof.txt',opened=opend)
+                if (.not.opend) open(31,file='zprof.txt',form=formtd)
+                open(31,file='zprof.txt',form=formtd)
               else
                 inquire(file=trim(directory)//'/zprof.ascii',exist=exist)
                 if (exist) then
                   open(31,file=trim(directory)//'/zprof.ascii')
+                  formtd='FORMATTED'
                 else
-                  call fatal_error('reinitialize_rho','error - no zprof.txt file')
+                  call fatal_error('reinitialize_rho','error - no zprof.* file')
                 endif
               endif
-              do n=1,nzgrid
-                read(31,*,iostat=stat) tmpz(n)
-                if (stat<0) exit
-              enddo
+              if (formtd=='FORMATTED') then
+                do n=1,nzgrid
+                  read(31,*,iostat=stat) tmpz(n)
+                  if (stat<0) exit
+                enddo
+              else
+                read(31,iostat=stat) dummy,tmpz
+              endif
+
               do n=n1,n2
                 f(:,:,n,ilnrho)=f(:,:,n,ilnrho)+log(rescale_rho*tmpz(n-nghost+nz*ipz))
               enddo
@@ -1017,6 +1072,8 @@ module Density
         lhiggsless=.false.
       endif
 !
+      if (lhiggsless.and.lconservative) ihless=farray_index_by_name('ihless')
+
       if (lhydro.and.lhiggsless) then
         call get_shared_variable('eps_hless',eps_hless)
         if (lrun) call get_shared_variable('width_hless_absolute',width_hless_absolute)
@@ -1036,7 +1093,8 @@ module Density
       !TP: used in boundary conditions on Astaroth side
       reference_state_padded = 0.
       reference_state_padded(l1:l2,:) = reference_state
-!
+      lpositive_total_mass = total_mass > 0.0
+
     endsubroutine initialize_density
 !***********************************************************************
     subroutine init_lnrho(f)
@@ -1062,13 +1120,16 @@ module Density
       real :: lnrhoint,cs2int,pot0
       real :: pot_ext,lnrho_ext,cs2_ext,tmp1,k_j2
       real :: zbot,ztop,haut
-      real, dimension (nx) :: r_mn,lnrho,TT,ss
+      real, dimension (nx) :: r_mn,TT
       real, pointer :: gravx, rhs_poisson_const,fac_cs,cs2cool
       integer, pointer :: isothmid, isothtop
       complex :: omega_jeans
-      integer :: j,ix,iy
+      integer :: j,ix,iy,ntheta,ncol,ios,ii
       logical :: lnothing
-      real :: gamma, gamma_m1
+      real :: gamma, gamma_m1, dummy
+      real, pointer :: gravitational_const
+      real, dimension(:), allocatable :: theta_rhobar,rhobar_,A_rhobar_
+      logical :: lrhobar_exists
 !
       intent(inout) :: f
 !
@@ -1599,6 +1660,54 @@ module Density
               f(l1:l2,m,n,iux) = f(l1:l2,m,n,iux) + abs(omega_jeans*ampllnrho(j)) * &
                  sin(kx_lnrho(j)*x(l1:l2)+phase_lnrho(j) + complex_phase(omega_jeans*ampllnrho(j)))
           enddo; enddo
+        case ('rhobar')
+          if (lroot) then 
+            inquire(file=rhobar_file,exist=lrhobar_exists)
+            if (lrhobar_exists) then
+              print*,"Init lrho: reading rhobar from rhobar.dat"
+              open(unit=10, file='rhobar.dat', status='old', action='read')
+              read(10,*,iostat=ios) dummy, dummy, dummy, ntheta, ncol
+              if (ios/=0) then
+                backspace(1)
+                read(10,*) dummy, dummy, dummy, ntheta
+                ncol=3
+              endif
+              allocate(theta_rhobar(ntheta),rhobar_(ntheta),A_rhobar_(ntheta))
+              theta_rhobar(1)=0.; rhobar_(1)=0.; A_rhobar_(1)=0.
+              do ii=2,ntheta
+                read(10,*) theta_rhobar(ii),rhobar_(ii),A_rhobar_(ii)
+              enddo
+              close(10)
+            else
+              !inquire(file='rhobar_r.dat',exist=rhobar_exists)
+              !if (rhobar_exists) then
+              !  if (lroot) print*,"Init lrho: reading R(theta) from rhobar_r.dat"
+              !  if (lroot) print*,"Rhobar(theta) = R(theta)*(sound speed^2)/(2piG)"
+              !  read(10,*) rhobar
+              !  close(10)
+              !  rhobar = rhobar*cs20/(2*pi*gravitational_const)
+              !endif
+            endif
+          endif
+          allocate(rhobar(nygrid))
+          if (lroot) then
+            if (.not.lrhobar_exists) then
+              print*,"init_lnrho: No rhobar file found; defaulting to rhobar = sound speed^2/(2piG)"
+              call get_shared_variable('gravitational_const',gravitational_const,caller='init_lnrho')
+              rhobar = cs20/(2*pi*gravitational_const)
+            else
+            ! Interpolate rhobar here interp(theta_rhobar,rhobar_,rhobar)
+              deallocate(theta_rhobar,rhobar_,A_rhobar_)
+            endif
+          endif
+          call mpibcast(rhobar,nygrid)
+          if (lspherical_coords) then
+            do n=n1,n2; do m=m1,m2
+              f(l1:l2,m,n,ilnrho) = log(rhobar(m-nghost + ipy*ny)*x(l1:l2)**(-2))
+            enddo; enddo
+          else
+            call not_implemented("init_lnrho","rhobar for non-spherical coordinates")
+          endif
         case ('jeans-wave-oblique')
 !
 !  Soundwave + self gravity.
@@ -1798,7 +1907,7 @@ module Density
 !
 !  Force mass conservation if requested
 !
-        if (lconserve_total_mass .and. total_mass > 0.0) then
+        if (lconserve_total_mass .and. lpositive_total_mass) then
 !
           cur_mass=box_volume*mean_density(f)
 !
@@ -2176,7 +2285,7 @@ module Density
 !  Diagnostic pencils.
 !
       if (idiag_rhom/=0 .or. idiag_rho2m/=0 .or.idiag_rho4m/=0 .or.idiag_rho6m/=0 .or. &
-           idiag_rho12m/=0 .or. idiag_rhof2m/=0 .or. idiag_rhomy/=0 .or. &
+           idiag_rho8m/=0 .or. idiag_rho12m/=0 .or. idiag_rhof2m/=0 .or. idiag_rhomy/=0 .or. &
            idiag_rhomx/=0 .or. idiag_rho2mx/=0 .or. idiag_rhomz/=0 .or. idiag_rho2mz/=0 .or. &
            idiag_rhomin/=0 .or.  idiag_rhomax/=0 .or. idiag_rhomxz/=0 .or. &
            idiag_totmass/=0 .or. idiag_mass/=0 .or. idiag_drho2m/=0 .or. idiag_rhorms/=0 .or. &
@@ -2303,6 +2412,10 @@ module Density
           p%ekin=0.5*p%rho*p%u2
         endif
       endif
+! Needed to get right maxadvec for diagnostics
+      if (lmultithread .and. ldiff_hyper3_mesh .and. idiag_dtv /= 0) then
+              call calc_advec_hypermesh
+      endif
 !
 !  Dummy pencils.
 !
@@ -2351,7 +2464,6 @@ module Density
 !                suppressed weno for log density
 !
       use WENO_transport
-      use FArrayManager, only: farray_index_by_name
       use Sub, only: div,grad,dot,dot2,u_dot_grad,del2,del6,multmv,g2ij,dot_mn,h_dot_grad, &
                      del6_strict,calc_del6_for_upwind
 
@@ -2361,7 +2473,7 @@ module Density
       intent(in) :: f
       intent(inout) :: p
       real, dimension(nx) :: tmp
-      integer :: i, ihless
+      integer :: i
 !
 ! set rho pencil, but it is overwritten in the conservative case.
 !
@@ -2451,6 +2563,7 @@ module Density
             where(real(t) < p%hless) p%rho=p%rho-eps_hless
           else
             p%rho=p%rho-eps_hless*max(0.d0, min(1.d0, (p%hless+0.5d0*width_hless_absolute-t)/width_hless_absolute))
+            !p%rho=p%rho-eps_hless*max(0.d0, min(1.d0, (f(l1:l2,m,n,ihless)+0.5d0*width_hless_absolute-t)/width_hless_absolute))
           endif
         endif
         p%rho=p%rho/(fourthird*p%lorentz*(1.-.25/p%lorentz))
@@ -2563,6 +2676,22 @@ module Density
 !
     endsubroutine density_after_boundary
 !***********************************************************************
+    subroutine calc_advec_hypermesh
+!
+!   14-oct-25/TP: carved from dlnrho_dt 
+!
+      real, dimension(nx) :: advec_hypermesh_rho
+      if (lupdate_courant_dt) then
+        if (ldynamical_diffusion) then
+          diffus_diffrho3 = diffus_diffrho3 + diffrho_hyper3_mesh
+          advec_hypermesh_rho=0.
+        else
+          advec_hypermesh_rho=diffrho_hyper3_mesh*pi5_1*sqrt(dxyz_2)
+        endif
+        advec2_hypermesh=advec2_hypermesh+advec_hypermesh_rho**2
+      endif
+    endsubroutine calc_advec_hypermesh
+!***********************************************************************
     subroutine dlnrho_dt(f,df,p)
 !
 !  Continuity equation.
@@ -2593,7 +2722,7 @@ module Density
       real :: gamma
       real, dimension (nx) :: tmp
       real, dimension (nx,3) :: tmpv
-      real, dimension (nx) :: density_rhs, density_rhs_tmp, advec_hypermesh_rho
+      real, dimension (nx) :: density_rhs, density_rhs_tmp
       integer :: j
       logical :: ldt_up
       real :: cs201=1., cs20_corr=1.
@@ -2635,6 +2764,11 @@ module Density
               !if (lrelativistic_eos) density_rhs=fourthird*density_rhs
               if (ladvection_density) density_rhs = density_rhs - cs20_corr*p%ugrho
               density_rhs=cs201*density_rhs
+            endif
+            if (lrelativistic_eos .and. .not.lconservative) then
+              call fatal_error('lrelativistic_eos only implemented with lnrho evolution', &
+                               'dlnrho_dt in density.f90')
+              ! alberto: to be implemented
             endif
 !
 !  Evolution of lnrho: set here density_rhs
@@ -2909,15 +3043,7 @@ module Density
             !fdiff = fdiff + diffrho_hyper3_mesh*pi5_1/60.*tmp/dt
           endif
         enddo
-        if (ldt_up) then
-          if (ldynamical_diffusion) then
-            diffus_diffrho3 = diffus_diffrho3 + diffrho_hyper3_mesh
-            advec_hypermesh_rho=0.
-          else
-            advec_hypermesh_rho=diffrho_hyper3_mesh*pi5_1*sqrt(dxyz_2)
-          endif
-          advec2_hypermesh=advec2_hypermesh+advec_hypermesh_rho**2
-        endif
+        call calc_advec_hypermesh
         if (headtt) print*,'dlnrho_dt: diffrho_hyper3_mesh=', diffrho_hyper3_mesh
       endif
 !
@@ -3123,6 +3249,7 @@ module Density
         if (idiag_rho2m/=0)    call sum_mn_name(p%rho**2,idiag_rho2m)
         if (idiag_rho4m/=0)    call sum_mn_name(p%rho**4,idiag_rho4m)
         if (idiag_rho6m/=0)    call sum_mn_name(p%rho**6,idiag_rho6m)
+        if (idiag_rho8m/=0)    call sum_mn_name(p%rho**8,idiag_rho8m)
         if (idiag_rho12m/=0)    call sum_mn_name(p%rho**12,idiag_rho12m)
         if (idiag_rhof2m/=0.and.lrho_flucz_as_aux) call sum_mn_name(f(l1:l2,m,n,irho_flucz)**2,idiag_rhof2m)
         if (idiag_rhorms/=0)   call sum_mn_name(p%rho**2,idiag_rhorms,lsqrt=.true.)
@@ -3648,7 +3775,8 @@ module Density
 !  (This needs to be consistent with what is defined above!)
 !
       if (lreset) then
-        idiag_rhom=0; idiag_rho2m=0; idiag_rho4m=0; idiag_rho6m=0; idiag_rho12m=0;
+        idiag_rhom=0; idiag_rho2m=0; idiag_rho4m=0; idiag_rho6m=0;
+        idiag_rho8m=0; idiag_rho12m=0;
         idiag_rhof2m=0; idiag_lnrho2m=0
         idiag_drho2m=0; idiag_drhom=0; idiag_rhorms=0; idiag_lnrhorms=0
         idiag_ugrhom=0; idiag_ugrhomz=0; idiag_uglnrhom=0
@@ -3678,6 +3806,7 @@ module Density
         call parse_name(iname,cname(iname),cform(iname),'rho2m',idiag_rho2m)
         call parse_name(iname,cname(iname),cform(iname),'rho4m',idiag_rho4m)
         call parse_name(iname,cname(iname),cform(iname),'rho6m',idiag_rho6m)
+        call parse_name(iname,cname(iname),cform(iname),'rho8m',idiag_rho8m)
         call parse_name(iname,cname(iname),cform(iname),'rho12m',idiag_rho12m)
         call parse_name(iname,cname(iname),cform(iname),'rhof2m',idiag_rhof2m)
         call parse_name(iname,cname(iname),cform(iname),'rhorms',idiag_rhorms)
@@ -4142,7 +4271,7 @@ module Density
     use Syscalls, only: copy_addr
     use General , only: string_to_enum
 
-    integer, parameter :: n_pars=400
+    integer, parameter :: n_pars=100
     integer(KIND=ikind8), dimension(n_pars) :: p_par
 
     call copy_addr(ldiff_shock,p_par(1)) ! bool
@@ -4225,10 +4354,17 @@ module Density
     call copy_addr(h_sld_dens,p_par(73))
     call copy_addr(nlf_sld_dens,p_par(74))
     call copy_addr(lconserve_total_mass,p_par(75)) ! bool
-    call copy_addr(total_mass,p_par(76))
+    !TP: total mass is a dconst so won't recompile when continuing a simulation where the mass has slightly changed
+    call copy_addr(total_mass,p_par(76)) ! real dconst
     call copy_addr(lrelativistic_eos_corr,p_par(77)) ! bool
     call copy_addr(lgamma_is_1,p_par(78)) ! bool
     call copy_addr(reference_state_padded,p_par(79)) ! (mx) (9)
+    !call copy_addr(ihless,p_par(80))  !  int
+    call string_to_enum(enum_density_floor_profile,density_floor_profile)
+    call copy_addr(enum_density_floor_profile,p_par(81)) ! int
+    call copy_addr(density_floor,p_par(82))
+    call copy_addr(density_floor_log,p_par(83))
+    call copy_addr(lpositive_total_mass,p_par(84)) ! bool
 
     endsubroutine pushpars2c
 !***********************************************************************

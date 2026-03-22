@@ -75,10 +75,14 @@ module EquationOfState
 !
 !  Set indices for auxiliary variables.
 !
-      !call farray_register_auxiliary('yH',iyH,communicated=.true.)
-      call farray_register_auxiliary('yH',iyH)
       if (.not.ltemperature.or.ltemperature_nolog) &
-        call farray_register_auxiliary('lnTT',ilnTT,communicated=.true.)
+        call farray_register_auxiliary('lnTT',ilnTT,communicated=.true.,rhs=.true.)
+!
+!TP: until logics are improved it might matter are communicated auxs registered before non-communicated auxs.
+!    Of course this is desirable so will remove this comment once the situation has been improved
+!
+      call farray_register_auxiliary('yH',iyH,rhs=.true.,read_from_gpu=lgpu)
+      !call farray_register_auxiliary('yH',iyH,communicated=.true.)
 !
 !  Identify version number (generated automatically by SVN).
 !
@@ -565,6 +569,7 @@ module EquationOfState
       real, dimension (mx,my,mz,mfarray) :: f
       real, dimension (mx) :: lnrho,ss,yH,lnTT
 !
+      
       do n=1,mz
       do m=1,my
         if (ldensity_nolog) then
@@ -1340,7 +1345,9 @@ module EquationOfState
 !      df=dlnTT_*(1.5+TT1_)-1/(1-yH+epsi)-2/yH
       dff=dlnTT_*(1.5+TT1_)-1/(1-yH+epsi)-2/(yH+epsi)
 !
-      do i=1,maxit
+      i = 1
+      do while(i <= maxit .and. .not. all(found))
+        i = i +1
         where (.not.found)
           where (      sign(1.,((yH-yHlow)*dff-ff)) &
                     == sign(1.,((yH-yHhigh)*dff-ff)) &
@@ -1382,7 +1389,6 @@ module EquationOfState
         elsewhere
           found=.true.
         endwhere
-        if (all(found)) return
       enddo
 !
     endsubroutine rtsafe_pencil

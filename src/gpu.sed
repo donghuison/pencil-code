@@ -24,19 +24,14 @@
 /STREAMLINES/ b end
 /YINYANG/ b end
 /PARTICLES/ b end
-/IMPLICIT_DIFFUSION/ b end
 /MPICOMM/ b end
 /MULTITHREADING/ b end
 /GPU_VENDOR/ b end
 /RUNTIME_COMPILATION/ b end
+/TRANSPILATION/ b end
+/GENERATE_DSL_CODE/ b end
+/LIBRARIES/ b end
 /FARRAY/ b end
-#s/^ *VISCOSITY *= *noviscosity *$/#undef LVISCOSITY/ 
-t prin
-b cont0
-: prin
-p
-t end
-: cont0
 /^ *[A-Z0-9_]* *= *no/ b end
 s/^ *REAL_PRECISION *= *double *$/PRECISION=DOUBLE/
 s/^ *REAL_PRECISION *= *8 *$/PRECISION=DOUBLE/
@@ -58,7 +53,7 @@ b end
 /IO[_ ]/ b end
 #s/^.*= *\([A-Za-z0-9_][A-Za-z0-9_]*\)/#define \U\1/ 
 s/\([a-zA-Z_0-9]\)  *\([a-zA-Z_0-9]\)/\1.f90 ..\/\2/g
-s/^ *\([A-Z_][A-Z0-9_]*\) *= *\([A-Za-z0-9_][A-Za-z0-9_/. ]*\) *$/#define L\1 1 \/\/ ..\/\2.f90/ 
+s/^ *\([A-Z_][A-Z0-9_]*\) *= *\([A-Za-z0-9_][A-Za-z0-9_/. ]*\) *$/#define L\1 1 \n#define L\2_MODULE 1 \/\/ ..\/\2.f90/ 
 p
 s/.*\/\/ *\([a-zA-Z_0-9\.].*[a-zA-Z_0-9]\) *$/\1 \\/
 H

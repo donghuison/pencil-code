@@ -1,0 +1,56 @@
+Sample layout for a simulation with a grid of [nx,ny,nz] grid points per processor.
+There are (px,py,pz) processors along the x, y, and z direction.
+The number of ghost layers is set here to NG and is of course variable in reality.
+This results in a global grid size of mxgrid=nx*px+2*NG in a monolithic layout.
+Likewise, the global grid size without grid cells is defined as nxgrid=nx*px.
+The chunk dimensions are denoted in square brackets.
+The group and dataset structure and dimensions would be as follows:
+
+
+This strategy is a variant of the "chunked" layout, where we take advantage of the
+fact that the multiple variables (indices of the f-array) are aligned in memory.
+This leads to typically 8 times larger chunks, which can be either better or worse.
+On the one hand, the number of write requests is strongly reduced,
+but on the other hand, the larger IO buffers may exhaust the available memory.
+The latter could make it impossible to automatically compress the written data.
+We use NA as the number of components that a full data snapshot contains:
+
+data	[nx,ny,nz,NA],(px,py,pz)
+
+tags/
+	ax	6
+	ay	7
+	az	8
+	lnTT	5
+	lnrho	4
+	ux	1
+	uy	2
+	uz	3
+
+ghost/
+	x,y,z	=> see "chunked" scheme
+
+
+Alternatively, the chunk size could be reduced to the original [nx,ny,nz] size.
+This reduces the risk to exhaust the memory, but again increases the number of write operations.
+
+data	[nx,ny,nz],(NA,px,py,pz)
+
+tags/
+	...	=> same as above
+
+The big advantage of this strategy is that reading independent quantities from a
+snapshot is indeed possible. For compressed snapshots this means that one would
+not need to uncompress the whole file, if one likes to read only the temperature.
+
+
+PS: It seems beneficial to do an independent multi-chucked IO to write the f-array.
+See discussion at page 81-86: https://www.alcf.anl.gov/files/Parallel_HDF5_1.pdf
+This means setting H5Pset_dxpl_mpio() to H5FD_MPIO_COLLECTIVE and
+setting H5Pset_dxpl_mpio_collective_opt() to H5FD_MPIO_INDIVIDUAL_IO.
+The reason is that all processors would of course take part in writing the f-array,
+but in fact only one processor writes to each chunk, hence this is individual MPI-IO.
+
+The respective call to activate the chunking should be:
+CALL h5pcreate_f(H5P_DATASET_CREATE_F, param_list_id, h5_error)
+CALL h5pset_chunk_f(param_list_id, dimensionality, chunk_dims, h5_error)

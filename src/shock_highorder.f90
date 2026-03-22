@@ -87,7 +87,7 @@ module Shock
       use FArrayManager
       use Messages, only: svn_id
 !
-      call farray_register_auxiliary('shock',ishock,communicated=.true.,on_gpu=lgpu)
+      call farray_register_auxiliary('shock',ishock,communicated=.true.,rhs=.true.)
 !
 !  Identify version number.
 !
@@ -377,7 +377,7 @@ module Shock
 !
       use Boundcond, only: boundconds_x, boundconds_y, boundconds_z
       use Mpicomm, only: initiate_isendrcv_bdry, finalize_isendrcv_bdry, &
-                         mpiallreduce_max, MPI_COMM_WORLD
+                         mpiallreduce_max, MPI_COMM_PENCIL
       use Magnetic, only: bb_unitvec_shock
       use Sub, only: div
 !
@@ -466,7 +466,7 @@ module Shock
 !  Scale given a fixed mesh Reynolds number.
 !
         if (headtt) print *, 'Shock: fix mesh Reynolds number'
-        call mpiallreduce_max(maxval(tmp(l1:l2,m1:m2,n1:n2)), shock_max, comm=MPI_COMM_WORLD)
+        call mpiallreduce_max(maxval(tmp(l1:l2,m1:m2,n1:n2)), shock_max, comm=MPI_COMM_PENCIL)
         shock: if (shock_max > 0.) then
           a1 = 0.
           scan_z: do n = n1, n2
@@ -488,7 +488,7 @@ module Shock
               a1 = max(a1, maxval(penc / penc1))
             enddo scan_y
           enddo scan_z
-          call mpiallreduce_max(a1, a, comm=MPI_COMM_WORLD)
+          call mpiallreduce_max(a1, a, comm=MPI_COMM_PENCIL)
           a = a / (re_mesh * pi * shock_max)
         else shock
           a = dxmin**2
@@ -852,6 +852,9 @@ module Shock
 
     integer, parameter :: n_pars=100
     integer(KIND=ikind8), dimension(n_pars) :: p_par
+    logical, save :: lmax_axis_only = .false., l121_smooth = .false.
+    logical, save :: low_order_divu = .false.
+    logical, save :: lshock_first = .false.
 
     call copy_addr(ishock_max   ,p_par(1))  ! int
     call copy_addr(div_threshold,p_par(2))
@@ -862,6 +865,11 @@ module Shock
     call copy_addr(lmax_shock   ,p_par(7)) ! bool
     call copy_addr(lconvergence_only,p_par(8))  ! bool
     call copy_addr(lgaussian_smooth,p_par(9)) ! bool
+    call copy_addr(lmax_axis_only,p_par(10)) ! bool
+    call copy_addr(l121_smooth,p_par(11)) ! bool
+    call copy_addr(low_order_divu,p_par(12)) ! bool
+    call copy_addr(lshock_first,p_par(13)) ! bool
+    call copy_addr(lconvergence_bias,p_par(14)) ! bool
 
     endsubroutine pushpars2c
 !***********************************************************************

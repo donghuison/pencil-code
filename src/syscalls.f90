@@ -4,12 +4,12 @@
 !
 module Syscalls
 !
-  use Cparam, only: ikind8
+  !!!use Cparam, only: ikind8
   use Geometrical_types, only: torus_rect
 
   implicit none
 !
-  !integer, parameter :: ikind8=selected_int_kind(14)  ! 8-byte integer kind
+  integer, parameter :: ikind8=selected_int_kind(14)  ! 8-byte integer kind
   integer, parameter :: rkind8=selected_real_kind(12) ! 8-byte real kind
 
   external directory_exists_c
@@ -47,6 +47,14 @@ module Syscalls
     !module procedure copy_addr_dble_1D
   endinterface
 !
+  interface
+    function sleep_c(ms) bind (c, name="sleep")
+      use iso_c_binding, only : c_int
+      integer(c_int), value :: ms
+      integer(c_int) :: sleep_c
+    endfunction sleep_c
+  endinterface
+!
   contains
 !***********************************************************************
     subroutine system_cmd(command)
@@ -63,6 +71,24 @@ module Syscalls
       ret=system_c(trim(command)//char(0))
 !
     endsubroutine system_cmd
+!***********************************************************************
+    subroutine sleep(seconds)
+!
+!  Sleep a pre-defined time.
+!
+!  26-Oct-2025/PABourdin: coded
+!
+      use iso_c_binding, only: c_int
+!
+      integer, intent(in) :: seconds
+!
+      integer(c_int) :: ms_c
+      integer :: result
+!
+      ms_c = seconds * 1000
+      result = sleep_c (ms_c)
+!
+    endsubroutine sleep
 !***********************************************************************
     function sizeof_real()
 !
@@ -112,8 +138,8 @@ module Syscalls
       character(len=*) :: value
 !
       value = ' '
-      call get_env_var_c(trim(name)//char(0), value)
-      value = trim(value)
+      call get_environment_variable (trim (name), value)
+      value = trim (value)
 !
     endsubroutine get_env_var
 !***********************************************************************

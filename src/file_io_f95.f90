@@ -36,9 +36,10 @@ module File_io
 !
 !  28-May-2015/Bourdin.KIS: implemented
 !
+      use Cdata, only: lroot
       use General, only: loptest
       use Messages, only: fatal_error
-      use Mpicomm, only: mpibcast_int, mpibcast_char, lroot, MPI_COMM_WORLD, stop_it_if_any
+      use Mpicomm, only: mpibcast_int, mpibcast_char, MPI_COMM_PENCIL, stop_it_if_any
 
       integer :: parallel_read
       character (len=*), intent(in) :: file
@@ -61,7 +62,7 @@ module File_io
       call stop_it_if_any(.false.,'')
 !
       ! Broadcast the file size.
-      call mpibcast_int(bytes,comm=MPI_COMM_WORLD)
+      call mpibcast_int(bytes,comm=MPI_COMM_PENCIL)
       parallel_read = bytes
 !
       ! Allocate temporary memory.
@@ -80,7 +81,7 @@ module File_io
       endif
 !
       ! Broadcast buffer to all MPI ranks.
-      call mpibcast_char(buffer, bytes, comm=MPI_COMM_WORLD)
+      call mpibcast_char(buffer, bytes, comm=MPI_COMM_PENCIL)
 !
     endfunction parallel_read
 !***********************************************************************
@@ -262,7 +263,7 @@ module File_io
     endfunction get_tmp_prefix
 !**************************************************************************
     !function find_namelist(name) result(lfound)
-    subroutine find_namelist(name,lfound)
+    subroutine find_namelist(name,lfound,lno_warning)
 !
 !  Tests if the namelist is present and reports a missing namelist.
 !
@@ -271,16 +272,20 @@ module File_io
 !                  easily revertable by shifting comment char at beginning and end.
 !
       use Cdata, only: comment_char
-      use General, only: lower_case
-      use Mpicomm, only: lroot, mpibcast, MPI_COMM_WORLD
+      use General, only: lower_case, loptest
+      use Mpicomm, only: lroot, mpibcast, MPI_COMM_PENCIL
       use Messages, only: warning
 !
       character(len=*), intent(in) :: name
       logical :: lfound
+      logical, optional :: lno_warning
 !
       integer :: ierr, pos, state, max_len, line_len
       character(len=36000) :: line
       character :: ch
+      logical :: lwarn
+!
+      lwarn = .not. loptest (lno_warning)
 !
       if (lroot) then
 !
@@ -329,10 +334,10 @@ module File_io
         enddo
 
         call parallel_rewind
-        if (.not. lfound) call warning ('find_namelist', 'namelist "'//trim(name)//'" is missing!')
+        if (.not. lfound .and. lwarn) call warning ('find_namelist', 'namelist "'//trim(name)//'" is missing!')
       endif
 !
-      call mpibcast (lfound,comm=MPI_COMM_WORLD)
+      call mpibcast (lfound,comm=MPI_COMM_PENCIL)
 !
     endsubroutine find_namelist
     !endfunction find_namelist

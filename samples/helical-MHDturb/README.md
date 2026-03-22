@@ -29,7 +29,7 @@ a large scale magnetic field develops from an initially random
 magnetic field (if initaa=0 is set).
 
 ## Links:
-* https://www.nordita.org/~brandenb/projects/LShelicityspec/
+* https://old.nordita.org/~brandenb/projects/LShelicityspec/
 * http://pencil-code.nordita.org/samples/turbulence/helical-MHDturb32-4procs/
 
 ## References:
@@ -44,3 +44,8 @@ magnetic field (if initaa=0 is set).
    large-scale dynamos'' Phys. Rev. E 87, 043104 |
    [arXiv](https://arxiv.org/abs/1208.4529) |
    [ADS](http://adsabs.harvard.edu/abs/2013PhRvE..87d3104C)
+
+*  Candelaresi, S., Hubbard, A., Brandenburg, A., & Mitra, D.: 2011,
+   ``Magnetic helicity transport in the advective gauge family,'' Phys. Plasmas 18, 012903
+   [arXiv](https://arxiv.org/abs/1010.6177) |
+   [ADS](http://adsabs.harvard.edu/abs/2011PhPl...18a2903C)

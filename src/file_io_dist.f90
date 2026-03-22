@@ -70,7 +70,7 @@ module File_io
     endsubroutine parallel_close
 !**************************************************************************
     !function find_namelist(name) result (lfound)
-    subroutine find_namelist(name,lfound)
+    subroutine find_namelist(name,lfound,lno_warning)
 !
 !  Tests if the namelist is present and reports a missing namelist.
 !
@@ -78,17 +78,21 @@ module File_io
 !   6-oct-2015/MR: turned into subroutine because of CRAY compiler bug;
 !                  easily revertable by shifting comment char at beginning and end.
 !
-      use Cdata, only: comment_char
-      use General, only: lower_case
-      use Mpicomm, only: lroot, mpibcast, MPI_COMM_WORLD
+      use Cdata, only: lroot, comment_char
+      use General, only: lower_case,loptest
+      use Mpicomm, only: mpibcast, MPI_COMM_PENCIL
       use Messages, only: warning
 !
       character(len=*), intent(in) :: name
       logical :: lfound
+      logical, optional :: lno_warning
 !
       integer :: ierr, pos, state, max_len, line_len
       character(len=36000) :: line
       character :: ch
+      logical :: lwarn
+!
+      lwarn = .not. loptest (lno_warning)
 !
       if (lroot) then
         lfound = .false.
@@ -135,10 +139,10 @@ module File_io
           enddo
         enddo
         call parallel_rewind
-        if (.not. lfound) call warning ('find_namelist', 'namelist "'//trim(name)//'" is missing!')
+        if (.not. lfound .and. lwarn) call warning ('find_namelist', 'namelist "'//trim(name)//'" is missing!')
       endif
 !
-      call mpibcast (lfound,comm=MPI_COMM_WORLD)
+      call mpibcast (lfound,comm=MPI_COMM_PENCIL)
 !
     endsubroutine find_namelist
     !endfunction find_namelist

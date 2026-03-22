@@ -38,8 +38,7 @@ class Param(object):
         self.keys = []
 
     def keys(self):
-        for i in self.__dict__.keys():
-            print(i)
+        return list(self.__dict__.keys())
 
     def read(
         self,
@@ -69,6 +68,7 @@ class Param(object):
 
         param2 : bool
           Selects the set of parameters only from run.
+          If neither Param1 nor Param2 is set, both param.nml and param2.nml are read in.
 
         quiet : bool
           Flag for switching of output.
@@ -424,6 +424,9 @@ class _Foo(object): pass
 
 @copy_docstring(Param.read)
 def param(*args, **kwargs):
+    """
+    Wrapper for :py:meth:`Param.read`
+    """
     param_tmp = Param()
     param_tmp.read(*args, **kwargs)
     return param_tmp

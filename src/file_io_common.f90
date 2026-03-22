@@ -288,14 +288,14 @@ module File_io
 !  28-May-2015/PABourdin: reworked
 !
       use Cdata, only: lroot
-      use Mpicomm, only: mpibcast_int, MPI_COMM_WORLD
+      use Mpicomm, only: mpibcast_int, MPI_COMM_PENCIL
 !
       integer :: parallel_count_lines
       character (len=*), intent(in) :: file
       logical, optional, intent(in) :: ignore_comments
 !
       if (lroot) parallel_count_lines = count_lines(file,ignore_comments)
-      call mpibcast_int(parallel_count_lines,comm=MPI_COMM_WORLD)
+      call mpibcast_int(parallel_count_lines,comm=MPI_COMM_PENCIL)
 !
     endfunction parallel_count_lines
 !***********************************************************************
@@ -312,7 +312,7 @@ module File_io
 !
       use Cdata, only: lroot
       use General, only: loptest
-      use Mpicomm, only: mpibcast_logical, MPI_COMM_WORLD
+      use Mpicomm, only: mpibcast_logical, MPI_COMM_PENCIL
 !
       logical :: parallel_file_exists
       character (len=*) :: file
@@ -321,11 +321,11 @@ module File_io
       ! Let the root node do the dirty work
       if (lroot) parallel_file_exists = file_exists(file,loptest(delete))
 !
-      call mpibcast_logical(parallel_file_exists,comm=MPI_COMM_WORLD)
+      call mpibcast_logical(parallel_file_exists,comm=MPI_COMM_PENCIL)
 !
     endfunction parallel_file_exists
 !***********************************************************************
-    subroutine read_namelist(reader,name,lactive)
+    subroutine read_namelist(reader,name,lactive,loptional)
 !
 !  Encapsulates reading of pars + error handling.
 !
@@ -338,7 +338,7 @@ module File_io
 !  19-aug-15/PABourdin: renamed from 'read_pars' to 'read_namelist'
 !
       use Cdata, only: lnamelist_error, lparam_nml, lstart, lroot
-      use General, only: loptest, itoa
+      use General, only: loptest, itoa, ioptest
       use Messages, only: warning
 !
       interface
@@ -349,10 +349,15 @@ module File_io
 !
       character(len=*), intent(in) :: name
       logical, optional, intent(in) :: lactive
+      logical, optional, intent(in) :: loptional
 !
       integer :: ierr
       logical :: found
+      integer :: namelist_mode
+      logical :: lnamelist_optional, lno_warning
       character(len=5) :: type, suffix
+!
+      lnamelist_optional = loptest (loptional)
 !
       if (.not. loptest (lactive, .true.)) return
 !
@@ -369,13 +374,17 @@ module File_io
       endif
 !
       !if (.not. find_namelist (trim(name)//trim(type)//trim(suffix))) then
-      call find_namelist (trim(name)//trim(type)//trim(suffix),found)
+      call find_namelist (trim(name)//trim(type)//trim(suffix), found, lnamelist_optional)
+      if(.not. found .and. lnamelist_optional) return
 !
-      ierr = 0 ! G95 complains 'ierr' is used but not set, even though 'reader' has intent(out).
+      ! G95 complains 'ierr' is used but not set, even though 'reader' has intent(out).
+      ! PABourdin:
+      ! Yes, because 'reader' is here a function *pointer* an it can not be verified if the actual reader has intent(out).
+      ierr = 0
       call reader(ierr)
 !
       if (ierr /= 0) then
-      
+!
         if (.not.found) then
           if (.not. lparam_nml) lnamelist_error = .true.
           call parallel_rewind

@@ -135,7 +135,28 @@ module Special
 !  Adjust Omega_mat to conformally flat universe.
 !
       Omega_mat=1.-(Omega_Lam+Omega_rad)
-      ascale=exp(f_ode(iLCDM_lna))
+!
+!  During start, compute ascale Hubble and from redshift0.
+!  Otherwise, take it from f_ode(iLCDM_lna).
+!
+      if (lstart) then
+        ascale=1./(1.+redshift0)
+        tphys=ascale**2/(2.*Hubble0*Omega_rad**.5)
+        Hubble=Hubble0*sqrt(Omega_mat/ascale**3+Omega_Lam+Omega_rad/ascale**4)
+      else
+        ascale=exp(f_ode(iLCDM_lna))
+        tphys=f_ode(iLCDM_tph)
+      endif
+!
+!  write relevant constants to file; to be read by idl
+!
+      if (lroot) then
+        open (1,file=trim(datadir)//'/pc_constants.pro',position="append")
+        write (1,*) 'Omega_rad=',Omega_rad
+        write (1,*) 'Omega_mat=',Omega_mat
+        write (1,*) 'Omega_Lam=',Omega_Lam
+        close (1)
+      endif
 !
       call keep_compiler_quiet(f)
 !
@@ -155,12 +176,7 @@ module Special
 !
       intent(inout) :: f
 !
-!  energy density of the charged particles
-!
-      ascale=1./(1.+redshift0)
-      Hubble=Hubble0*sqrt(Omega_mat/ascale**3+Omega_Lam+Omega_rad/ascale**4)
-!
-!  initial condition for physical time.
+!  initial condition for lna and physical time.
 !
       tph_init=ascale**2/(2.*Hubble0*Omega_rad**.5)
 !
@@ -252,6 +268,7 @@ module Special
 !
       lna=f_ode(iLCDM_lna)
       tph=f_ode(iLCDM_tph)
+      tphys=tph
 !
 !  dlna/dtph=H, and since dt=dtph/a^nconformal, we have
 !  so dlna/dt=dlna/dtph*dtph/dt=H*dtph/dt=H*a^nconformal.

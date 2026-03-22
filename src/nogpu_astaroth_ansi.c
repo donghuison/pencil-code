@@ -6,7 +6,10 @@
 #include "headers_c.h"
 
 /* ------------------------------------------------------------------- */
-void FTNIZE(initialize_gpu_c)(REAL* f, FINT* comm_fint, double* t)
+void FTNIZE(initialize_gpu_c)(REAL* f, FINT* comm_fint, double* t, int* nt, 
+				FINT* lreads_all_vars_from_device_,
+				FINT* lcpu_timestep_on_gpu_
+				)
 {
 }
 /* ------------------------------------------------------------------- */
@@ -34,10 +37,6 @@ void FTNIZE(after_timestep_gpu_c)()
 {
 }
 /* ---------------------------------------------------------------------- */
-void FTNIZE(source_function_and_opacity_gpu_c)(int *inu)
-{
-}
-/* ------------------------------------------------------------------- */
 void FTNIZE(copy_farray_c)(REAL* f)
 {
 }
@@ -80,15 +79,27 @@ void FTNIZE(torchinfer_c)(FINT* itsub)
 {
 }
 /* ------------------------------------------------------------------- */
-void FTNIZE(torchtrain_c)(REAL *loss)
+void FTNIZE(torchtrain_c)(REAL *loss, FINT* itsub, double *t)
 {
 }
 /* ------------------------------------------------------------------- */
-void FTNIZE(calcq_gpu_c)(int *idir, int *dir, int *stop, int *unit_vec, int *lperiodic)
+void FTNIZE(radtransfer_gpu_c)()
 {
 }
 /* ------------------------------------------------------------------- */
 void FTNIZE(get_gpu_reduced_vars_c)(REAL* dst)
+{
+}
+/* ------------------------------------------------------------------- */
+void FTNIZE(test_bcs_c)(void)
+{
+}
+/* ------------------------------------------------------------------- */
+void FTNIZE(update_after_substep_gpu_c)(void)
+{
+}
+/* ------------------------------------------------------------------- */
+void FTNIZE(split_update_gpu_c)(void)
 {
 }
 /* ------------------------------------------------------------------- */

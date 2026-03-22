@@ -11,9 +11,9 @@
 !
 module FArrayManager
 !
-  use Cparam, only: mvar,maux,mglobal,maux_com,mscratch,max_n_odevars
+  use Cparam, only: mvar,maux,mglobal,maux_com,mscratch,lgpu
   use Cdata, only: nvar,naux,nscratch,nglobal,naux_com,datadir,lroot,lwrite_aux,lreloading, &
-                   n_odevars,f_ode, df_ode, lode
+                   n_odevars,f_ode,df_ode,lode,f_ode_diagnostics
   use HDF5_IO
   use Messages
 !
@@ -154,11 +154,11 @@ module FArrayManager
 !
     endsubroutine farray_register_global
 !***********************************************************************
-    subroutine farray_register_auxiliary(varname,ivar,communicated,on_gpu,vector,array,ierr)
+    subroutine farray_register_auxiliary(varname,ivar,communicated,rhs,read_from_gpu,vector,array,ierr)
 !
 !  Register an auxiliary variable in the f array.
 !
-      use Cdata,  only: maux_vtxbuf_index
+      use Cdata,  only: maux_vtxbuf_index, read_vtxbuf_from_gpu
       use Cparam, only: mfarray
       use General, only: loptest
 !
@@ -167,7 +167,8 @@ module FArrayManager
       logical, optional, intent(in) :: communicated
       integer, optional, intent(in) :: vector, array
       integer, optional, intent(out) :: ierr
-      logical, optional, intent(in) :: on_gpu
+      logical, optional, intent(in) ::  rhs
+      logical, optional, intent(in) :: read_from_gpu
 !
       integer :: vartype
       integer :: vtxbuf_index,i
@@ -180,7 +181,7 @@ module FArrayManager
 !
       call farray_register_variable(varname,ivar,vartype,vector=vector,array=array,ierr=ierr)
 
-      if (loptest(on_gpu)) then
+      if (loptest(rhs) .and. lgpu) then
 
         !TP: first we get the largest non zero index in the index array
         vtxbuf_index = maxval(maux_vtxbuf_index)
@@ -193,14 +194,17 @@ module FArrayManager
           vtxbuf_index = vtxbuf_index+1
         endif
         maux_vtxbuf_index(ivar) = vtxbuf_index
+        read_vtxbuf_from_gpu(ivar) = merge(1,0,loptest(read_from_gpu))
         if (present(array)) then
-                do i = 1,array-1
-                        maux_vtxbuf_index(ivar+i) = vtxbuf_index+i
-                enddo
+          do i = 1,array-1
+            maux_vtxbuf_index(ivar+i) = vtxbuf_index+i
+            read_vtxbuf_from_gpu(ivar+i) = merge(1,0,loptest(read_from_gpu))
+          enddo
         else if (present(vector)) then
-                do i = 1,vector-1
-                        maux_vtxbuf_index(ivar+i) = vtxbuf_index+i
-                enddo
+          do i = 1,vector-1
+            maux_vtxbuf_index(ivar+i) = vtxbuf_index+i
+            read_vtxbuf_from_gpu(ivar+i) = merge(1,0,loptest(read_from_gpu))
+          enddo
         endif
 
       endif
@@ -421,22 +425,16 @@ module FArrayManager
         n_odevars = n_odevars+nvar_
 
       endif
+
     endsubroutine farray_register_ode
 !***********************************************************************
     subroutine farray_finalize_ode
 
-      !TP: We unfortunately seem have to know the dimension of f_ode
-      !    for the dispatching functionality of special.f90 to work for calc_ode_diagnostics_special
-      !    (if using (:) dimensions I get segfaults).
-      !    Lying to the compiler that f_ode has dimension of max_n_odevars in
-      !    the appropriate funcs could work but that seems like a more major sin
-      if (n_odevars > max_n_odevars) then
-          call fatal_error ("farray_finalize_ode", "can have only 100 ode variables at most!")
-      endif
       if (n_odevars>0) then
         lode=.true.
-        allocate(f_ode(max_n_odevars),df_ode(n_odevars))
+        allocate(f_ode(n_odevars),df_ode(n_odevars))
         f_ode=0.
+        if (lgpu) allocate(f_ode_diagnostics(n_odevars))  ! needed for concurrent calcul. of ODE-related diagnostics
       endif
 
     endsubroutine farray_finalize_ode

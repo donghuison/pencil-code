@@ -66,6 +66,7 @@ module Initcond
   public :: strange,phi_siny_over_r2
   public :: ferriere_uniform_x, ferriere_uniform_y
   public :: rotblob, rotblob_yz, pre_stellar_cloud, dipole, dipole_tor, switchback
+  public :: quadrupole, quadrupole2, quadrupole3, dipoleA, dipoleB
   public :: read_outside_scal_array, read_outside_vec_array
 !
   interface posnoise            ! Overload the `posnoise' function
@@ -90,7 +91,7 @@ module Initcond
     module procedure gaunoise_rprof_scal
   endinterface
 !
-  character(LEN=labellen) :: wave_fmt1='(1x,a,4f8.2)'
+  character(LEN=labellen) :: wave_fmt1='(1x,a,e9.2,3f8.2)'
 !
   contains
 !***********************************************************************
@@ -1893,6 +1894,9 @@ module Initcond
           f(l2+1-kx,m1,n1,j+2)=+ampl*aimag(phase_factor_x)
         endif
       endif
+
+      call keep_compiler_quiet(ky)
+      call keep_compiler_quiet(kz)
 !
     endsubroutine beltramik_general
 !***********************************************************************
@@ -2565,14 +2569,13 @@ module Initcond
       real, dimension (mx,my,mz,mfarray) :: f
       real, optional :: kx, ky, kz
       real :: ampl, k=1., fac
-      real :: kx1, ky1, kz1
 !
 !  wavenumber k
 !
 !  set x-dependent cos wave
 !
       if (present(kx)) then
-        k=kx; if (k==0) print*,'coswave: k must not be zero!'
+        k=kx; if (k==0) print*,'coswave: k must not be zero!'; fac=ampl
         if (ampl==0) then
           if (lroot) print*,'coswave: ampl=0; kx=',k
         else
@@ -2874,6 +2877,23 @@ module Initcond
 !
     endsubroutine hawley_etal99a
 !***********************************************************************
+    subroutine error_stratification_dat_size(lnoghost_strati)
+!
+!   For use in subroutine stratification; changes the printed error message
+!   depending on the value of lnoghost_strati
+!
+!   20-Aug-2025/Kishore: coded
+!
+      logical, intent(in) :: lnoghost_strati
+!
+      if (lnoghost_strati) then
+        call fatal_error('stratification','file invalid or too big - ghost cells may have been included')
+      else
+        call fatal_error('stratification','file invalid or too short; ghost cells may be missing')
+      endif
+!
+    endsubroutine error_stratification_dat_size
+!***********************************************************************
     subroutine stratification(f,strati_type)
 !
 !  Read mean stratification from "stratification.dat".
@@ -2883,8 +2903,9 @@ module Initcond
 !  30-apr-16/axel: adapted for polytropic eos
 !  28-jun-19/nishant: added an option to use stratification file without
 !                     the ghost cells; use lnoghost_strati=T in init_pars
+!  20-Aug-2025/Kishore: cleaned up handling of lnoghost_strati (reduced duplicated code)
 !
-      use EquationOfState, only: eoscalc
+      use EquationOfState, only: eoscalc, cs2top, cs2bot
       use Sub, only: write_zprof
       use Cdata, only: lnoghost_strati
 !
@@ -2893,7 +2914,7 @@ module Initcond
       real, dimension (mz) :: lnrho_mz,ss_mz,lnTT_mz
       real :: tmp,var1,var2,var3
       logical :: exist
-      integer :: stat
+      integer :: stat, nmin, nmax, n_top, n_bot
       character (len=labellen) :: strati_type
 !
 !  Read mean stratification and write into array.
@@ -2911,42 +2932,39 @@ module Initcond
         endif
       endif
 !
+      if (lnoghost_strati) then
+        if (lroot) print*,'ghost cells are not needed in stratification.dat'
+        nmin = 1 + nghost
+        nmax = nzgrid + nghost
+      else
+        if (lroot) print*,'ghost cells are needed in stratification.dat'
+        nmin = 1
+        nmax = mzgrid
+      endif
+!
+!     indices of the top/bottom boundary points in an array of size mzgrid
+      n_bot = nghost+1
+      n_top = nzgrid+nghost
+!
 !  Read data - first the entire stratification file.
 !
       select case (strati_type)
 !
       case ('lnrho_ss')
 !
-!NS: added this switch for avoiding ghost cells from stratification file
-!
-       if (lnoghost_strati) then
-          if (lroot) print*,'ghost cells are not needed in stratification.dat'
-          do n=1,nzgrid
-            read(19,*,iostat=stat) tmp,var1,var2
-            if (stat==0) then
-             if (ip<5) print*, 'stratification: z, var1, var2=', tmp, var1, var2
-             if (ldensity) lnrho0(n)=var1
-             if (lentropy) ss0(n)=var2
-            else
-             call fatal_error('stratification','file invalid or too big - ghost cells may have been included')
-            endif
-          enddo
-       else
-          if (lroot) print*,'ghost cells are needed in stratification.dat'
-          do n=1,mzgrid
-            read(19,*,iostat=stat) tmp,var1,var2
-            if (stat==0) then
-             if (ip<5) print*, 'stratification: z, var1, var2=', tmp, var1, var2
-             if (ldensity) lnrho0(n)=var1
-             if (lentropy) ss0(n)=var2
-            else
-             call fatal_error('stratification','file invalid or too short; ghost cells may be missing')
-            endif
-          enddo
-       endif
+      do n=nmin,nmax
+        read(19,*,iostat=stat) tmp,var1,var2
+        if (stat==0) then
+          if (ip<5) print*, 'stratification: z, var1, var2=', tmp, var1, var2
+          if (ldensity) lnrho0(n)=var1
+          if (lentropy) ss0(n)=var2
+        else
+          call error_stratification_dat_size(lnoghost_strati)
+        endif
+      enddo
 !
       case ('lnrho_lnTT')
-        do n=1,mzgrid
+        do n=nmin,nmax
           read(19,*,iostat=stat) tmp,var1,var2
           if (stat==0) then
             if (ip<5) print*, 'stratification: z, var1, var2=', tmp, var1, var2
@@ -2957,12 +2975,12 @@ module Initcond
               ss0(n)=tmp
             endif
           else
-            call fatal_error('stratification','file invalid or too short - ghost cells may be missing')
+            call error_stratification_dat_size(lnoghost_strati)
           endif
         enddo
 !
       case ('lnrho_lnTT_acc')
-        do n=1,mzgrid
+        do n=nmin,nmax
           read(19,*,iostat=stat) tmp,var1,var2,var3
           if (stat==0) then
             if (ip<5) print*, 'stratification: z, var1, var2, var3=', tmp, var1, var2, var3
@@ -2974,19 +2992,18 @@ module Initcond
             endif
             if (lascalar) acc0(n)=var3
           else
-            call fatal_error('stratification','file invalid or too short - ghost cells may be missing')
+            call error_stratification_dat_size(lnoghost_strati)
           endif
         enddo
 !
       case ('lnrho')
-         print*,'NS1:'   !do n=1,nzgrid
-        do n=1,mzgrid
+        do n=nmin,nmax
           read(19,*,iostat=stat) tmp,var1
           if (stat==0) then
             if (ip<5) print*, 'stratification: z, var1=', tmp, var1
             if (ldensity) lnrho0(n)=var1
           else
-            call fatal_error('stratification','file invalid or too short - ghost cells may be missing')
+            call error_stratification_dat_size(lnoghost_strati)
           endif
 !
         enddo
@@ -2994,74 +3011,53 @@ module Initcond
 !
 !  Select the right region for the processor afterwards.
 !
-!--   select case (n)
-!
-!  Without ghost zones.
-!
-!--   case (nzgrid+1)
-      if (n==(nzgrid+1)) then
-        if (lentropy) then
-          do n=n1,n2
-            f(:,:,n,ilnrho)=lnrho0(ipz*nz+(n-nghost))
-            f(:,:,n,iss)=ss0(ipz*nz+(n-nghost))
-          enddo
-        endif
-        if (ltemperature) then
-          do n=n1,n2
-            f(:,:,n,ilnrho)=lnrho0(ipz*nz+(n-nghost))
-            f(:,:,n,ilnTT)=lnTT0(ipz*nz+(n-nghost))
-          enddo
-        endif
-        if (ltemperature.and.lascalar) then
-          do n=n1,n2
-            f(:,:,n,ilnrho)=lnrho0(ipz*nz+(n-nghost))
-            f(:,:,n,ilnTT)=lnTT0(ipz*nz+(n-nghost))
-            f(:,:,n,iacc)=acc0(ipz*nz+(n-nghost))
-          enddo
-        endif
-        if (.not.lentropy.and..not.ltemperature) then
-          do n=n1,n2
-            f(:,:,n,ilnrho)=lnrho0(ipz*nz+(n-nghost))
-          enddo
-        endif
-!
-!  With ghost zones.
-!
-!--   case (mzgrid+1)
-      elseif (n==(mzgrid+1)) then
-        if (lentropy) then
-          do n=1,mz
-            f(:,:,n,ilnrho)=lnrho0(ipz*nz+n)
-            f(:,:,n,iss)=ss0(ipz*nz+n)
-          enddo
-        endif
-        if (ltemperature) then
-          do n=1,mz
-            f(:,:,n,ilnrho)=lnrho0(ipz*nz+n)
-            f(:,:,n,ilnTT)=lnTT0(ipz*nz+n)
-          enddo
-        endif
-        if (.not.lentropy.and..not.ltemperature) then
-          do n=1,mz
-            f(:,:,n,ilnrho)=lnrho0(ipz*nz+n)
-          enddo
-        endif
-!
-!--   case default
+      if (lnoghost_strati) then
+        nmin = n1
+        nmax = n2
       else
-        if (lroot) then
-          print '(A,I4,A,I4,A,I4,A)','ERROR: The stratification file '// &
-                'for this run is allowed to contain either',nzgrid, &
-                ' lines (without ghost zones) or more than',mzgrid, &
-                ' lines (with ghost zones). It does contain',n-1, &
-                ' lines though.'
-        endif
-        call fatal_error('','')
+        nmin = 1
+        nmax = mz
+      endif
 !
-!--   endselect
+      do n=nmin,nmax
+        f(:,:,n,ilnrho)=lnrho0(ipz*nz+n)
+      enddo
+!
+!  Kishore: simplified the below assuming lentropy and ltemperature cannot simultaneously be true.
+!
+      if (lentropy) then
+        do n=nmin,nmax
+          f(:,:,n,iss)=ss0(ipz*nz+n)
+        enddo
+        call eoscalc(ilnrho_ss, lnrho0(n_top), ss0(n_top), cs2=cs2top)
+        call eoscalc(ilnrho_ss, lnrho0(n_bot), ss0(n_bot), cs2=cs2bot)
+      elseif (ltemperature.and..not.lascalar) then
+        do n=nmin,nmax
+          f(:,:,n,ilnTT)=lnTT0(ipz*nz+n)
+        enddo
+        call warning('stratification', &
+          'cs2bot and cs2top are not set according to stratification.dat')
+!  Kishore: since eoscalc_point is not implemented in eos_temperature_ionization,
+!  Kishore: uncommenting the below breaks
+!  Kishore: samples/1d-tests/solar-atmosphere-temperature
+        !call eoscalc(ilnrho_TT, lnrho0(n_top), lnTT0(n_top), cs2=cs2top)
+        !call eoscalc(ilnrho_TT, lnrho0(n_bot), lnTT0(n_bot), cs2=cs2bot)
+      elseif (ltemperature.and.lascalar) then
+        do n=nmin,nmax
+          f(:,:,n,ilnTT)=lnTT0(ipz*nz+n)
+          f(:,:,n,iacc)=acc0(ipz*nz+n)
+        enddo
+        call warning('stratification', &
+          'cs2bot and cs2top are not set according to stratification.dat')
+!  Kishore: leaving this out for now as eoscalc_point is not implemented
+!  Kishore: in eos_idealgas_vapor
+        !call eoscalc(ilnrho_TT, lnrho0(n_top), lnTT0(n_top), cs2=cs2top)
+        !call eoscalc(ilnrho_TT, lnrho0(n_bot), lnTT0(n_bot), cs2=cs2bot)
       endif
 !
 !  occupy profile arrays
+!
+!  Kishore: lnrho_mz seems to never be used
 !
       if (lentropy) then
         do n=1,mz
@@ -3262,7 +3258,7 @@ module Initcond
 !  22-feb-03/axel: fixed 3-D background solution for enthalpy
 !  26-Jul-03/anders: Revived from June 1 version
 !
-      use Mpicomm, only: mpireduce_sum, mpibcast_real, MPI_COMM_WORLD
+      use Mpicomm, only: mpireduce_sum, mpibcast_real, MPI_COMM_PENCIL
 !
       real, dimension (mx,my,mz,mfarray) :: f
       real, dimension (nx) :: hh, xi
@@ -3376,7 +3372,7 @@ module Initcond
 !  Calculate <rho> and send to all processors
 !
       if (lroot) rho0 = exp(-lnrhosum_wholebox/nwgrid)
-      call mpibcast_real(rho0,comm=MPI_COMM_WORLD)
+      call mpibcast_real(rho0,comm=MPI_COMM_PENCIL)
       if (ip<14) print*,'planet_hc: iproc,rho0=',iproc,rho0
 !
 !  Multiply density by rho0 (divide by <rho>)
@@ -3391,7 +3387,7 @@ module Initcond
 !
 !   jun-03/anders: coded (adapted from old 'planet', now 'planet_hc')
 !
-      use Mpicomm, only: mpireduce_sum, mpibcast_real, MPI_COMM_WORLD
+      use Mpicomm, only: mpireduce_sum, mpibcast_real, MPI_COMM_PENCIL
 !
       real, dimension (mx,my,mz,mfarray) :: f
       real, dimension (nx) :: hh, xi, r_ell
@@ -3454,20 +3450,20 @@ module Initcond
 !
         where (r_ell>1.0) hh=-0.5*Omega**2*z(n)**2 + 0.5*Omega**2*ztop**2 + hh0
 !
-!  Calculate velocities (Kepler speed subtracted)
+!  Calculate velocities (Kepler speed subtracted if shear module is used)
 !
-        f(l1:l2,m,n,iux)=   eps2*sigma *Omega*y(m)*xi
-        f(l1:l2,m,n,iuy)=(qshear-sigma)*Omega*x(l1:l2)*xi
+        f(l1:l2,m,n,iux)=f(l1:l2,m,n,iux)+   eps2*sigma *Omega*y(m)*xi
+        f(l1:l2,m,n,iuy)=f(l1:l2,m,n,iuy)+(qshear-sigma)*Omega*x(l1:l2)*xi
 !
 !  calculate density, depending on what gamma is
 !
         if (lentropy) then
-          f(l1:l2,m,n,ilnrho)=(log(gamma_m1*hh/cs20)-gamma*f(l1:l2,m,n,iss))/gamma_m1
+          f(l1:l2,m,n,ilnrho)=f(l1:l2,m,n,ilnrho)+(log(gamma_m1*hh/cs20)-gamma*f(l1:l2,m,n,iss))/gamma_m1
         else
           if (gamma==1.) then
-            f(l1:l2,m,n,ilnrho) = hh/cs20
+            f(l1:l2,m,n,ilnrho) = f(l1:l2,m,n,ilnrho) + hh/cs20
           else
-            f(l1:l2,m,n,ilnrho) = log(gamma_m1*hh/cs20)/gamma_m1
+            f(l1:l2,m,n,ilnrho) = f(l1:l2,m,n,ilnrho) + log(gamma_m1*hh/cs20)/gamma_m1
           endif
         endif
       enddo; enddo
@@ -3491,7 +3487,7 @@ module Initcond
 !  Calculate <rho> and send to all processors
 !
       if (lroot) rho0 = exp(-lnrhosum_wholebox/nwgrid)
-      call mpibcast_real(rho0,comm=MPI_COMM_WORLD)
+      call mpibcast_real(rho0,comm=MPI_COMM_PENCIL)
       if (ip<14) print*,'planet_hc: iproc,rho0=',iproc,rho0
 !
 !  Multiply density by rho0 (divide by <rho>)
@@ -3819,7 +3815,7 @@ module Initcond
 !  (for vector potential, or passive scalar)
 !
 !  14-apr-09/axel: adapted from htube, used in paper with Violaine Auger
-!                  in Vermersch & Brandenburg (2009, AN 330, 797–806).
+!                  in Vermersch & Brandenburg (2009, AN 330, 797-806).
 !
       integer :: i1,i2
       real, dimension (mx,my,mz,mfarray) :: f
@@ -6200,11 +6196,10 @@ module Initcond
       use General, only: loptest, roptest
 !
       real, dimension (mx,my,mz,mfarray) :: f
-      integer :: i, i1a, i1b, i2a, i2b, ikx, iky, ikz, stat, ik, nk, ndim_u, ndim_v
+      integer :: i, i1a, i1b, i2a, i2b, ikx, iky, ikz, stat, ndim_u, ndim_v
       real, dimension (:,:,:,:), allocatable :: u_re, u_im, v_re, v_im
       real, dimension (:,:,:), allocatable :: k1, r
       real, dimension (:), allocatable :: kx, ky, kz
-      real, dimension (:), allocatable :: kk
       real :: ampl, kpeak, deriv_prefactor, scale_factor=1.,ksteepness=5.
 !
       if (ampl==0.) then
@@ -7520,6 +7515,223 @@ module Initcond
       endif
 !
     endsubroutine dipole
+!***********************************************************************
+    subroutine quadrupole(f,ix,amp,r_inner_,r_outer_)
+!
+!  initial vector potential for a
+!  purely poloidal axisymmetric field \vec{B} \sim [f_r \cos\theta, f_\theta \sin\theta, 0]
+!
+!  30-nov-25/axel: adapted from dipole
+!
+      real, dimension (mx,my,mz,mfarray) :: f
+      integer :: ix
+      real :: amp, rpart, rr2, pom2, r_inner, r_outer
+      real, optional :: r_inner_, r_outer_
+      integer :: l,m,n
+!
+      if (present(r_inner_).and.present(r_outer_)) then
+        r_inner=r_inner_
+        r_outer=r_outer_
+      else
+        r_inner=xyz0(1)
+        r_outer=xyz1(1)
+      endif
+!
+!  Dipolar in the z direction in Cartesian coordinates
+!
+      if (lcartesian_coords) then
+        call fatal_error('quadrupole', 'not yet programmed')
+        do n=n1,n2
+        do m=m1,m2
+        do l=l1,l2
+          pom2=x(l)**2+y(m)**2
+          rr2=pom2+z(n)**2
+          if (rr2<=1.) then
+            f(l,m,n,ix+1)=amp*sqrt(pom2)
+          else
+            f(l,m,n,ix+1)=amp*sqrt(pom2/rr2**3)
+          endif
+        enddo
+        enddo
+        enddo
+!
+!  Quadrupole in spherical coordinantes.
+!  Want B_phi=P_1^1(costh)/r^2, so A_r=-P_1(costh)/r
+!
+      elseif (lspherical_coords) then
+        do m = 1,my
+          do l = 1,mx
+            rpart = amp/x(l)
+            f(l,m,:,ix) = rpart*cos(y(m))
+            f(l,m,:,ix+1:ix+2) = 0.
+          enddo
+        enddo
+      endif
+!
+    endsubroutine quadrupole
+!***********************************************************************
+    subroutine quadrupole2(f,ix,amp,r_inner_,r_outer_)
+!
+!  initial vector potential for a
+!  purely poloidal axisymmetric field \vec{B} \sim [f_r \cos\theta, f_\theta \sin\theta, 0]
+!
+!  30-nov-25/axel: adapted from dipole
+!
+      real, dimension (mx,my,mz,mfarray) :: f
+      integer :: ix
+      real :: amp, rpart, rr2, pom2, r_inner, r_outer
+      real, optional :: r_inner_, r_outer_
+      integer :: l,m,n
+!
+      if (present(r_inner_).and.present(r_outer_)) then
+        r_inner=r_inner_
+        r_outer=r_outer_
+      else
+        r_inner=xyz0(1)
+        r_outer=xyz1(1)
+      endif
+!
+!  Dipolar in the z direction in Cartesian coordinates
+!
+      if (lcartesian_coords) then
+        call fatal_error('quadrupole', 'not yet programmed')
+        do n=n1,n2
+        do m=m1,m2
+        do l=l1,l2
+          pom2=x(l)**2+y(m)**2
+          rr2=pom2+z(n)**2
+          if (rr2<=1.) then
+            f(l,m,n,ix+1)=amp*sqrt(pom2)
+          else
+            f(l,m,n,ix+1)=amp*sqrt(pom2/rr2**3)
+          endif
+        enddo
+        enddo
+        enddo
+!
+!  Quadrupole in spherical coordinantes.
+!  Want B_phi=P_1^1(costh)/r^2, so A_r=-P_1(costh)/r
+!
+      elseif (lspherical_coords) then
+        do m = 1,my
+          do l = 1,mx
+            rpart = amp/x(l)**2
+            f(l,m,:,ix+1) = f(l,m,:,ix+1)+rpart*3.*sin(y(m))*cos(y(m))
+          enddo
+        enddo
+      endif
+!
+    endsubroutine quadrupole2
+!***********************************************************************
+    subroutine quadrupole3(f,ix,amp,r_inner_,r_outer_)
+!
+!  initial vector potential for a
+!  purely poloidal axisymmetric field \vec{B} \sim [f_r \cos\theta, f_\theta \sin\theta, 0]
+!
+!  30-nov-25/axel: adapted from dipole
+!
+      real, dimension (mx,my,mz,mfarray) :: f
+      integer :: ix
+      real :: amp, rpart, rr2, pom2, r_inner, r_outer
+      real, optional :: r_inner_, r_outer_
+      integer :: l,m,n
+!
+      if (present(r_inner_).and.present(r_outer_)) then
+        r_inner=r_inner_
+        r_outer=r_outer_
+      else
+        r_inner=xyz0(1)
+        r_outer=xyz1(1)
+      endif
+!
+!  Dipolar in the z direction in Cartesian coordinates
+!
+      if (lcartesian_coords) then
+        call fatal_error('quadrupole', 'not yet programmed')
+        do n=n1,n2
+        do m=m1,m2
+        do l=l1,l2
+          pom2=x(l)**2+y(m)**2
+          rr2=pom2+z(n)**2
+          if (rr2<=1.) then
+            f(l,m,n,ix+1)=amp*sqrt(pom2)
+          else
+            f(l,m,n,ix+1)=amp*sqrt(pom2/rr2**3)
+          endif
+        enddo
+        enddo
+        enddo
+!
+!  Quadrupole in spherical coordinantes.
+!  Want B_phi=P_1^1(costh)/r^2, so A_r=-P_1(costh)/r
+!
+      elseif (lspherical_coords) then
+        do m = 1,my
+          do l = 1,mx
+            rpart = amp/x(l)**4
+            f(l,m,:,ix+2) = f(l,m,:,ix+1)+rpart*3.*sin(y(m))*cos(y(m))
+          enddo
+        enddo
+      endif
+!
+    endsubroutine quadrupole3
+!***********************************************************************
+    subroutine dipoleA(f,ix,amp,r,angle)
+!
+!  initial vector potential for dipole A
+!
+      real, dimension (mx,my,mz,mfarray) :: f
+      integer :: ix
+      real :: amp, rr, r, angle
+!
+      integer :: l,m,n
+!
+      if (lcartesian_coords) then
+        do n=n1,n2
+        do m=m1,m2
+        do l=l1,l2
+          rr=sqrt(x(l)**2+y(m)**2+z(n)**2)
+          if (rr<=r) then
+            f(l,m,n,ix)=f(l,m,n,ix) -(amp*y(m)*cos(angle))
+            f(l,m,n,ix+1)=f(l,m,n,ix+1)+(amp*(x(l)*cos(angle)-z(n)*sin(angle)))
+            f(l,m,n,ix+2)=f(l,m,n,ix+2)+(amp*y(m)*sin(angle))
+          else
+            f(l,m,n,ix)=f(l,m,n,ix)-(amp*y(m)*cos(angle))/(rr)**3
+            f(l,m,n,ix+1)=f(l,m,n,ix+1)+(amp*(x(l)*cos(angle)-z(n)*sin(angle)))/(rr)**3
+            f(l,m,n,ix+2)=f(l,m,n,ix+2)+(amp*y(m)*sin(angle))/(rr)**3
+          endif
+        enddo
+        enddo
+        enddo
+      endif
+!
+    endsubroutine dipoleA
+!
+!***********************************************************************
+    subroutine dipoleB(f,ix,amp,e, angle)
+!
+!  initial vector potential for dipole B
+!
+      real, dimension (mx,my,mz,mfarray) :: f
+      integer :: ix
+      real :: amp, rr, e, angle
+!
+      integer :: l,m,n
+!
+      if (lcartesian_coords) then
+        do n=n1,n2
+        do m=m1,m2
+        do l=l1,l2
+          rr=sqrt(x(l)**2+y(m)**2+z(n)**2)
+          f(l,m,n,ix)=f(l,m,n,ix)-(amp*y(m)*cos(angle))/(rr+e)**3
+          f(l,m,n,ix+1)=f(l,m,n,ix+1)+(amp*(x(l)*cos(angle)-z(n)*sin(angle)))/(rr+e)**3
+          f(l,m,n,ix+2)=f(l,m,n,ix+2)+(amp*y(m)*sin(angle))/(rr+e)**3
+        enddo
+        enddo
+        enddo
+      endif
+!
+    endsubroutine dipoleB
 !***********************************************************************
     subroutine switchback(f,ix,amp,amp2,r_inner_,r_outer_)
 !

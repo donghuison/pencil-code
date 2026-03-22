@@ -46,9 +46,11 @@ GetOptions(\%opts,
            qw( -t   --test
                -b   --backup
                -d   --debug
+               -h   --help
                -v   --version
                )) or die ("Aborting.\n");
 if ($opts{'v'} || $opts{'version'}) { die ('$Id$'."\n"); }
+if ($opts{'h'} || $opts{'help'}) { die ('Usage: ...'."\n"); }
 my $debug = 0;
 if ($opts{'d'} || $opts{'debug'}) { $debug = 1; }
 my $test = 0;
@@ -58,7 +60,7 @@ if ($opts{'b'} || $opts{'backup'}) { $backup = 1; }
 
 # Test if code was compiled
 my $test_result = `$configtest 2>&1`;
-if ($test_result =~ /Please compile first/is) { exit (1); }
+if ($test_result =~ /Please compile first/is) { die ("Please compile 'pc_configtest' first!\n"); }
 
 # Find missing namelists
 my %missing = ();
@@ -114,17 +116,17 @@ foreach my $file (@files) {
 		$change = 1;
 	}
 
-	# Auto-expansion of individual namelists with their mandatory variables
-	foreach my $module (keys (%expansion)) {
+#	# Auto-expansion of individual namelists with their mandatory variables
+#	foreach my $module (keys (%expansion)) {
 ### For now, we stop here.
-last;
-		my %hash = %{$expansion{$module}};
-		foreach my $source (keys (%hash)) {
-			my $target = $modules{$source};
-			my $expand = $hash{$source};
+#last;
+#		my %hash = %{$expansion{$module}};
+#		foreach my $source (keys (%hash)) {
+#			my $target = $modules{$source};
+#			my $expand = $hash{$source};
 ### WORK HERE
-		}
-	}
+#		}
+#	}
 
 	# Rename namelist variables
 	my $num_lines = @lines;

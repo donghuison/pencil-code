@@ -96,9 +96,7 @@ module Magnetic
   real, dimension(3) :: B_ext = 0.0
   real, dimension(3) :: B_ext_inv=(/0.0,0.0,0.0/)
   real, dimension (mz,3) :: aamz
-  real :: inertial_length=0.,linertial_2
   real :: ux_const=0., ampl_uy=0.
-  logical :: lelectron_inertia=.false.
   logical :: lcalc_aameanz=.false., lcalc_aamean=.false.
   logical :: reinitialize_aa=.false.
   logical, dimension(7) :: lresi_dep=.false.
@@ -380,9 +378,6 @@ module Magnetic
 !
     endsubroutine initialize_magnetic
 !***********************************************************************
-    subroutine initialize_magnetic_after_special
-    endsubroutine initialize_magnetic_after_special
-!***********************************************************************
     subroutine init_aa(f)
 !
 !  initialise magnetic condition; called from start.f90
@@ -542,6 +537,20 @@ module Magnetic
       call keep_compiler_quiet(f,df)
 
     endsubroutine daa_dt
+!***********************************************************************
+    subroutine calc_diagnostic_auxiliaries_magnetic(f,p)
+!
+!  Dummy routine
+!
+      real, dimension (mx,my,mz,mfarray) :: f
+      type (pencil_case) :: p
+!
+      intent(in) :: f, p
+!
+      call keep_compiler_quiet(f)
+      call keep_compiler_quiet(p)
+!
+    endsubroutine calc_diagnostic_auxiliaries_magnetic
 !***********************************************************************
     subroutine calc_diagnostics_magnetic(f,p)
 !

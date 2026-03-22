@@ -74,6 +74,8 @@ module Mpicomm
   integer(kind=MPI_OFFSET_KIND) :: size_of_int = 0, size_of_real = 0, size_of_double = 0
   logical :: lcommunicate_y=.false.
 !
+  character(LEN=MPI_MAX_PROCESSOR_NAME), dimension(ncpus) :: nodenames
+!
 !  For f-array processor boundaries
 !
   real, dimension (:,:,:,:), allocatable :: lbufxi,ubufxi,lbufxo,ubufxo
@@ -144,7 +146,7 @@ module Mpicomm
   type (ind_coeffs), dimension(:), allocatable :: intcoeffs
 
   integer, parameter :: LEFT=1, MID=2, RIGHT=3, MIDY=MID, NIL=0
-  integer :: MIDZ=MID, MIDC=MID
+  integer :: MIDZ=MID!, MIDC=MID
   integer :: len_cornbuf, len_cornstrip_y, len_cornstrip_z, ycornstart, zcornstart
   integer, dimension(3) :: yy_buflens
 !
@@ -165,8 +167,7 @@ module Mpicomm
     real, dimension(:), allocatable :: xgrid,ygrid
     integer, dimension(:,:), allocatable :: xind_rng,yind_rng
     character(LEN=5) :: unit_system
-    real :: unit_length, unit_time, unit_BB, unit_T, &
-            renorm_UU, renorm_t, renorm_L
+    real :: unit_length, unit_time, unit_BB, unit_T, renorm_UU, renorm_t, renorm_L
     real, dimension(mx,2) :: xweights
     real, dimension(my,2) :: yweights
     integer, dimension(mx) :: xinds
@@ -180,6 +181,22 @@ module Mpicomm
   contains
 !
 !***********************************************************************
+    subroutine mpicomm_init_min
+!
+! Minimal initialization: size and rank w.r.t. MPI_COMM_WORLD, and derived communicators.
+!
+!  22-Sep-25/MR: coded
+!
+      call MPI_INIT(mpierr)
+      call MPI_COMM_SIZE(MPI_COMM_WORLD, nprocs, mpierr)
+      call MPI_COMM_RANK(MPI_COMM_WORLD, iproc, mpierr)
+      call MPI_COMM_DUP(MPI_COMM_WORLD,MPI_COMM_PENCIL,mpierr)
+      call MPI_COMM_DUP(MPI_COMM_PENCIL,MPI_COMM_GRID,mpierr)
+
+      lroot = (iproc==root)
+
+    endsubroutine mpicomm_init_min
+!***********************************************************************
     subroutine mpicomm_init
 !
 !  Part of the initialization which can be done before input parameters are known.
@@ -192,8 +209,9 @@ module Mpicomm
 !
 !$    integer :: thread_support
       integer :: iapp=0         ! (KIND=ikind8) ?
-      integer :: flag
+      integer :: flag, ndnmlen
       integer :: nprocs_penc
+      character(LEN=MPI_MAX_PROCESSOR_NAME) :: ndname
 !
 !$    call MPI_INIT_THREAD(MPI_THREAD_MULTIPLE,thread_support,mpierr)
 !$    if (thread_support < MPI_THREAD_MULTIPLE) then
@@ -207,6 +225,14 @@ module Mpicomm
 !
       call MPI_COMM_SIZE(MPI_COMM_WORLD, nprocs, mpierr)
       call MPI_COMM_RANK(MPI_COMM_WORLD, iproc, mpierr)
+!
+! Let each process know on which node each process runs in array nodenames (can be exploited for signalling).
+!
+      call MPI_GET_PROCESSOR_NAME(ndname, ndnmlen, mpierr)
+      ndname = ndname(1:ndnmlen)
+      call MPI_ALLGATHER(ndname,MPI_MAX_PROCESSOR_NAME,MPI_CHARACTER,nodenames,MPI_MAX_PROCESSOR_NAME, &
+                         MPI_CHARACTER,MPI_COMM_WORLD,mpierr)
+!
 !if (lroot) print*, 'Pencil0: nprocs,MPI_COMM_WORLD', nprocs, MPI_COMM_WORLD
 !
 ! If mpirun/mpiexec calls also other applications than Pencil:
@@ -290,10 +316,14 @@ module Mpicomm
       if (mod(nxgrid,nprocx)/=0.or. &
           mod(nygrid,nprocy)/=0.or. &
           mod(nzgrid,nprocz)/=0) then
-        if (lroot) &
+        if (lroot) then
+          print*,'nxgrid/nprocx=',real(nxgrid)/real(nprocx)
+          print*,'nygrid/nprocy=',real(nygrid)/real(nprocy)
+          print*,'nzgrid/nprocz=',real(nzgrid)/real(nprocz)
           print*, 'In each dimension the number of grid points has to be '// &
                   'divisible by the number of processors.'
-        call stop_it('mpicomm_init')
+          call stop_it('mpicomm_init')
+        endif
       endif
 !
 !  Avoid overlapping ghost zones.
@@ -673,10 +703,6 @@ module Mpicomm
 !
 !  20-dec-15/MR: coded
 !
-      real, dimension(:,:,:), allocatable :: gridbuf_midy, gridbuf_midz, &  ! contains grid request of direct neighbour(s)
-                                             gridbuf_left, &                !             ~         of left corner neighbour
-                                             gridbuf_right                  !             ~         of right corner neighbour
-
       integer :: patch_neigh_left, patch_neigh_right, patch_neigh_top, patch_neigh_bot
       integer :: ipatch
       logical, save :: lcalled=.false.
@@ -1493,7 +1519,7 @@ print*, 'noks_all,ngap_all,nstrip_total=', noks_all,ngap_all,nstrip_total
 !
       integer :: tolowyr,touppyr,tolowys,touppys,tolowzr,touppzr,tolowzs,touppzs ! msg. tags placeholders
       integer :: TOllr,TOulr,TOuur,TOlur,TOlls,TOuls,TOuus,TOlus                 ! placeholder tags
-      integer :: ivar1, ivar2, nbufy, nbufz, nbufyz, mxl, comm, bufact, dir,mm,j
+      integer :: ivar1, ivar2, nbufy, nbufz, nbufyz, mxl, comm, bufact, dir,mm
 !
       ivar1=1; ivar2=min(mcom,size(f,4))
 
@@ -2338,7 +2364,7 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       real, dimension(:,:,:,:), intent(inout) :: buffer
       integer, intent(in), optional :: ivar1_opt, ivar2_opt
 !
-      integer :: ivar1, ivar2, nbuf, j, nx_loc, nz_loc, nvar_loc
+      integer :: ivar1, ivar2, nbuf, nx_loc, nz_loc, nvar_loc
       integer :: isend_rq, irecv_rq
       integer, dimension (MPI_STATUS_SIZE) :: irecv_stat, isend_stat
       real, dimension(:,:,:,:), allocatable :: bufo,bufi
@@ -2393,7 +2419,7 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       real, dimension(:,:,:,:), intent(inout) :: buffer
       integer, intent(in), optional :: ivar1_opt, ivar2_opt
 !
-      integer :: ivar1, ivar2, nbuf, j, ny_loc, nx_loc, nvar_loc
+      integer :: ivar1, ivar2, nbuf, ny_loc, nx_loc, nvar_loc
       integer :: isend_rq, irecv_rq
       integer, dimension (MPI_STATUS_SIZE) :: irecv_stat, isend_stat
       real, dimension(:,:,:,:), allocatable :: bufo,bufi
@@ -4500,6 +4526,17 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 !
     endsubroutine mpiallreduce_sum_scl
 !***********************************************************************
+    integer function get_comm(idir,comm)
+      integer, optional :: idir,comm
+      if (present(comm)) then
+        get_comm=comm
+      else if (present(idir)) then
+        get_comm=mpigetcomm(idir)
+      else
+        get_comm=MPI_COMM_GRID
+      endif
+    endfunction get_comm
+!***********************************************************************
     subroutine mpiallreduce_sum_arr(fsum_tmp,fsum,nreduce,idir,comm)
 !
 !  Calculate total sum for each array element and return to all processors.
@@ -4514,14 +4551,8 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 !
       if (nreduce==0) return
 !
-      if (present(idir)) then
-        mpiprocs=mpigetcomm(idir)
-      else
-        mpiprocs=MPI_COMM_GRID
-      endif
-!
       call MPI_ALLREDUCE(fsum_tmp, fsum, nreduce, mpi_precision, MPI_SUM, &
-                         mpiprocs, mpierr)
+                         get_comm(idir,comm), mpierr)
 !
     endsubroutine mpiallreduce_sum_arr
 !***********************************************************************
@@ -4539,15 +4570,10 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 !
       if (any(nreduce==0)) return
 !
-      if (present(idir)) then
-        mpiprocs=mpigetcomm(idir)
-      else
-        mpiprocs=MPI_COMM_GRID
-      endif
 !
       num_elements = product(nreduce)
       call MPI_ALLREDUCE(fsum_tmp, fsum, num_elements, mpi_precision, MPI_SUM, &
-                         mpiprocs, mpierr)
+                         get_comm(idir,comm), mpierr)
 !
     endsubroutine mpiallreduce_sum_arr2
 !***********************************************************************
@@ -4565,15 +4591,10 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 !
       if (any(nreduce==0)) return
 !
-      if (present(idir)) then
-        mpiprocs=mpigetcomm(idir)
-      else
-        mpiprocs=MPI_COMM_GRID
-      endif
 !
       num_elements = product(nreduce)
       call MPI_ALLREDUCE(fsum_tmp, fsum, num_elements, mpi_precision, MPI_SUM, &
-                         mpiprocs, mpierr)
+                         get_comm(idir), mpierr)
 !
     endsubroutine mpiallreduce_sum_arr3
 !***********************************************************************
@@ -4591,15 +4612,10 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 !
       if (any(nreduce==0)) return
 !
-      if (present(idir)) then
-        mpiprocs=mpigetcomm(idir)
-      else
-        mpiprocs=MPI_COMM_GRID
-      endif
 !
       num_elements = product(nreduce)
       call MPI_ALLREDUCE(fsum_tmp, fsum, num_elements, mpi_precision, MPI_SUM, &
-                         mpiprocs, mpierr)
+                         get_comm(idir), mpierr)
 !
     endsubroutine mpiallreduce_sum_arr4
 !***********************************************************************
@@ -4617,15 +4633,10 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 !
       if (any(nreduce==0)) return
 !
-      if (present(idir)) then
-        mpiprocs=mpigetcomm(idir)
-      else
-        mpiprocs=MPI_COMM_GRID
-      endif
 !
       num_elements = product(nreduce)
       call MPI_ALLREDUCE(fsum_tmp, fsum, num_elements, mpi_precision, MPI_SUM, &
-                         mpiprocs, mpierr)
+                         get_comm(idir), mpierr)
 !
     endsubroutine mpiallreduce_sum_arr5
 !***********************************************************************
@@ -4901,6 +4912,24 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 !
     endsubroutine mpireduce_max_arr
 !***********************************************************************
+    subroutine mpireduce_max_arr2(fmax_tmp,fmax,nreduce,comm)
+!
+!  Calculate total maximum for each array element and return to root.
+!
+      integer, dimension(2)  :: nreduce
+      real, dimension(nreduce(1),nreduce(2)) :: fmax_tmp,fmax
+      integer, optional :: comm
+!
+      integer :: num_elements
+!
+      if (any(nreduce==0)) return
+!
+      num_elements = product(nreduce)
+      call MPI_REDUCE(fmax_tmp, fmax, num_elements, mpi_precision, MPI_MAX, root, &
+                      ioptest(comm,MPI_COMM_GRID), mpierr)
+!
+    endsubroutine mpireduce_max_arr2
+!***********************************************************************
     subroutine mpireduce_min_scl(fmin_tmp,fmin,comm)
 !
 !  Calculate total minimum for each array element and return to root.
@@ -4915,7 +4944,7 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 !***********************************************************************
     subroutine mpireduce_min_arr(fmin_tmp,fmin,nreduce,comm)
 !
-!  Calculate total maximum for each array element and return to root.
+!  Calculate total minimum for each array element and return to root.
 !
       integer :: nreduce
       real, dimension(nreduce) :: fmin_tmp,fmin
@@ -5110,6 +5139,10 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
           inplace_opt=.false.
         endif
         num_elements = product(nreduce)
+        ! 2025-Nov-24/Kishore: I think this should be
+        ! `if (inplace_opt .and. lroot) then`
+        ! since MPI_IN_PLACE is only supposed to be used for the root
+        ! process' sendbuf (https://www.open-mpi.org/doc/current/man3/MPI_Reduce.3.php)
         if (inplace_opt) then
           call MPI_REDUCE(MPI_IN_PLACE, fsum, num_elements, mpi_precision, &
                           MPI_SUM, root, mpiprocs, mpierr)
@@ -5121,17 +5154,19 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 !
     endsubroutine mpireduce_sum_arr2
 !***********************************************************************
-    subroutine mpireduce_sum_arr3(fsum_tmp,fsum,nreduce,idir)
+    subroutine mpireduce_sum_arr3(fsum_tmp,fsum,nreduce,idir,inplace)
 !
 !  Calculate total sum for each array element and return to root.
 !
       integer, dimension(3) :: nreduce
       real, dimension(nreduce(1),nreduce(2),nreduce(3)) :: fsum_tmp,fsum
       integer, optional :: idir
+      logical, optional :: inplace
 !
       integer :: mpiprocs, num_elements
+      logical :: inplace_opt
 !
-      intent(in)  :: fsum_tmp,nreduce
+      intent(in)  :: fsum_tmp,nreduce,inplace
       intent(out) :: fsum
 !
       if (any(nreduce==0)) return
@@ -5144,9 +5179,19 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
         else
           mpiprocs=MPI_COMM_GRID
         endif
+        if (present(inplace)) then
+          inplace_opt=inplace
+        else
+          inplace_opt=.false.
+        endif
         num_elements = product(nreduce)
-        call MPI_REDUCE(fsum_tmp, fsum, num_elements, mpi_precision, MPI_SUM, &
+        if (inplace_opt .and. lroot) then
+          call MPI_REDUCE(MPI_IN_PLACE, fsum, num_elements, mpi_precision, MPI_SUM, &
                         root, mpiprocs, mpierr)
+        else
+          call MPI_REDUCE(fsum_tmp, fsum, num_elements, mpi_precision, MPI_SUM, &
+                        root, mpiprocs, mpierr)
+        endif
       endif
 !
     endsubroutine mpireduce_sum_arr3
@@ -5317,6 +5362,17 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       call MPI_BARRIER(ioptest(comm,MPI_COMM_PENCIL), mpierr)
 !
     endsubroutine mpibarrier
+!***********************************************************************
+    subroutine mpifinalize_min
+!
+!  Minimal finalizing.
+!
+!  22-Sep-25/MR: coded
+!
+      call MPI_BARRIER(MPI_COMM_WORLD, mpierr)
+      call MPI_FINALIZE(mpierr)
+
+    endsubroutine mpifinalize_min
 !***********************************************************************
     subroutine mpifinalize
 !
@@ -5519,6 +5575,68 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 !
     endsubroutine check_emergency_brake
 !***********************************************************************
+    subroutine transp_single_proc(a,var)
+!
+!  Doing a transpose (dummy version for single processor).
+!
+!   5-sep-02/axel: adapted from version in mpicomm.f90
+!   5-sep-25/TP:   copied from nompicomm.f90 here to enable the more general transposing
+!                  for a single proc (don't have to have nxgrid == nzgrid) needed for 1d-tests/jeans-x
+!
+      real, dimension(nx,ny,nz) :: a
+      real, dimension(:,:), allocatable :: tmp
+      character :: var
+!
+      integer :: m, n, iy, ibox
+!
+      if (ip<10) print*, 'transp for single processor'
+!
+!  Doing x-y transpose if var='y'
+!
+      if (var=='y') then
+        if (nygrid/=1) then
+!
+          if (mod(nx,ny)/=0) then
+            if (lroot) print*, 'transp: works only if nx is an integer '//&
+                 'multiple of ny!'
+            call stop_it('transp')
+          endif
+!
+          allocate (tmp(nx,ny))
+          do n=1,nz
+            do ibox=0,nx/nygrid-1
+              iy=ibox*ny
+              tmp=transpose(a(iy+1:iy+ny,:,n))
+              a(iy+1:iy+ny,:,n)=tmp
+            enddo
+          enddo
+          deallocate (tmp)
+!
+        endif
+!
+!  Doing x-z transpose if var='z'
+!
+      elseif (var=='z') then
+        if (nzgrid/=1) then
+!
+          if (nx/=nz) then
+            if (lroot) print*, 'transp: works only for nx=nz!'
+            call stop_it('transp')
+          endif
+!
+          allocate (tmp(nx,nz))
+          do m=1,ny
+            tmp=transpose(a(:,m,:))
+            a(:,m,:)=tmp
+          enddo
+          deallocate (tmp)
+!
+        endif
+!
+      endif
+!
+    endsubroutine transp_single_proc
+!***********************************************************************
     subroutine transp(a,var, comm, lsync)
 !
 !  Doing the transpose of information distributed on several processors
@@ -5530,6 +5648,7 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 !  26-oct-02/axel: comments added
 !   6-jun-03/axel: works now also in 2-D (need only nxgrid=nygrid)
 !   5-oct-06/tobi: generalized to nxgrid = n*nygrid
+!   25-sep-25/TP:  added the easy case where we have one proc
 !
 ! TODO: Implement nxgrid = n*nzgrid
 !
@@ -5548,6 +5667,10 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 !
 !  Doing x-y transpose if var='y'
 !
+      if (nprocx*nprocy*nprocz == 1) then
+              call transp_single_proc(a,var)
+              return
+      endif
       if (loptest(lsync,.true.)) then
         !$omp barrier
       endif
@@ -6611,7 +6734,7 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 !
     endsubroutine distribute_xy_2D
 !***********************************************************************
-    subroutine distribute_yz_3D(out, in, comm)
+    subroutine distribute_yz_3D(out, in, comm_)
 !
 !  This routine divides a large array of 3D data on the source processor
 !  and distributes it to all processors in the yz-plane.
@@ -6620,7 +6743,8 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 !
       real, dimension(:,:,:), intent(out):: out
       real, dimension(:,:,:), intent(in) :: in
-      integer, optional :: comm
+      integer, optional :: comm_
+      integer :: comm
 !
       integer :: bnx, bny, bnz ! transfer box sizes
       integer :: pz, py, partner, nbox
@@ -6630,6 +6754,8 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       bnx = size (out, 1)
       bny = size (out, 2)
       bnz = size (out, 3)
+
+      comm = ioptest(comm_,MPI_COMM_YZPLANE)
 !
       if (lfirst_proc_yz) then
 
@@ -6656,13 +6782,13 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
             else
               ! send to partner
               out = in(:,py*bny+1:(py+1)*bny,pz*bnz+1:(pz+1)*bnz)
-              call MPI_SEND (out, nbox, mpi_precision, partner, ytag, MPI_COMM_YZPLANE, mpierr)
+              call MPI_SEND (out, nbox, mpi_precision, partner, ytag, comm, mpierr)
             endif
           enddo
         enddo
       else
         ! receive from broadcaster
-        call MPI_RECV (out, nbox, mpi_precision, 0, ytag, MPI_COMM_YZPLANE, stat, mpierr)
+        call MPI_RECV (out, nbox, mpi_precision, 0, ytag, comm, stat, mpierr)
       endif
 !
     endsubroutine distribute_yz_3D
@@ -9771,52 +9897,34 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 !
     endsubroutine collect_grid
 !***********************************************************************
-    subroutine distribute_grid(x, y, z, gx, gy, gz)
-!
-!  This routine distributes the global grid to all processors
-!  (concurrent communications).
-!
-!  16-jan-2023/MR: coded
-!
-      use General, only: indgen
-!
-      real, dimension(mx), intent(out) :: x
-      real, dimension(my), intent(out) :: y
-      real, dimension(mz), intent(out) :: z
-      real, dimension(mxgrid), intent(in), optional :: gx
-      real, dimension(mygrid), intent(in), optional :: gy
-      real, dimension(mzgrid), intent(in), optional :: gz
-!
-      if (lfirst_proc_yz) then    ! x-beam through root
-        if (lroot) then
-          call mpiscatterv_real_plain(gx,spread(mx,1,nprocx),(indgen(nprocx)-1)*nx,x,mx,comm=MPI_COMM_XBEAM)
-        else
-          call mpiscatterv_real_plain(x,(/1/),(/1/),x,mx,comm=MPI_COMM_XBEAM)
-        endif
-      endif
-!
-      if (lfirst_proc_xz) then    ! y-beam through root
-        if (lroot) then
-          call mpiscatterv_real_plain(gy,spread(my,1,nprocy),(indgen(nprocy)-1)*ny,y,my,comm=MPI_COMM_YBEAM)
-        else
-          call mpiscatterv_real_plain(y,(/1/),(/1/),y,my,comm=MPI_COMM_YBEAM)
-        endif
-      endif
-!
-      if (lfirst_proc_xy) then    ! z-beam through root
-        if (lroot) then
-          call mpiscatterv_real_plain(gz,spread(mz,1,nprocz),(indgen(nprocz)-1)*nz,z,mz,comm=MPI_COMM_ZBEAM)
-        else
-          call mpiscatterv_real_plain(z,(/1/),(/1/),z,mz,comm=MPI_COMM_ZBEAM)
-        endif
-      endif
-
-      call mpibcast_real(x,mx,comm=MPI_COMM_YZPLANE)
-      call mpibcast_real(y,my,comm=MPI_COMM_XZPLANE)
-      call mpibcast_real(z,mz,comm=MPI_COMM_XYPLANE)
-!
-    endsubroutine distribute_grid
-!***********************************************************************
+!NOT USED SO ON COMMENT
+!    subroutine distribute_grid(x, y, z, gx, gy, gz)
+!!
+!!  This routine distributes the global grid to all processors
+!!  (concurrent communications).
+!!
+!!  16-jan-2023/MR: coded
+!!
+!      use General, only: indgen
+!!
+!      real, dimension(mx), intent(out) :: x
+!      real, dimension(my), intent(out) :: y
+!      real, dimension(mz), intent(out) :: z
+!      real, dimension(mxgrid), intent(inout) :: gx
+!      real, dimension(mygrid), intent(inout) :: gy
+!      real, dimension(mzgrid), intent(inout) :: gz
+!!
+!      call mpibcast_real (gx, mxgrid, comm=MPI_COMM_WORLD)
+!      x = gx(1+ipx*nx:nx+2*nghost+ipx*nx)
+!!
+!      call mpibcast_real (gy, mygrid, comm=MPI_COMM_WORLD)
+!      y = gy(1+ipy*ny:ny+2*nghost+ipy*ny)
+!!
+!      call mpibcast_real (gz, mzgrid, comm=MPI_COMM_WORLD)
+!      z = gz(1+ipz*nz:nz+2*nghost+ipz*nz)
+!!
+!    endsubroutine distribute_grid
+!!***********************************************************************
     subroutine y2x(a,xi,zj,zproc_no,ay)
 !
 !  Load the y dimension of an array in a 1-d array.
@@ -9931,55 +10039,51 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 !
     endsubroutine mpigather_z
 !***********************************************************************
-    subroutine mpigather( sendbuf, recvbuf , comm)
+    subroutine mpigather(sendbuf, recvbuf, comm)
 !
 !  Gathers the chunks of a 3D array from each processor in a big array at root.
 !
-!  Here no parallelization in x allowed.
-!
 !  19-nov-10/MR: coded
+!  22-Oct-2025/Kishore: support parallelization in x direction.
 !
-      real, dimension(nxgrid,ny,nz):: sendbuf   ! nx=nxgrid !
-      real, dimension(:,:,:)       :: recvbuf
-      integer, optional :: comm
+      use General, only: find_proc_coords
 !
-      integer :: ncnt, i
+      real, dimension(nx,ny,nz), intent(in) :: sendbuf
+      real, dimension(:,:,:), intent(out) :: recvbuf
+      integer, optional, intent(in) :: comm
+!
+      integer :: iy, iz, i, ipx, ipy, ipz
 !
 !  MR: These long integer variables would be necessary for big nxgrid*nygrid,
 !      but there is no MPI_GATHERV which would accept a long int shifts argument.
 !
-      integer(KIND=ikind8) :: nlayer, nshift
+      integer(KIND=ikind8) :: nlayer, nlayer_y
       integer(KIND=ikind8), dimension(ncpus) :: shifts
       integer, dimension(ncpus) :: counts
-!
-      ncnt = nxgrid*ny
 !
       if (lroot) then
 !
         nlayer = nz*int8(nxgrid)*int8(nygrid)
         if (nlayer>max_int) &
           call stop_it("mpigather: integer overflow in shifts")
-        counts = ncnt
 !
-        shifts(1) = 0
-        nshift = nlayer
+        nlayer_y = int8(nxgrid)*ny
+        counts = nx
 !
-        do i=2,ncpus
-!
-          if ( mod(i,nprocy)==1 ) then
-            shifts(i) = nshift
-            nshift = nshift+nlayer
-          else
-            shifts(i) = shifts(i-1)+ncnt
-          endif
-!
+        do i=1,ncpus
+          call find_proc_coords(i-1,ipx,ipy,ipz)
+          shifts(i) = ipz*nlayer + ipy*nlayer_y + ipx*nx
         enddo
 !
       endif
 !
-      do i=1,nz
-        call MPI_GATHERV(sendbuf(1,1,i), ncnt, mpi_precision, recvbuf(1,1,i), counts, int(shifts), &
-                         mpi_precision, root, ioptest(comm,MPI_COMM_GRID), mpierr)
+      do iz=1,nz
+        do iy=1,ny
+          !TODO: on SNG, segfault below; invalid memory access. I suspect the issue is an integer overflow in shifts (which would explain why it doesn't show up in smaller runs), but not really sure how to get around this.
+          call MPI_GATHERV(sendbuf(1,iy,iz), nx, mpi_precision, &
+            recvbuf(1,iy,iz), counts, int(shifts), mpi_precision, &
+            root, ioptest(comm,MPI_COMM_GRID), mpierr)
+        enddo
       enddo
 !
     endsubroutine mpigather

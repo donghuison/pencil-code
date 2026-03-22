@@ -13,7 +13,7 @@
 ! MVAR CONTRIBUTION 0
 ! MAUX CONTRIBUTION 0
 !
-! PENCILS PROVIDED fcont(3,n_forcing_cont_max)
+! PENCILS PROVIDED fcont(3,n_forcing_cont_max); curlfcont(3,n_forcing_cont_max)
 !
 !***************************************************************
 module Forcing
@@ -98,6 +98,7 @@ module Forcing
       type (pencil_case) :: p
 !
       if (lpencil(i_fcont)) p%fcont=0.
+      if (lpencil(i_curlfcont)) p%curlfcont=0.
 !
       call keep_compiler_quiet(f)
 !
@@ -112,18 +113,6 @@ module Forcing
       call keep_compiler_quiet(p)
 !
     endsubroutine calc_diagnostics_forcing
-!***********************************************************************
-    subroutine forcing_continuous(df,p)
-!
-!  dummy routine
-!
-      real, dimension (mx,my,mz,mvar) :: df
-      type (pencil_case) :: p
-!
-      call keep_compiler_quiet(df)
-      call keep_compiler_quiet(p)
-!
-    endsubroutine forcing_continuous
 !***********************************************************************
     subroutine forcing_cont(force)
 !

@@ -52,7 +52,8 @@ program remesh
   use Common
   use Mpicomm
   use Syscalls, only: system_cmd
-  use General   !, only: get_from_nml_str,get_from_nml_real,get_from_nml_log,convert_nml
+  use General, only: get_from_nml_str,get_from_nml_real,get_from_nml_log,convert_nml, &
+                     find_proc_general, find_proc_coords_general, itoa, notanumber
   use Messages, only: memory_usage
   use Posix
 !
@@ -74,9 +75,9 @@ program remesh
   integer, dimension (mprocs) :: cpu_global
 
   real, dimension(:,:,:,:), allocatable :: acoll, a
-  real, dimension(mxcoll) :: xcoll
-  real, dimension(mycoll) :: ycoll
-  real, dimension(mzcoll) :: zcoll
+  real, dimension(mxcoll) :: xcoll,dxcoll_1,dxcoll_tilde
+  real, dimension(mycoll) :: ycoll,dycoll_1,dycoll_tilde
+  real, dimension(mzcoll) :: zcoll,dzcoll_1,dzcoll_tilde
 
 ! SC: added axtra dimension in x direction to 'f' array
   real, dimension (mmx_grid,mmy_grid,mmz_grid,mvar) :: f
@@ -84,9 +85,9 @@ program remesh
   real, dimension (mmx_grid) :: rx,rdx_1,rdx_tilde
   real, dimension (mmy_grid) :: ry,rdy_1,rdy_tilde
   real, dimension (mmz_grid) :: rz,rdz_1,rdz_tilde
-  real, dimension (mmx,mprocs) :: rrx
-  real, dimension (mmy,mprocs) :: rry
-  real, dimension (mmz,mprocs) :: rrz
+  real, dimension (mmx,mprocs) :: rrx,rrdx_1,rrdx_tilde
+  real, dimension (mmy,mprocs) :: rry,rrdy_1,rrdy_tilde
+  real, dimension (mmz,mprocs) :: rrz,rrdz_1,rrdz_tilde
   real :: tdummy, t_sp
   real :: facx, facy, facz, x0loc, y0loc, z0loc, w1, w2,dang,dang_old
   integer :: cpu_local,iyy,icpu,out_size,io_len
@@ -100,9 +101,10 @@ program remesh
 
   integer(kind=ikind8) :: mmw=mmx*mmy*mmz, mmw_grid=mmx_grid*mmy_grid*mmz_grid, mwcoll=mxcoll*mycoll*mzcoll
 
-  call mpicomm_init
+  call mpicomm_init_min
+
   if (lroot) print*,'Per process memory for arrays f:',mmw_grid*mvar,', ff:',mmw*mvar*mprocs, &
-             ', acoll:',mvar*mwcoll,' (Multiply with number of bytes per element!)'
+                    ', acoll:',mvar*mwcoll,' (Multiply with number of bytes per element!)'
 
   if (divx<=0) then
     if (lroot) print*, 'Error: divx<=0 not allowed, set it to 1!'
@@ -136,18 +138,19 @@ program remesh
     lstop=.true.
   endif
 
-  if (lstop) then
-    call mpifinalize
-    stop
-  endif
-
   if (lroot) then 
     clperi=get_from_nml_str('LPERI',trim(datadir)//'/param2.nml',lvec=.true.)
     if (clperi=='') then
       print*, 'lperi could not be identified!'
-      stop
+      lstop=.true.
     endif
   endif
+
+  if (lstop) then
+    call mpifinalize_min
+    stop
+  endif
+
   call mpibcast(clperi)
   call convert_nml(trim(clperi),lperi)
 !
@@ -168,6 +171,7 @@ program remesh
       rel_dang=get_from_nml_real('REL_DANG',lexist,trim(datadir)//'/param2.nml')
       if (.not.lexist) then
         print*, 'rel_dang could not be identified!'
+        call mpifinalize_min
         stop
       endif
     endif
@@ -233,7 +237,7 @@ program remesh
       call safe_character_assign(dimfile,trim(datadir)//'/dim.dat')
       if (ip<8) print*,'Reading '//trim(dimfile)
       open(1,FILE=dimfile,FORM='formatted')
-      read(1,*) dummy,dummy,dummy,dummy,dummy
+      read(1,*) dummy
       read(1,*) prec
       close(1)
     endif
@@ -244,17 +248,22 @@ program remesh
    layout_src=(/nprocx,nprocy,nprocz/)
    if (any(mod((/mulx*layout_src(1),muly*layout_src(2),mulz*layout_src(3)/),(/divx,divy,divz/)) /= 0)) then
      if (lroot) print*, 'div[xyz] results in non-integer destination proc number!'
-     call mpibarrier
+     call mpifinalize_min
      stop
    endif
 
    layout_dst=(/mulx*layout_src(1)/divx,muly*layout_src(2)/divy,mulz*layout_src(3)/divz/)
    layout_rem=layout_src/(/divx,divy,divz/)    ! proc layout for remesh.x
    nprocs_rem=product(layout_rem)              ! number of processors for remesh.x
-
+   if (lroot) then
+     print*, 'Processor layouts of source     :', layout_src
+     print*, '                     destination:', layout_dst
+     print*, '                     remesh prog:', layout_rem
+     flush(6)
+   endif
    if (nprocs>1 .and. nprocs/=nprocs_rem) then
      if (lroot) print*, 'Inappropriate number of ranks: nprocs/=nprocs_rem', nprocs,nprocs_rem
-     call mpibarrier
+     call mpifinalize_min
      stop
    endif
 !
@@ -294,21 +303,21 @@ program remesh
       if (lperi(1)) then
         facx=1./remesh_parx
       else
-        facx=(nxgrid-1.)/(remesh_parx*nxgrid-1.)    ! because dx=Lx/(nxgrid-1) !
+        facx=(nxgrid-1)/(remesh_parx*nxgrid-1.)    ! because dx=Lx/(nxgrid-1) !
       endif
     endif
     if (remesh_pary/=1.) then
       if (lperi(2)) then
         facy=1./remesh_pary
       else
-        facy=(nygrid-1.)/(remesh_pary*nygrid-1.)
+        facy=(nygrid-1)/(remesh_pary*nygrid-1.)
       endif
     endif
     if (remesh_parz/=1.) then
       if (lperi(3)) then
         facz=1./remesh_parz
       else
-        facz=(nzgrid-1.)/(remesh_parz*nzgrid-1.)
+        facz=(nzgrid-1)/(remesh_parz*nzgrid-1.)
       endif
     endif
 
@@ -357,23 +366,22 @@ yinyang_loop: &
 !
       ip=10
       call chn(srcproc,ch)
-      call safe_character_assign(file,&
-          trim(datadir)//'/proc'//trim(ch)//'/'//trim(varfile))
+      call safe_character_assign(file,trim(datadir)//'/proc'//trim(ch)//'/'//trim(varfile))
       if (lroot.and.ip<8) print*,'Reading '//trim(file)
 !
 ! Check for existence of varfile.
 !
       inquire(FILE=trim(file),EXIST=lexist)
-!print*,'varfile=',icpu,trim(file)
       if (lexist) then
 !
 !  File found for iyy=ncpus, i.e. iproc=ncpus --> a Yin-Yang grid supposed.
 !
         if (lyinyang.and.iyy==ncpus.and..not.lyang) then
           lyang=.true.
-          print*, 'This run is treated as a Yin-Yang one!'
+          if (lroot) print*, 'This run is treated as a Yin-Yang one!'
           if (muly/=mulz) then
             if (lroot) print*, 'muly/=mulz --> nprocz=3*nprocy violated for new layout!'
+            call mpifinalize_min
             stop
           endif
         endif
@@ -393,7 +401,7 @@ yinyang_loop: &
       endif
 
       !print*,'Remeshing processor',cpu+1,'of',ncpus+iyy,'processors'
-      if (lyang) print*, '(Yang grid)'
+      if (lroot.and.lyang) print*, '(Yang grid)'
 !
 !  Read varfile (this is typically var.dat).
 !
@@ -411,7 +419,7 @@ yinyang_loop: &
       lshort=.not.lshear
       if (lshear) then
         read(1,err=991) t_sp,x,y,z,dx,dy,dz,deltay
-        print*,'read deltay=',deltay
+        if (lroot) print*,'read deltay=',deltay
         goto 993
 !
 !  this is the end of the program.
@@ -429,7 +437,7 @@ yinyang_loop: &
         read(1,err=994,end=994) t_sp,x,y,z,dx,dy,dz
         goto 993
 994     continue
-        print*,'lshear,t_sp=',lshear,t_sp
+        if (lroot) print*,'lshear,t_sp=',lshear,t_sp
         !backspace(1)
         !read(1) t_sp !,x,y,z !,dx,dy,dz
       endif
@@ -447,11 +455,12 @@ yinyang_loop: &
       read(1) dx,dy,dz
       read(1) Lx,Ly,Lz
       read(1) dx_1,dy_1,dz_1
+      read(1) dx_tilde,dy_tilde,dz_tilde
       close(1)
 
-      xcoll(i1x:i2x)=x
-      ycoll(i1y:i2y)=y
-      zcoll(i1z:i2z)=z
+      xcoll(i1x:i2x)=x; dxcoll_1(i1x:i2x)=dx_1; dxcoll_tilde(i1x:i2x)=dx_tilde
+      ycoll(i1y:i2y)=y; dycoll_1(i1y:i2y)=dy_1; dycoll_tilde(i1y:i2y)=dy_tilde
+      zcoll(i1z:i2z)=z; dzcoll_1(i1z:i2z)=dz_1; dzcoll_tilde(i1z:i2z)=dz_tilde
 
       i1x=i1x+nx; i2x=i2x+nx; 
       enddo
@@ -518,7 +527,7 @@ yinyang_loop: &
           rx(ll2+i)=rx(ll2)+i*dx
         enddo
       else
-        rx(1:mx)=xcoll(1:mx); rdx_1(1:mx)=dx_1; rdx_tilde(1:mx)=dx_tilde
+        rx=xcoll; rdx_1=dxcoll_1; rdx_tilde=dxcoll_tilde
       endif
 !     
       if (remesh_pary/=1.) then
@@ -546,7 +555,7 @@ yinyang_loop: &
           ry(mm2+i)=ry(mm2)+i*dy
         enddo
       else
-        ry(1:my)=ycoll(1:my); rdy_1(1:my)=dy_1; rdy_tilde(1:my)=dy_tilde
+        ry=ycoll; rdy_1=dycoll_1; rdy_tilde=dycoll_tilde
       endif
 !
       if (remesh_parz/=1.) then
@@ -574,7 +583,7 @@ yinyang_loop: &
           rz(nn2+i)=rz(nn2)+i*dz
         enddo
       else
-        rz(1:mz)=zcoll(1:mz); rdz_1(1:mz)=dz_1; rdz_tilde(1:mz)=dz_tilde
+        rz=zcoll; rdz_1=dzcoll_1; rdz_tilde=dzcoll_tilde
       endif
 !
 !  Interpolating f-array to increased number of mesh points if only one
@@ -727,6 +736,12 @@ yinyang_loop: &
               rrx(:,cpu_local)=rx(xstart:xstop)
               rry(:,cpu_local)=ry(ystart:ystop)
               rrz(:,cpu_local)=rz(zstart:zstop)
+              rrdx_1(:,cpu_local)=rdx_1(xstart:xstop)
+              rrdy_1(:,cpu_local)=rdy_1(ystart:ystop)
+              rrdz_1(:,cpu_local)=rdz_1(zstart:zstop)
+              rrdx_tilde(:,cpu_local)=rdx_tilde(xstart:xstop)
+              rrdy_tilde(:,cpu_local)=rdy_tilde(ystart:ystop)
+              rrdz_tilde(:,cpu_local)=rdz_tilde(zstart:zstop)
 !--             endif
             enddo
           enddo
@@ -740,7 +755,7 @@ yinyang_loop: &
 !
 !  Smoothing data if any of the remesh_par* is unequal to 1.
 !
-      if (any((/remesh_parx,remesh_pary,remesh_parz/)/=1.)) then
+      if (any((/remesh_parx,remesh_pary,remesh_parz/)/=1)) then
         do j=1,mprocs
           do i=1,mvar
             call rmwig(ff(:,:,:,:,j),i,1.,.false.)
@@ -770,12 +785,14 @@ yinyang_loop: &
           call safe_character_assign(file_new,trim(datadir)//'/proc'//trim(ch)//'/var.dat')
           call safe_character_assign(file2,trim(destination)//'/'//trim(file_new))
           if (ip<8) print*,'Writing '//trim(file2)
+!print*,'Writing '//trim(file2)//' from proc ', iproc
 !print*, 'cpu, cpu_global, rrx=', cpu, cpu_global(i), rrx(:,i)
+        if (notanumber(ff(:,:,:,:,i))) print*,'notanumber in ff: target proc', i
           open(91,file=file2,form='unformatted')
           write(91) ff(:,:,:,:,i)
           if (lshear) then
             write(91) t_sp,rrx(:,i),rry(:,i),rrz(:,i),dx,dy,dz,deltay
-            print*,'wrote deltay=',deltay
+            if (lroot) print*,'wrote deltay=',deltay
           else
             write(91) t_sp,rrx(:,i),rry(:,i),rrz(:,i),dx,dy,dz
           endif
@@ -819,8 +836,8 @@ yinyang_loop: &
         write(1) t_sp,rrx(:,i),rry(:,i),rrz(:,i),dx,dy,dz
         write(1) dx,dy,dz
         write(1) Lx,Ly,Lz
-        write(1) rdx_1,rdy_1,rdz_1
-        write(1) rdx_tilde,rdy_tilde,rdz_tilde
+        write(1) rrdx_1(:,i),rrdy_1(:,i),rrdz_1(:,i)
+        write(1) rrdx_tilde(:,i),rrdy_tilde(:,i),rrdz_tilde(:,i)
         close(1)
       enddo
 !
@@ -839,7 +856,7 @@ yinyang_loop: &
   call mpibarrier
   call memory_usage
 
-  call mpifinalize
+  call mpifinalize_min
 !
 endprogram remesh
 !***********************************************************************
@@ -854,7 +871,6 @@ endprogram remesh
 !  30-Aug-02/wolf: coded
 !  12-nov-02/nils: adapted from equ.f90
 !
-      use Cdata
       use Common
 !
       real, dimension (mmx,mmy,mmz,mvar) :: f,df
@@ -886,7 +902,6 @@ endprogram remesh
 !  30-Aug-02/wolf: coded
 !  12-nov-02/nils: adapted from equ.f90
 !
-      use Cdata
       use Common
 !
       real, dimension (mmx,mmy,mmz,mvar) :: f,df
@@ -899,7 +914,7 @@ endprogram remesh
 !
       if (explog) then
         f(:,:,:,ivar)=exp(f(:,:,:,ivar))
-        if(lroot) print*,'RMWIG: turn f into exp(f), ivar=',ivar
+        if (lroot) print*,'RMWIG: turn f into exp(f), ivar=',ivar
       endif
 !
 !  x, y, and z directions
@@ -912,7 +927,7 @@ endprogram remesh
 !
       if (explog) then
         f(lll1:lll2,mmm1:mmm2,nnn1:nnn2,ivar)=alog(f(lll1:lll2,mmm1:mmm2,nnn1:nnn2,ivar))
-        if(lroot) print*,'RMWIG: turn f back into alog(f), ivar=',ivar
+        if (lroot) print*,'RMWIG: turn f back into alog(f), ivar=',ivar
       endif
 !
     endsubroutine rmwig
@@ -929,7 +944,6 @@ endprogram remesh
 !   8-jul-02/wolf: coded
 !  12-nov-02/nils: adapted from deriv.f90
 !
-      use Cdata
       use Common
 !
       real, dimension (mmx,mmy,mmz,mvar) :: f
@@ -986,10 +1000,10 @@ endprogram remesh
 !      
 !  12-nov-02/nils: adapted from sub.f90
 !
-      character (len=6)  :: ch
       integer :: cpu
+      character(len=6) :: ch
 !
-      ch='    '
+      ch=''
       if (cpu.lt.0) stop 'chn: lt1'
       if (cpu.lt.10) then
         write(ch(1:1),'(i1)') cpu

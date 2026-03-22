@@ -12,6 +12,7 @@ import os
 import re
 import warnings
 import pathlib
+import functools
 
 MARKER_FILES = ["run.in", "start.in", "src/cparam.local", "src/Makefile.local"]
 
@@ -73,23 +74,33 @@ class PathWrapper(pathlib.WindowsPath if os.name == 'nt' else pathlib.PosixPath)
 
 class SinglePrinter:
     """
-    Instances of this class will print their output only on the MPI root process
-    
+    Instances of this class will print their output only on the MPI root process.
+
     KG (2025-Feb-07): added
+    KG (2025-Dec-03): optimized to import mpi4py only when really needed
     """
-    def __init__(self):
+
+    @property
+    @functools.lru_cache()
+    def print(self):
+        """
+        This logic really belongs in __init__, but we do things this way because
+        importing mpi4py.MPI is very slow. If mpi4py.MPI were imported in
+        __init__, that alone would account for half the initialization time of
+        the Pencil module
+        """
         try:
             from mpi4py import MPI
             comm = MPI.COMM_WORLD
             rank = comm.Get_rank()
         except ImportError:
             rank = 0
-        
+
         if (rank == 0):
-            self.print = True
+            return True
         else:
-            self.print = False
-    
+            return False
+
     def __call__(self, message):
         """
         message: str
@@ -111,6 +122,15 @@ def copy_docstring(original):
     the users being shown outdated help text.
     
     Copied from https://softwareengineering.stackexchange.com/a/386758
+    
+    NOTE: since sphinx-autoapi (used to generated the readthedocs pages) does
+    not know about this decorator, it is best to manually add a minimal
+    docstring of the form
+    \"\"\"
+    Wrapper for :py:meth:`Averages.read`
+    \"\"\"
+    to the wrapper function; this will allow Sphinx to create a link to the
+    original function.
     """
     def wrapper(target):
         target.__doc__ = original.__doc__
