@@ -10,6 +10,7 @@
 module Cdata
 !
   use Cparam
+  use iso_fortran_env, only: int64
 !
   implicit none
 !
@@ -173,7 +174,7 @@ module Cdata
   real :: ybot_slice=0.0,ytop_slice=1.0
   real :: zbot_slice=0.0,ztop_slice=1.0
   real :: r_rslice=0.
-  integer :: nth_rslice=min(nxgrid,nygrid,nzgrid)/2, nph_rslice=min(nxgrid,nygrid,nzgrid)
+  integer :: nth_rslice=floor((min(nxgrid,nygrid,nzgrid)/2.)+.1), nph_rslice=min(nxgrid,nygrid,nzgrid)
   real :: glnCrossSec0=0.0, CrossSec_x1=-1., CrossSec_x2=1., CrossSec_w=.1
   logical, dimension(3) :: lperi=.true. !PAR_DOC: vector of the form ($x$,$y$,$z$);
                                         !PAR_DOC: determines whether the corresponding
@@ -252,7 +253,6 @@ module Cdata
   integer :: ix_loc=1,iy_loc=1, iy2_loc=1
   integer :: iz_loc=1,iz2_loc=1, iz3_loc=1, iz4_loc=1
   integer :: iproc=0,ipx=0,ipy=0,ipz=0,iproc_world=0,ipatch=0
-  logical :: lverbose_performance_log = .false.
   logical :: lprocz_slowest=.true. !PAR_DOC: if set to \code{F}, the ordering
                                    !PAR_DOC: of processor numbers is changed,
                                    !PAR_DOC: so the $z$ processors are now in
@@ -317,6 +317,9 @@ module Cdata
   character (len=labellen) :: trigger_spec='code_time'  !PAR_DOC: trigger quantity for spectral output
   character (len=labellen) :: trigger_vid='code_time'   !PAR_DOC: trigger quantity for video output
   logical :: lsnap=.false., lsnap_down=.false., lspec=.false., lspec_start=.false., lspec_at_tplusdt=.false.
+  logical :: lspec_tcrit=.false. !PAR_DOC: allow setting critical time for switching to log interval for dspec.
+  logical :: lsnap_tcrit=.false. !PAR_DOC: allow setting critical time for switching to log interval for dsnap.
+  logical :: lvid_tcrit=.false. !PAR_DOC: allow setting critical time for switching to log interval for dvid.
   real :: dsnap=100. !PAR_DOC: save a snapshot (VAR file) every dsnap time units
   real :: dsnap_down=0. !PAR_DOC: save a downsampled snapshot every dsnap time units
   real :: d1davg=impossible !PAR_DOC: save 1D (xy, yz, ...) averages every d1davg
@@ -325,6 +328,9 @@ module Cdata
     !PAR_DOC: units
   real :: dvid=0. !PAR_DOC: save slice (video) files every dvid time units.
   real :: dspec=impossible !PAR_DOC: save power spectra every dspec time units
+  real :: tspec_crit_log_interval=impossible !PAR_DOC: critical time above which we set dspec to a negative value.
+  real :: tsnap_crit_log_interval=impossible !PAR_DOC: critical time above which we set dsnap to a negative value.
+  real :: tvid_crit_log_interval=impossible !PAR_DOC: critical time above which we set dvid to a negative value.
   real :: dit1=impossible
   real :: dtracers=0., dfixed_points=0.
   real :: crash_file_dtmin_factor=-1.0
@@ -435,6 +441,9 @@ module Cdata
 !  Rotation and shear parameters.
 !
   real :: Omega=0.0, theta=0.0, phi=0.0, qshear=0.0, Sshear=0.0, deltay=0.0
+!
+  logical :: lrotation = .false.
+!
   !$omp threadprivate(deltay)
 !DM : Omega is now used in the viscosity routine too, for Lambda effect in rotating
 ! coordinate. This should be taken care of by 'shared variables' if in future
@@ -634,6 +643,18 @@ module Cdata
   logical :: lpencil_check_diagnos_opti=.false.
   logical :: lpencil_check_at_work=.false.
   integer :: ipencil_swap=0
+  integer :: special_module_index=1
+!
+!  Variables for substepping in time
+!
+!  For knowing does the current iteration correspond to a substep loop
+  logical :: lsubstepping_in_time=.false.
+!  How many substeps to be done per one actual timestep
+   integer :: number_of_substeps_per_timestep = 0
+!  For knowing which variables are substepped
+  logical, dimension(mvar) :: variable_substepped=.false.
+  logical, dimension(100) :: lspecial_substepped=.false.
+
 !
 !  Variables related to calculating diagnostic output.
 !
@@ -665,6 +686,9 @@ module Cdata
 
   integer, target :: m,n
   integer :: nt=10000000, it=0, itorder=3, itsub=0, it_timing=0, it_rmv=0
+  integer(kind=int64) :: iterations=0
+  !Whether it should persist between restarts
+  logical :: lpersistent_it =.false.
   logical :: ltiming_io=.false.
   logical :: lwrite_slices=.false., lwrite_1daverages=.false., lwrite_2daverages=.false.
   logical :: lwrite_tracers=.false., lwrite_fixed_points=.false.
@@ -687,6 +711,8 @@ module Cdata
   logical :: lreset_seed=.false.
   logical :: lproper_averages=.false.
   character (len=1) :: slice_position='p'
+! time avaraging
+  real :: tavg=0.
 ! averaging over smaller box
   logical :: lav_smallx=.false.,loutside_avg=.false.
   real :: xav_max=impossible
@@ -714,11 +740,13 @@ module Cdata
   character (len=30) :: cname_half(mname_half)
 !  Radius inside of which diagnostics are calculated for sphere_in_a_box models
   real :: radius_diag=1.0
+  real :: offset_min_calc=0.   !PAR_DOC: offset value for computing negative minima,
+                               !PAR_DOC: when some values are masked out with zeros.
 !  Phase boundaries for ISM
   real :: ssmask1=0.0,ssmask2=0.0
 !  Coordinates of the point where some quantities can be printed.
-  integer :: lpoint=(mx+1)/2,mpoint=(my+1)/2,npoint=(mz+1)/2
-  integer :: lpoint2=(mx+1)/4,mpoint2=(my+1)/4,npoint2=(mz+1)/4
+  integer :: lpoint=(mx+1)/2,mpoint=(my+1)/2,npoint=floor(((mz+1)/2.) + 0.1)
+  integer :: lpoint2=(mx+1)/4,mpoint2=(my+1)/4,npoint2=floor(((mz+1)/4.) +0.1)
   integer :: iproc_pt=0, iproc_p2=0
 !
 !  Diagnostic variables (needs to be consistent with reset list in register.90).
@@ -789,12 +817,12 @@ module Cdata
   character (LEN=labellen), dimension(n_xy_specs_max) :: xy_specs=''
   logical :: EP_spec=.false., hEP_spec=.false., nd_spec=.false., ud_spec=.false., abs_u_spec=.false.
   logical :: ro_spec=.false., TT_spec=.false., ss_spec=.false., cc_spec=.false., cr_spec=.false.
-  logical :: sp_spec=.false., ssp_spec=.false., sssp_spec=.false., mu_spec=.false.
+  logical :: sp_spec=.false., ssp_spec=.false., sssp_spec=.false., mu_spec=.false., gph_spec=.false.
   logical :: lr_spec=.false., r2u_spec=.false., r3u_spec=.false., oun_spec=.false.
   logical :: np_spec=.false., np_ap_spec=.false., rhop_spec=.false., ele_spec=.false., pot_spec=.false.
   logical :: ux_spec=.false., uy_spec=.false., uz_spec=.false., a0_spec=.false., ucp_spec=.false.
   logical :: ou_spec=.false., ab_spec=.false., azbz_spec=.false., uzs_spec=.false.
-  logical :: ub_spec=.false., Lor_spec=.false., EMF_spec=.false., Tra_spec=.false.
+  logical :: ub_spec=.false., Lor_spec=.false., OmU_spec=.false., EMF_spec=.false., Tra_spec=.false.
   logical :: GWs_spec=.false., GWh_spec=.false., GWm_spec=.false., Str_spec=.false., Stg_spec=.false.
   logical :: Gab_spec=.false., Gan_spec=.false., GBb_spec=.false.
   logical :: GWs_spec_boost=.false., GWh_spec_boost=.false.
@@ -1010,10 +1038,10 @@ module Cdata
   logical :: l1dphiavg_save, l1davgfirst_save, ldiagnos_save, l2davgfirst_save
   logical :: lout_save, l1davg_save, l2davg_save, lout_sound_save, lvideo_save
   logical :: lchemistry_diag_save
-  real :: deltay_save,scl_factor_target_save,Hp_target_save, appa_target_save
+  real    :: deltay_save,scl_factor_target_save,Hp_target_save, appa_target_save
   logical :: ltimestep_diagnostics = .false.
 
-  real(KIND=rkind8) :: t_save,tspec_save
+  real(KIND=rkind8) :: t_save,tspec_save,t_snap_save
   real :: t1ddiagnos_save,t2davgfirst_save,tslice_save,tsound_save
 
 !$ logical, volatile, dimension(n_helperflags) :: lhelperflags=(/.false.,.false.,.false.,.false./)
@@ -1024,6 +1052,7 @@ module Cdata
   integer, dimension(max_threads_possible) :: core_ids
 !$ logical, volatile :: lhelper_run=.true., lhelper_perf
 !$ logical :: loffload=.false.
+!$ integer :: ngpus=0
 !
 ! threadprivate definitions for OpenMP
 !

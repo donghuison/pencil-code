@@ -37,10 +37,9 @@ module File_io
       use Messages, only: fatal_error
 !
       integer, intent(in) :: unit
-      integer(kind=8) :: rec_len, num_rec
+      integer(kind=8) :: rec_len, num_rec, num, len, i
       integer, intent(in) :: reference
 !
-      integer :: i, num, len
 !
       if (num_rec < 0) then
         num_rec = -num_rec
@@ -260,7 +259,7 @@ module File_io
 !
 ! 20-may-18/MR: coded
 !
-      use General, only: coptest
+      use General, only: coptest, keep_compiler_quiet
       use Syscalls, only: system_cmd
 
       integer :: num
@@ -269,6 +268,7 @@ module File_io
       character(LEN=*), optional, intent(IN) :: options 
       logical,          optional, intent(IN) :: only_number
     
+      call keep_compiler_quiet(only_number)
       call system_cmd('ls '//coptest(options)//name//' > tmplsout 2> /dev/null')
       num=count_lines('tmplsout')
       call delete_file('tmplsout')
@@ -353,20 +353,20 @@ module File_io
 !
       integer :: ierr
       logical :: found
-      integer :: namelist_mode
-      logical :: lnamelist_optional, lno_warning
+      logical :: lnamelist_optional
       character(len=5) :: type, suffix
+      character(len=4) :: run_type
 !
       lnamelist_optional = loptest (loptional)
 !
       if (.not. loptest (lactive, .true.)) return
 !
       if (lstart .or. lparam_nml) then
-        type = 'init'
+        run_type = 'init'
       else
-        type = 'run'
+        run_type = 'run'
       endif
-      if (name /= '') type = '_'//type
+      if (name /= '') type = '_'//run_type
       suffix = '_pars'
       if (name == 'initial_condition_pars') then
         type = ''
@@ -375,11 +375,11 @@ module File_io
 !
       !if (.not. find_namelist (trim(name)//trim(type)//trim(suffix))) then
       call find_namelist (trim(name)//trim(type)//trim(suffix), found, lnamelist_optional)
-      if(.not. found .and. lnamelist_optional) return
+      if (.not. found .and. lnamelist_optional) return
 !
       ! G95 complains 'ierr' is used but not set, even though 'reader' has intent(out).
       ! PABourdin:
-      ! Yes, because 'reader' is here a function *pointer* an it can not be verified if the actual reader has intent(out).
+      ! Yes, because 'reader' is here a function *pointer* and it can not be verified whether the actual reader has intent(out).
       ierr = 0
       call reader(ierr)
 !
@@ -394,10 +394,10 @@ module File_io
         lnamelist_error = .true.
         if (lroot) then
           if (ierr == -1) then
-            call warning ('read_namelist', 'namelist "'//trim(name)//trim(type)//trim(suffix)//'" is missing!')
+            call warning ('read_namelist', 'namelist "'//trim(name)//trim(type)//trim(suffix)//'" is missing')
           else
             call warning ('read_namelist', 'namelist "'//trim(name)//trim(type)//trim(suffix)// &
-                          '" has an error ('//trim(itoa(ierr))//')!')
+                          '" has an error ('//trim(itoa(ierr))//')')
           endif
         endif
       endif

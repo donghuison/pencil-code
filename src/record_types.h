@@ -16,6 +16,9 @@ integer, parameter :: id_block_PERSISTENT        = 2000
 integer, parameter :: id_record_RANDOM_SEEDS     = 1
 integer, parameter :: id_record_RANDOM_SEEDS2    = 2
 
+!Iteration number
+integer, parameter :: id_record_ITERATION_NUMBER = 100
+
 ! Interstellar
 ! deprecated:
 integer, parameter :: id_record_ISM_T_NEXT_OLD   = 250
@@ -61,4 +64,7 @@ integer, parameter :: id_record_TIME_STEP        = 330
 integer, parameter :: id_record_EPS_RKF          = 331
 
 ! special/axionSU2back.f90
-integer, parameter :: id_record_SPECIAL_LNKMIN0         = 340
+integer, parameter :: id_record_SPECIAL_LNKMIN0  = 340
+
+! special/gravitational_waves_hTXk.f90
+integer, parameter :: id_record_DT_GW            = 350

@@ -71,8 +71,7 @@ program start
   use Initcond
   use InitialCondition, only: initial_condition_all, initial_condition_clean_up
   use Interstellar,     only: init_interstellar
-  use IO,               only: wgrid, directory_names, wproc_bounds, output_globals
-  use HDF5_IO,          only: wdim
+  use IO,               only: wdim, wgrid, directory_names, wproc_bounds, output_globals
   use Lorenz_gauge,     only: init_lorenz_gauge
   use Magnetic,         only: init_aa
   use Messages
@@ -358,14 +357,16 @@ program start
 !  by the various procedures below.
 !
 !  If lmodify is true, read var.dat into auxiliary array df
-!  and read modify_filename into f
+!  and read modify_filename into f. 
+!  20-apr-26/MR: Note that from now on modify_filename must not contain an extension (like .dat or .h5)
+!                It will be set according to the IO_strategy.
 !
   if (lmodify) then
-    call rsnap('var.dat',df,mvar,lread_nogrid)
+    call rsnap('var',df,mvar,lread_nogrid)
     call rsnap(modify_filename,f,mvar,lread_nogrid)
   else
     if (lread_oldsnap) then
-      call rsnap('var.dat',f,mvar,lread_nogrid)
+      call rsnap('var',f,mvar,lread_nogrid)
     else
       f(:,:,:,1:mvar)=0.0
     endif

@@ -44,7 +44,8 @@ fast: Makefile
 html: Makefile
 	@make clean
 	@$(SPHINXBUILD) -M $@ "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
-	@make clean
+	#Kishore: Illa, the below appears to delete the generated HTML files once the build is complete. Was that intentional?
+	#@make clean
 
 # Catch-all target: route all unknown targets to Sphinx using the new
 # "make mode" option.  $(O) is meant as a shortcut for $(SPHINXOPTS).

@@ -44,7 +44,7 @@ module Chemistry
   real :: Rgas, Rgas_unit_sys=1.
   real, dimension(mx,my,mz) :: cp_full, cv_full
   real, dimension(:,:,:), pointer :: mu1_full
-  real, dimension(mx,my,mz) :: lambda_full, rho_full, TT_full
+  real, dimension(mx,my,mz) :: lambda_full = 0.0, rho_full, TT_full
   real, dimension(mx,my,mz,nchemspec) :: cv_R_spec_full
 !real, dimension (mx,my,mz) ::  e_int_full,cp_R_spec
 
@@ -54,7 +54,7 @@ module Chemistry
   real :: lambda_const=impossible
   real :: visc_const=impossible
   real :: Diff_coef_const=impossible
-  real :: Sc_number=0.7!, Pr_number=0.7
+  real :: Sc_number=0.7, Pr_number=0.7
 !  real :: Cp_const=impossible
   real :: Cv_const=impossible
   logical :: lfix_Sc=.false., lfix_Pr=.false.
@@ -154,7 +154,7 @@ module Chemistry
 !
   real, allocatable, dimension(:,:,:,:,:) :: Bin_Diff_coef
   real, allocatable, dimension(:,:,:,:) :: Diff_full, Diff_full_add
-  real, dimension(mx,my,mz,nchemspec) :: XX_full
+  real, dimension(mx,my,mz,nchemspec) :: XX_full = 0.0
   real, dimension(mx,my,mz,nchemspec) :: species_viscosity
   real, dimension(mx,my,mz,nchemspec) :: RHS_Y_full
   real, dimension(nchemspec) :: nu_spec=0., mobility=1.
@@ -206,7 +206,7 @@ module Chemistry
 !
 !   Species constants
 !
-  real, dimension(nchemspec,24), target :: species_constants
+  real, dimension(nchemspec,24), target :: species_constants = 0.0
 !
 !   Lewis coefficients
 !
@@ -244,7 +244,7 @@ module Chemistry
       lThCond_simple,lambda_const, visc_const,Cp_const,Cv_const,Diff_coef_const, &
       init_x1,init_x2,init_y1,init_y2,init_z1,init_z2,init_TT1,&
       init_TT2,init_rho, &
-      init_ux,init_uy,init_uz,l1step_test,Sc_number,init_pressure,lfix_Sc, &
+      init_ux,init_uy,init_uz,l1step_test,Sc_number,Pr_number,init_pressure,lfix_Sc, &
       str_thick,lfix_Pr, lT_tanh,lT_const, lheatc_chemistry, lspecies_cond_simplified, &
       ldamp_zone_for_NSCBC, latmchem, lcloud, prerun_directory, &
       lchemistry_diag,lfilter_strict,linit_temperature, &
@@ -272,7 +272,7 @@ module Chemistry
       lgradP_terms, lnormalize_chemspec, lnormalize_chemspec_N2, &
       gam_surf_energy_cgs, isurf_energy, iconc_sat_spec, nucleation_rate_coeff_cgs, &
       lnoevap, lnolatentheat, gam_surf_energy_mul_fac, deltaH_cgs,&
-      min_nucl_radius_cgs, lupw_chemspec, &
+      min_nucl_radius_cgs, lupw_chemspec, Pr_number, &
       lFlame_index_as_aux, lmixture_fraction_as_aux, mixture_fraction_element, &
       flameind_spec1, flameind_spec2
 !
@@ -322,6 +322,8 @@ module Chemistry
   integer :: i_O2_glob,ichem_O2, i_C3H8_glob,ichem_C3H8
   logical :: lO2, lC3H8
   real    :: mO2, mC3H8
+
+  logical :: lcompute_rhs_y_full = .false.
   contains
 !
 !***********************************************************************
@@ -692,6 +694,8 @@ module Chemistry
 !                   D = Diff_coef_const/\rho*(T/T0)**n0.7, with T0 now = 298K.
 !
       if (lDiff_simple .and. Diff_coef_const == impossible) Diff_coef_const = 2.58e-4  !MR: the same as lambda_const?
+      if (lfix_Pr .and. Pr_number == 0.) call fatal_error('initialize_chemistry', &
+          'Pr_number must be nonzero when lfix_Pr=T')
 !
 !  true_density_cond_spec
 !
@@ -729,14 +733,38 @@ module Chemistry
       write (1,*) nchemspec,nreactions
       close (1)
 !
-    if(allocated(a_k4))       a_k4_min = minval(a_k4,1)
-    if(allocated(low_coeff))  low_coeff_abs_max = maxval(abs(low_coeff),1)
-    if(allocated(high_coeff)) high_coeff_abs_max = maxval(abs(high_coeff),1)
-    if(allocated(troe_coeff)) troe_coeff_abs_max = maxval(abs(troe_coeff),1)
+    if(allocated(a_k4)) then
+      if (allocated(a_k4_min)) deallocate(a_k4_min)
+      allocate(a_k4_min(size(a_k4,2)))
+      a_k4_min = minval(a_k4,1)
+    endif
+
+    if(allocated(low_coeff)) then
+      if (allocated(low_coeff_abs_max)) deallocate(low_coeff_abs_max)
+      allocate(low_coeff_abs_max(size(low_coeff,2)))
+      low_coeff_abs_max= maxval(abs(low_coeff),1)
+    endif
+
+    if(allocated(high_coeff)) then
+      if (allocated(high_coeff_abs_max)) deallocate(high_coeff_abs_max)
+      allocate(high_coeff_abs_max(size(high_coeff,2)))
+      high_coeff_abs_max= maxval(abs(high_coeff),1)
+    endif
+
+    if(allocated(troe_coeff)) then
+      if (allocated(troe_coeff_abs_max)) deallocate(troe_coeff_abs_max)
+      allocate(troe_coeff_abs_max(size(troe_coeff,2)))
+      troe_coeff_abs_max= maxval(abs(troe_coeff),1)
+    endif
+
     if(.not. lmultithread) call chemistry_allocate_rhs_arrays
     if (lgpu .and. (l1step_test .or. reac_rate_method=='1step_test')) &
           call warning('initialize_chemistry','1step test will not be correct on the GPU')
 
+
+!TP: Based on reading the code RHS_Y_full is only accessed in the NSCBC module so it should be safe to not compute
+!    if the module is not used, no?
+    lcompute_rhs_y_full = lnscbc
     endsubroutine initialize_chemistry
 !***********************************************************************
     subroutine chemistry_allocate_rhs_arrays
@@ -1137,6 +1165,8 @@ module Chemistry
 !
       if (lpencil(i_gXXk)) then
         do k = 1,nchemspec
+          ! [PABourdin] use of "XX_full" without initialization!
+          ! uncovered with F2008 on the "2d-tests/chemistry_GrayScott" autotest.
           call grad(XX_full(:,:,:,k),p%gXXk(:,:,k))
         enddo
       endif
@@ -1149,6 +1179,8 @@ module Chemistry
 !
       if (lpencil(i_mukmu1)) then
         do k = 1,nchemspec
+          ! [PABourdin] use of "species_constants" without initialization!
+          ! uncovered with F2008 on the "2d-tests/chemistry_GrayScott" autotest.
           p%mukmu1(:,k) = species_constants(k,imass)/unit_mass*p%mu1(:)
         enddo
       endif
@@ -1342,6 +1374,8 @@ module Chemistry
           if (lpencil(i_glambda)) &
             call not_implemented('calc_pencils_chemistry','glambda pencil for lSmag_heat_transport=T')
         else
+          ! [PABourdin] use of "lambda_full" without initialization!
+          ! uncovered with F2008 on the "2d-tests/chemistry_GrayScott" autotest.
           p%lambda = lambda_full(l1:l2,m,n)
           if (lpencil(i_glambda)) call grad(lambda_full,p%glambda)
         endif
@@ -1447,12 +1481,6 @@ module Chemistry
         endif
       else
         p%DYDt_diff = 0.
-      endif
-!
-      if (latmchem) then
-        RHS_Y_full(l1:l2,m,n,:) = p%DYDt_diff
-      else
-        RHS_Y_full(l1:l2,m,n,:) = p%DYDt_reac+p%DYDt_diff
       endif
 !
       if (lpencil(i_cs2) .and. lcheminp) then
@@ -1781,12 +1809,11 @@ module Chemistry
 !
       real :: mO2=0., mH2=0., mN2=0., mH2O=0., mCH4=0., mCO2=0.
 
-      real :: log_inlet_density, del, PP
+      real :: log_inlet_density, PP
       integer :: i_H2=0, i_O2=0, i_H2O=0, i_N2=0
       integer :: ichem_H2=0, ichem_O2=0, ichem_N2=0, ichem_H2O=0
-      integer :: i_CH4=0, i_CO2=0, ichem_CH4=0, ichem_CO2=0
-      real :: initial_mu1, final_massfrac_O2, final_massfrac_CH4, &
-          final_massfrac_H2O, final_massfrac_CO2,final_massfrac_H2
+      real :: initial_mu1, final_massfrac_O2, &
+          final_massfrac_H2O, final_massfrac_H2
       real :: init_H2, init_O2, init_N2, init_H2O, init_CO2, init_CH4
       logical :: lH2=.false., lO2=.false., lN2=.false., lH2O=.false.
       logical :: lCH4=.false., lCO2=.false.
@@ -1933,7 +1960,7 @@ module Chemistry
       real, dimension(mx,my,mz,mfarray) :: f
       integer :: i, j,k
 !
-      real :: initial_mu1, ksi_TTD, dTdr_c, deltaT, PP
+      real :: ksi_TTD, dTdr_c, deltaT, PP
 !
       call air_field(f,PP)
 !
@@ -2943,7 +2970,23 @@ module Chemistry
 !
 !  Thermal diffusivity
 !
-            if (lheatc_chemistry .and. (.not. lThCond_simple)) call calc_therm_diffus_coef
+            if (lheatc_chemistry .and. (.not. lThCond_simple)) then
+              if (lfix_Pr) then
+                do j3 = nn1,nn2
+                  do j2 = mm1,mm2
+                    if (visc_const == impossible) then
+                      lambda_full(ll1:ll2,j2,j3) = f(ll1:ll2,j2,j3,iviscosity) * &
+                          rho_full(ll1:ll2,j2,j3) * cp_full(ll1:ll2,j2,j3) / Pr_number
+                    else
+                      lambda_full(ll1:ll2,j2,j3) = visc_const * &
+                          rho_full(ll1:ll2,j2,j3) * cp_full(ll1:ll2,j2,j3) / Pr_number
+                    endif
+                  enddo
+                enddo
+              else
+                call calc_therm_diffus_coef
+              endif
+            endif
 !
           endif
         else
@@ -3056,16 +3099,11 @@ module Chemistry
 !   renormalization of the species
 !
       real, dimension(mx,my,mz,mfarray) :: f
-      real, dimension(mx,my,mz) :: sum_Y
       integer :: k
 !
-      sum_Y = 0.
-      do k = 1,nchemspec
-        sum_Y = sum_Y+f(:,:,:,ichemspec(k))
-      enddo
 
       do k = 1,nchemspec
-        f(:,:,:,ichemspec(k)) = f(:,:,:,ichemspec(k))/sum_Y
+        f(:,:,:,ichemspec(k)) = f(:,:,:,ichemspec(k))/sum(f(:,:,:,ichemspec(1):ichemspec(nchemspec)))
       enddo
 !
     endsubroutine chemspec_normalization
@@ -3078,6 +3116,7 @@ module Chemistry
 !
 !  28-feb-08/axel: coded
 !
+      use General, only: idiv
       character(len=80) :: chemicals=''
       ! Careful, limits the absolut size of the input matrix !!!
       character(len=15) :: file1='chemistry_m.dat', file2='chemistry_p.dat'
@@ -3272,7 +3311,7 @@ module Chemistry
             enddo
           elseif (kreactions_profile(j) == 'square') then
             do n = 1,mz
-              if (n < mz/2) then
+              if (n < idiv(mz,2)) then
                 kreactions_z(n,j) = kreactions_profile_width(j)
               else
                 kreactions_z(n,j) = 0.
@@ -3376,7 +3415,7 @@ module Chemistry
 !
 !  indices
 !
-      integer :: j, k,i,ii
+      integer :: j, k,i
       integer, parameter :: i1=1, i2=2, i3=3, i4=4, i5=5, i6=6, i7=7, i8=8, i9=9, i10=10
       integer, parameter :: i11=11, i12=12, i13=13, i14=14, i15=15, i16=16, i17=17, i18=18, i19=19
       integer, parameter :: iz1=1, iz2=2, iz3=3, iz4=4, iz5=5, iz6=6, iz7=7, iz8=8, iz9=9, iz10=10
@@ -3393,6 +3432,15 @@ module Chemistry
 !
       call timing('dchemistry_dt','entered',mnloop=.true.)
       if (headtt .or. ldebug) print*,'dchemistry_dt: SOLVE dchemistry_dt'
+!
+      if(lcompute_rhs_y_full) then
+        if (latmchem) then
+          RHS_Y_full(l1:l2,m,n,:) = p%DYDt_diff
+        else
+          RHS_Y_full(l1:l2,m,n,:) = p%DYDt_reac+p%DYDt_diff
+        endif
+      endif
+!
 !
 !  Interface for your personal subroutines calls
       !
@@ -3603,13 +3651,13 @@ module Chemistry
         else
           diffus_chem=0.
           do j = 1,nx
-            if (ldiffusion .and. .not. ldiff_simple) then
+            if (ldiffusion) then
 !
 !--------------------------------------
 !  This expression should be discussed
 !--------------------------------------
 !
-              diffus_chem(j) = diffus_chem(j)+maxval(Diff_full_add(l1+j-1,m,n,1:nchemspec))*dxyz_2(j)
+              diffus_chem(j) = diffus_chem(j)+maxval(p%Diff_penc_add(j,1:nchemspec))*dxyz_2(j)
             else
               diffus_chem(j) = 0.
             endif
@@ -3659,7 +3707,7 @@ module Chemistry
 !
       real, dimension(mx,my,mz,mfarray) :: f
       type (pencil_case) :: p
-      real, dimension(nx) :: ff_condm,sum_DYDt,sum_hhk_DYDt_reac
+      real, dimension(nx) :: sum_DYDt,sum_hhk_DYDt_reac
 
       integer :: ii,k,j
 !
@@ -3714,9 +3762,9 @@ module Chemistry
           if (idiag_Ymin(ii)/= 0) call max_mn_name(-f(l1:l2,m,n,ichemspec(ii)),idiag_Ymin(ii),lneg=.true.)
           if (idiag_TYm(ii)/= 0) &
             call sum_mn_name(max(1.-f(l1:l2,m,n,ichemspec(ii))/Ythresh(ii),0.),idiag_TYm(ii))
-          if (idiag_diffm(ii)/= 0)   call sum_mn_name( Diff_full_add(l1:l2,m,n,ii),idiag_diffm(ii))
-          if (idiag_diffmax(ii)/= 0) call max_mn_name( Diff_full_add(l1:l2,m,n,ii),idiag_diffmax(ii))
-          if (idiag_diffmin(ii)/= 0) call max_mn_name(-Diff_full_add(l1:l2,m,n,ii),idiag_diffmin(ii),lneg=.true.)
+          if (idiag_diffm(ii)/= 0)   call sum_mn_name(p%Diff_penc_add(:,ii),idiag_diffm(ii))
+          if (idiag_diffmax(ii)/= 0) call max_mn_name(p%Diff_penc_add(:,ii),idiag_diffmax(ii))
+          if (idiag_diffmin(ii)/= 0) call max_mn_name(-p%Diff_penc_add(:,ii),idiag_diffmin(ii),lneg=.true.)
         enddo
 !
         call sum_mn_name(cp_full(l1:l2,m,n),idiag_cpfull)
@@ -4301,28 +4349,16 @@ module Chemistry
 !
         allocate(low_coeff(3,nreactions),STAT=stat)
         if (stat > 0) call fatal_error('chemkin_data',"Couldn't allocate low_coeff")
-        allocate(low_coeff_abs_max(nreactions),STAT=stat)
-        if (stat > 0) call fatal_error('chemkin_data',"Couldn't allocate low_coeff_abs_max")
         low_coeff = 0.
-        low_coeff_abs_max = 0.
         allocate(high_coeff(3,nreactions),STAT=stat)
         if (stat > 0) call fatal_error('chemkin_data',"Couldn't allocate high_coeff")
-        allocate(high_coeff_abs_max(nreactions),STAT=stat)
-        if (stat > 0) call fatal_error('chemkin_data',"Couldn't allocate high_coeff_abs_max")
         high_coeff = 0.
-        high_coeff_abs_max = 0.
         allocate(troe_coeff(3,nreactions),STAT=stat)
         if (stat > 0) call fatal_error('chemkin_data',"Couldn't allocate troe_coeff")
-        allocate(troe_coeff_abs_max(nreactions),STAT=stat)
-        if (stat > 0) call fatal_error('chemkin_data',"Couldn't allocate troe_coeff_abs_max")
         troe_coeff = 0.
-        troe_coeff_abs_max = 0.
         allocate(a_k4(nchemspec,nreactions),STAT=stat)
         if (stat > 0) call fatal_error('chemkin_data',"Couldn't allocate a_k4")
-        allocate(a_k4_min(nreactions),STAT=stat)
-        if (stat > 0) call fatal_error('chemkin_data',"Couldn't allocate a_k4_min")
         a_k4 = impossible
-        a_k4_min = impossible
         allocate(Mplus_case (nreactions),STAT=stat)
         if (stat > 0) call fatal_error('chemkin_data',"Couldn't allocate Mplus_case")
         Mplus_case = .false.
@@ -4521,7 +4557,7 @@ module Chemistry
 
 
                     if (ParanthesisInd>0) then
-                      Mplus_case (k)=.true.
+                      Mplus_case(k)=.true.
                     endif
 
                     i=1
@@ -5087,7 +5123,7 @@ module Chemistry
 !
       real :: Rcal, f_phi, E_a
       real :: init_C3H8, init_O2
-      integer :: i_O2, i_C3H8, j
+      integer :: i_O2, i_C3H8
       real, dimension(nx) :: activation_energy, pre_exp, term1, term2
 !
       if (nreactions /= 1) call fatal_error('roux','nreactions should always be 1')
@@ -5160,7 +5196,7 @@ module Chemistry
       real, dimension(nx) :: rho1
       real, dimension(nx,nchemspec) :: molm
       type (pencil_case) :: p
-      integer :: k,j,ii
+      integer :: k,j
       integer,parameter :: i1=1, i2=2, i3=3, i4=4, i5=5, i6=6, i7=7, i8=8, i9=9, i10=10
       integer,parameter :: i11=11, i12=12, i13=13, i14=14, i15=15, i16=16, i17=17, i18=18, i19=19
 !
@@ -5806,13 +5842,14 @@ module Chemistry
       else
         call fatal_error('get_gamma_slice','No such dir!')
       endif
+      call keep_compiler_quiet(f)
 !
     endsubroutine get_gamma_slice
 !***********************************************************************
     subroutine air_field(f,PP)
 !
       real, dimension(mx,my,mz,mfarray) :: f
-      real, dimension(mx,my,mz) :: sum_Y, tmp
+      real, dimension(mx,my,mz) :: sum_Y, tmp 
       real :: PP ! (in dynes = 1atm)
 !
       logical :: emptyfile=.true.
@@ -6386,6 +6423,8 @@ module Chemistry
         slice = mu1_full(l1:l2,m1:m2,index)
         call der_onesided_4_slice_other(mu1_full,sgn,grad_slice,index,direction)
       endif
+
+      call keep_compiler_quiet(f)
 !
     endsubroutine get_mu1_slice
 !***********************************************************************
@@ -6990,7 +7029,7 @@ module Chemistry
       real :: dustbin_width
       real, dimension (nx) :: mfluxcond
 !
-      real, dimension (nx) :: ff_cond_fact, Q_cond
+      real, dimension (nx) :: ff_cond_fact
       real, dimension(ndustspec) :: ad
       integer :: ichem, kkk,k
 !
@@ -7037,7 +7076,7 @@ module Chemistry
       real, dimension (mx,my,mz,mvar) :: df
       type (pencil_case) :: p
       integer :: ichem, kkk,ix0,ix
-      real :: ffcondp, Q_cond
+      real :: ffcondp
       real, intent(IN) :: rp,dapdt,np_swarm
 !
 ! Modify continuity equation
@@ -7080,7 +7119,6 @@ module Chemistry
       integer :: ichem, kkk,i
       integer, dimension(nx) :: kk_vec
       real, dimension(ndustspec) :: ad
-      real :: Q_nucl
 !
       do i=1,nx
         !
@@ -7123,8 +7161,7 @@ module Chemistry
       real, dimension (mx,my,mz,mvar) :: df
       type (pencil_case) :: p
 !
-      integer :: ichem, kkk,i,ii
-      real, dimension(nx) :: Q_nucl
+      integer :: ichem, kkk,ii
       !
       if (lnucleation .and. dt>0) then
         !
@@ -7153,7 +7190,7 @@ module Chemistry
         else
           df(l1:l2,m,n,icc) = df(l1:l2,m,n,icc) + p%ff_nucl*(1+p%cc(:,1))*p%rho1
         endif
-        df(l1:l2,m,n,icc+1) = df(l1:l2,m,n,icc+1) + p%nucl_rmin*p%ff_nucl*(1+p%cc(:,2))*p%rho1
+        df(l1:l2,m,n,icc+1) = df(l1:l2,m,n,icc+1) + p%nucl_rmin*p%ff_nucl*(1+p%cc(:,min(npscalar,2)))*p%rho1
         !
         !  Generating the nucleii consumes the condensing species
         !
@@ -7190,7 +7227,6 @@ module Chemistry
       real, dimension (nx) :: mfluxcond
       type (pencil_case) :: p
       !
-      integer :: ichem, kkk
       !
       mfluxcond=A_spec*(p%chem_conc(:,ichem_cond_spec)-p%conc_sat_spec)*sqrt(p%TT)
       !
@@ -7207,7 +7243,7 @@ module Chemistry
       type (pencil_case), intent(in) :: p
       real, dimension (nx), intent(out) :: nucleation_rate, nucleation_rmin
       !
-      integer :: ichem, kkk, i
+      integer :: i
       real :: volume_spec_cgs=4.5e-23
       real :: volume_spec
       real, dimension (nx) :: sat_ratio_spec
@@ -7428,6 +7464,19 @@ module Chemistry
     call copy_addr(lc3h8,p_par(129)) ! bool
     call copy_addr(mo2,p_par(130))
     call copy_addr(mc3h8,p_par(131))
+    call copy_addr(lcompute_rhs_y_full,p_par(132))
+
+    call keep_compiler_quiet(str_thick)
+    call keep_compiler_quiet(init_x1)
+    call keep_compiler_quiet(init_y1)
+    call keep_compiler_quiet(init_z1)
+    call keep_compiler_quiet(init_rho)
+    call keep_compiler_quiet(init_rho2)
+    call keep_compiler_quiet(lfix_Pr)
+
+    call keep_compiler_quiet(init_x2)
+    call keep_compiler_quiet(init_y2)
+    call keep_compiler_quiet(init_z2)
 
   endsubroutine pushpars2c
 !***********************************************************************
@@ -7441,7 +7490,6 @@ module Chemistry
   integer :: n_loc, m_loc, igrad1, igrad2, ind_chem_spec1, ind_chem_spec2
   integer :: iweight
   logical :: lspec1, lspec2, lweight
-  real, dimension(nx) :: FI
   real, dimension(nx,3) :: grad1, grad2
 !
   call find_species_index(flameind_spec1,igrad1,ind_chem_spec1,lspec1)

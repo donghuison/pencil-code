@@ -74,11 +74,8 @@ module Timestep
 !
     endsubroutine initialize_timestep
 !***********************************************************************
-    subroutine time_step(f,df,p)
-!
-!   2-apr-01/axel: coded
-!  14-sep-01/axel: moved itorder to cdata
-!
+    subroutine advance_substeps(f,df,p,n_advancement,dt_)
+
       use Boundcond, only: update_ghosts
       use BorderProfiles, only: border_quenching
       use Equ, only: pde, impose_floors_ceilings
@@ -92,41 +89,19 @@ module Timestep
       use Sub, only: set_dt, shift_dt
       use GPU, only: update_after_substep_gpu, split_update_gpu
       use Mpicomm, only: mpiwtime
-!
-      real, dimension (mx,my,mz,mfarray) :: f
-      real, dimension (mx,my,mz,mvar) :: df
+
+      real, contiguous, dimension(:,:,:,:) :: f
+      real, contiguous, dimension(:,:,:,:) :: df
       real :: start_time
       type (pencil_case) :: p
       real :: ds, dtsub
-!
-!  dt_beta_ts may be needed in other modules (like Dustdensity) for fixed dt.
-!
-! ==============  the following should be omitted at some point =============
-!  There is also an option to advance the time in progressively smaller
-!  fractions of the current time. This is used to model the end of inflation,
-!  when lfractional_tstep_negative should be used.
-!  If dt=.5 and tstart=20, then one has -20, -10, -5, -2.5, etc.
-!  From radiation era onward, lfractional_tstep_positive should be used
-!  to make sure the dt used in run.in is positive.
-!
-      if (.not. ldt) then
-  !     if (lfractional_tstep_advance) then
-  !       if (lfractional_tstep_negative) then
-  !         dt_beta_ts=-dt*t
-  !       else
-  !         dt_beta_ts=dt*t
-  !       endif
-  !     else
-          dt_beta_ts=dt*beta_ts
-  !     endif
-      endif
-! ==================  until here =========================================
-!
-!  Set up df and ds for each time sub.
-!
-      do itsub=1,itorder
+      integer :: n_advancement
 
-        lfirst=(itsub==1)
+      real, optional :: dt_
+      real :: dt_used
+
+      do itsub=1,itorder
+        lfirst=(itsub==1 .and. n_advancement == 1)
         llast=(itsub==itorder)
 
         headtt = headt .and. lfirst .and. lroot
@@ -160,14 +135,20 @@ module Timestep
 !
         call pde(f,df,p)
 
+        if(present(dt_)) then
+          dt_used = dt_
+        else
+          dt_used = dt
+        endif
+
         if (lode) call ode
 
         ds=ds+1.0
 !
 !  Calculate dt_beta_ts.
 !
-        if (ldt) dt_beta_ts=dt*beta_ts
-        if (ip<=6) print*, 'time_step: iproc, dt=', iproc_world, dt  !(all have same dt?)
+        if (ldt) dt_beta_ts=dt_used*beta_ts
+        if (ip<=6) print*, 'time_step: iproc, dt=', iproc_world, dt_used  !(all have same dt?)
         dtsub = ds * dt_beta_ts(itsub)
 !
 !  Apply border quenching.
@@ -204,13 +185,11 @@ module Timestep
           call advance_shear(f, df, dtsub)
         endif
 !
-        start_time = mpiwtime()
-        if (lgpu) then
-          call update_after_substep_gpu
-        else
-          call update_after_substep(f,df,dtsub,llast)
+        start_time = real(mpiwtime())
+        if (lgpu) then; call update_after_substep_gpu
+        else;           call update_after_substep(f,df,dtsub,llast)
         endif
-        after_substep_sum_time = after_substep_sum_time + mpiwtime()-start_time
+        after_substep_sum_time = after_substep_sum_time + real(mpiwtime())-start_time
 !
         ! [PAB] according to MR this breaks the autotest.
         ! @Piyali: there must be a reason to add an additional global communication,
@@ -220,8 +199,71 @@ module Timestep
 !  Increase time.
 !
         t = t + dtsub
+      enddo
 !
-      enddo   ! substep loop
+    endsubroutine advance_substeps
+!***********************************************************************
+    subroutine time_step(f,df,p)
+!
+!   2-apr-01/axel: coded
+!  14-sep-01/axel: moved itorder to cdata
+!
+      use GPU, only: split_update_gpu
+      use Equ, only: pde
+!
+      real, contiguous, dimension(:,:,:,:) :: f
+      real, contiguous, dimension(:,:,:,:) :: df
+      type (pencil_case) :: p
+      real(KIND=rkind8) :: t_start
+      integer :: i
+      logical :: headt_save
+
+!
+!  dt_beta_ts may be needed in other modules (like Dustdensity) for fixed dt.
+!
+! ==============  the following should be omitted at some point =============
+!  There is also an option to advance the time in progressively smaller
+!  fractions of the current time. This is used to model the end of inflation,
+!  when lfractional_tstep_negative should be used.
+!  If dt=.5 and tstart=20, then one has -20, -10, -5, -2.5, etc.
+!  From radiation era onward, lfractional_tstep_positive should be used
+!  to make sure the dt used in run.in is positive.
+!
+      if (.not. ldt) then
+  !     if (lfractional_tstep_advance) then
+  !       if (lfractional_tstep_negative) then
+  !         dt_beta_ts=-dt*t
+  !       else
+  !         dt_beta_ts=dt*t
+  !       endif
+  !     else
+          dt_beta_ts=dt*beta_ts
+  !     endif
+      endif
+! ==================  until here =========================================
+!
+      t_start = t
+      headt_save = headt
+!
+!  Chosen terms are advanced more finely in time while keeping other terms constant
+!
+      if(number_of_substeps_per_timestep > 0) then
+        headt = .false.
+        lfirst=.true.
+        call pde(f,df,p)
+        lsubstepping_in_time=.true.
+        do i=1,number_of_substeps_per_timestep
+          call advance_substeps(f,df,p,i,dt/number_of_substeps_per_timestep)
+        enddo
+        lsubstepping_in_time=.false.
+        headt = headt_save
+      endif
+
+      t = t_start
+!
+!  Set up df and ds for each time sub.
+!
+      call advance_substeps(f,df,p,1)
 !
 !  Integrate operator split terms.
 !
@@ -242,7 +284,7 @@ module Timestep
       use Viscosity, only: split_update_viscosity
       use Particles_main, only: split_update_particles
 !
-      real, dimension(mx,my,mz,mfarray), intent(inout) :: f
+      real, contiguous, dimension(:,:,:,:), intent(inout) :: f
 !
 !  Dispatch to respective modules.
 !
@@ -269,8 +311,8 @@ module Timestep
       use Particles_main, only: particles_special_after_dtsub, particles_write_rmv
 !
       logical, intent(in) :: llast
-      real, dimension (mx,my,mz,mfarray) :: f
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: f
+      real, contiguous, dimension(:,:,:,:) :: df
       real :: dtsub
 !
 !  Enables checks to avoid unnecessary communication
@@ -325,10 +367,12 @@ module Timestep
     subroutine pushpars2c(p_par)
 
     use Syscalls, only: copy_addr
+    use General, only: keep_compiler_quiet
 
     integer, parameter :: n_pars=0
     integer(KIND=ikind8), dimension(n_pars) :: p_par
 
+    call keep_compiler_quiet(p_par)
     !!call copy_addr(alpha_ts,p_par(1))  ! (3)
     !!call copy_addr(beta_ts ,p_par(2))  ! (3)
 

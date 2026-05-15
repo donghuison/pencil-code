@@ -157,6 +157,15 @@ my $log            = ($opts{'l'} || $opts{'log'}             || '');
 my $log_dir        = (              $opts{'log-dir'}         || '');
 
 my @config_files;
+#On CSC machines and on Dardel pc_run finds the wrong configs 
+#making it so that one has to always give explicitly the config to pc_run via -f.
+#Thus I read the config file that was used in pc_build
+#I don't see any downsides to this, but please remove it if you find one.
+if (!defined $config_files && -e "src/.config-files") {
+    open my $fh, "<", "src/.config-files" or die $!;
+    $config_files = do { local $/; <$fh> };
+    close $fh;
+}
 if (defined $config_files) {
     my @files = split(/[,\s\+]+/s, $config_files);
     @config_files = Pencil::ConfigFinder::locate_config_files(@files) ;
@@ -299,7 +308,7 @@ sub start_cmd {
     honour_nostart();
     setup_datadir();
     run_extra_setup_script();
-    setup_environment();
+    setup_environment("start");
     setup_local_disc();
     handle_local_binary($start_x);
     identify_revision($start_x);
@@ -315,7 +324,7 @@ sub start_cmd {
 sub run_cmd {
 # Run run.x
 
-    setup_environment();
+    setup_environment("run");
     setup_local_disc();
     handle_local_binary($run_x);
     distribute_var_files();
@@ -436,15 +445,26 @@ sub dump_parameters {
 }
 # ---------------------------------------------------------------------- #
 sub setup_environment {
-    $ENV{PC_MODULES_LIST} = `grep '^ *SPECIAL *=' src/Makefile.local | tail -n 1 | tr "[A-Z]" "[a-z]" | sed -e's/.*= *//' -e's/special.//g'`;
+
+    $ENV{PC_MODULES_LIST} = `grep '^ *SPECIAL *=' src/Makefile.local | tail -n 1 | tr "[A-Z]" "[a-z]" | sed -e's/.*= *//' -e's/special.//g' -e's/#.*\$//'`;
     #print "pc_run:MODULES:", $ENV{PC_MODULES_LIST}, "\n";
-    if ($settings{'multithread'}) {
-      $ENV{OMP_PROC_BIND} = 'TRUE';
-      $ENV{SRUN_CPUS_PER_TASK} = '$SLURM_CPUS_PER_TASK';    # shall not be effective!
-      $ENV{OMP_NUM_THREADS} = '$SLURM_CPUS_PER_TASK';
-    }
+    #Might as well set all of these env variables always since they don't
+    #hurt when running single-threaded
+    #if ($settings{'multithread'}) {
+      $ENV{OMP_PROC_BIND} = 'close,spread';
+      $ENV{OMP_MAX_ACTIVE_LEVELS} = 2;
+      $ENV{OMP_WAIT_POLICY} = 'PASSIVE';
+      my $ncpus = $ENV{SLURM_CPUS_PER_TASK};
+      if (!defined $ncpus) {
+          chomp($ncpus = `nproc`);
+      }
+      $ENV{OMP_NUM_THREADS}    = $ncpus;
+      $ENV{SRUN_CPUS_PER_TASK} = $ncpus;
+    #}
     if ($settings{'mpich'}) {
-      $ENV{MPICH_GPU_SUPPORT_ENABLED} = '1';
+      if($_[0] eq "run") {
+        $ENV{MPICH_GPU_SUPPORT_ENABLED} = '1';
+      }
     }
 }
 # ---------------------------------------------------------------------- #
@@ -703,7 +723,7 @@ sub run_system_cmd {
     if (-e $errorfile) {
         print "Found ERROR file\n";
         $status |= 16;
-        clear_error();
+        #clear_error();
     }
 
     die "Aborting.\n" if ($status != 0);
@@ -773,15 +793,16 @@ sub local_settings {
         '^ \s* integer\b [^\!]* ncpus \s*=\s* ([0-9]*)', 'src/cparam.local'
     );
 
-    # Multithreading from Makefile.local
-    $settings{'multithread'} = 0 + defined(match_line_ix(
-        '^ \s* MULTITHREADING *= *[a-zA-Z]', 'src/Makefile.local'));
-    identify_setting('multithread', %settings);
-
     # GPU from Makefile.local
     $settings{'gpu'} = 0 + defined(match_line_ix(
         '^ \s* GPU *= *[a-zA-Z_]', 'src/Makefile.local'));
     identify_setting('gpu', %settings);
+
+    # Multithreading from Makefile.local
+    $settings{'multithread'} = $settings{'gpu'} + defined(match_line_ix(
+        '^ \s* MULTITHREADING *= *[a-zA-Z]', 'src/Makefile.local'));
+    identify_setting('multithread', %settings);
+
 
     # MPICH from loaded modules
     if ($settings{'mpi'} && $settings{'gpu'}) {
@@ -977,7 +998,7 @@ sub setup_datadir {
 # ---------------------------------------------------------------------- #
 sub subdir_list {
 # Return list of directories below data/ that must exist
-    my @subdirs = qw/ allprocs averages idl /;
+    my @subdirs = qw| allprocs allprocs/signals averages idl signals |;
     my $HDF5 = `grep -Eci '^ *io *= *io_hdf5' src/Makefile.local`;
     my $MPIIO = `grep -Ec '^ *IO *= *io_mpi2' src/Makefile.local`;
     if ($HDF5 > 0) {
@@ -1564,8 +1585,16 @@ sub unlink_if_exist {
 
     my @existing_files = grep { -e } @files;
     if (@existing_files) {
-        unlink @existing_files
-          or die "Cannot remove all of @existing_files\n";
+	foreach my $file_path (@existing_files) {
+	  if(-d $file_path)
+	  {
+            remove_tree($file_path) or die "Cannot remove directory $file_path\n";
+	  } else
+	  {
+            unlink $file_path 
+              or die "Cannot remove $file_path\n";
+	  }
+	}
     }
 }
 # ---------------------------------------------------------------------- #

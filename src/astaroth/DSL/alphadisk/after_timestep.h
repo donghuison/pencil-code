@@ -1,7 +1,4 @@
 #if LALPHADISK
-field_order(AC_isigma__mod__alphadisk-1) Field F_SIGMA
-field_order(AC_imdot__mod__alphadisk-1) Field F_MDOT
-field_order(AC_itmid__mod__alphadisk-1) Field F_TMID
 Kernel after_timestep_alphadisk(){
   real DF_MDOT = 0.0
   real DF_TMID = 0.0

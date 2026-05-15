@@ -1126,11 +1126,22 @@ module EquationOfState
 !***********************************************************************
     subroutine pushpars2c(p_par)
 
-    integer, parameter :: n_pars=0
+    use Syscalls, only: copy_addr
+    use General,  only: string_to_enum
+
+    integer, parameter :: n_pars=100
     integer(KIND=ikind8), dimension(n_pars) :: p_par
 
     call keep_compiler_quiet(p_par)
 
+    call copy_addr(rho0,p_par(1))
+    call copy_addr(lnrho0,p_par(2))
+    call copy_addr(rgas,p_par(3))
+    call copy_addr(imass,p_par(4)) ! int
+    call copy_addr(cp_const,p_par(5))
+    call copy_addr(pr_number,p_par(6))
+    call copy_addr(lpres_grad,p_par(7)) ! bool
+    call copy_addr(linterp_pressure,p_par(8)) ! bool
     endsubroutine pushpars2c
 !***********************************************************************
 !********************************************************************

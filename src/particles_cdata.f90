@@ -19,7 +19,7 @@ module Particles_cdata
 !
   integer, parameter :: maxp=20
   integer(KIND=ikind8), parameter :: npar_maxp=npar*maxp
-  integer, parameter :: max_par_per_grid=int(npar_maxp/nwgrid)+1  ! ceiling needed?
+  integer, parameter :: max_par_per_grid=int(floor(npar_maxp/real(nwgrid)))+1  ! ceiling needed?
   real :: rp_int=-impossible, rp_ext=-impossible
   real :: rp_ext_width=-impossible
   real :: dsnap_par_minor=0.0, dsnap_par=0.0
@@ -83,6 +83,8 @@ module Particles_cdata
   integer :: idlncc=0
   integer :: idfg=0,idfx=0,idfy=0,idfz=0
   integer :: ivpxt=0, ivpzt=0
+  integer :: imskh = 0, itbrt = 0, itbpe = 0
+
 
   integer :: npar_inserted_tot=0
   integer :: max_particles=npar

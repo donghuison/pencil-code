@@ -1,5 +1,7 @@
 #include "../../PC_moduleflags.h"
 
+#define REAL_MAX AC_REAL_MAX
+
 #if LENTROPY
 #define LENERGY 1
 #endif
@@ -7,6 +9,38 @@ const bool AC_lpencil_check__mod__cdata = false
 const bool AC_lpencil_check_at_work__mod__cdata = false
 
 #include "../typedefs.h"
+
+#define IN_DSL 1
+#include "cparam.h"
+#undef AC_bot
+#undef AC_top
+#include "../../../cparam_c.h"
+const int AC_xtop__mod__equationofstate=nx
+#include "../../../cparam_pencils.inc_c.h"
+
+#undef AC_nx
+#undef AC_ny
+#undef AC_nz
+
+#define AC_nx nx
+#define AC_ny ny
+#define AC_nz nz
+
+#define AC_nxgrid nxgrid
+#define AC_nygrid nxgrid
+#define AC_nzgrid nxgrid
+
+#define AC_nxgrid__mod__cparam nxgrid
+#define AC_nygrid__mod__cparam nxgrid
+#define AC_nzgrid__mod__cparam nxgrid
+
+#undef AC_mx
+#undef AC_my
+#undef AC_mz
+
+#define AC_mx mx 
+#define AC_my my 
+#define AC_mz mz 
 
 #define AC_n1 n1
 #define AC_m1 m1
@@ -49,18 +83,6 @@ const int prof_nz = 150
 
 #define AC_NGHOST_VAL__mod__cparam NGHOST_VAL
 
-#define AC_mx mx 
-#define AC_my my 
-#define AC_mz mz 
-
-#define AC_nx nx 
-#define AC_ny ny
-#define AC_nz nz 
-
-#define AC_nxgrid nxgrid 
-#define AC_nygrid nygrid 
-#define AC_nzgrid nzgrid 
-
 #define AC_dsx AC_ds.x
 #define AC_dsy AC_ds.y
 #define AC_dsz AC_ds.z
@@ -77,23 +99,15 @@ const int prof_nz = 150
 //#include "../stdlib/pc_derivs.h"
 #include "../stdlib/general_operators.h"
 #define AC_NGHOST__mod__cparam nghost
-#define REAL_MAX AC_REAL_MAX
 //TP: nphis1 and nphis2 don't actually work. simply declared to compile the code
 //
-#define IN_DSL 1
-#include "cparam.h"
-#undef AC_bot
-#undef AC_top
-#include "../../../cparam_c.h"
-const int AC_xtop__mod__equationofstate=nx
-#include "../../../cparam_pencils.inc_c.h"
 #include "PC_modulepardecs.h"
 #include "../stdlib/optimized_integrators.h"
 #include "../stdlib/slope_limited_diffusion.h"
 
 #include "../fieldecs.h"
+#include "../stdlib/smooth_max.h"
 
-output real AC_maxchi
 #if Ltimestep_rkf_lowsto_MODULE
 enum PC_SUB_STEP_NUMBER
 {
@@ -128,14 +142,8 @@ minval(real x) {return x}
 
 #define notanumber(x) (false)
 
-output real  AC_dt1_max
-output float AC_dt1_max_single_precision
-output real AC_dt1_advec
-output real AC_dt1_diffus
-
-#if Leos_idealgas_MODULE
-#define AC_lntt0__mod__equationofstate AC_lnTT0__mod__equationofstate
-#endif
+global output real  AC_dt1_max
+global output float AC_dt1_max_single_precision
 
 #define AC_gamma1__mod__energy  AC_gamma1__mod__equationofstate 
 #define AC_gamma1__mod__magnetc AC_gamma1__mod__equationofstate 
@@ -157,17 +165,14 @@ output real aaz_initial_max
 output real rho_initial_max
 output real ss_initial_max
 
-output real AC_maxnu
 
 ac_unused_real_array_1d(index) {suppress_unused_warning(index); return 0.0}
 ac_unused_real_array_2d(index1,index2) {suppress_unused_warning(index1); suppress_unused_warning(index2); return 0.0}
 ac_unused_real_array_3d(index1,index2,index3) {suppress_unused_warning(index1); suppress_unused_warning(index2); suppress_unused_warning(index3); return 0.0}
+const real ac_unused_real_array_2d_dummy_value = 0.0
 const real ac_unused_real_scalar = 0.0
 const real ac_real_unused_scalar = 0.0
 #define epsi AC_REAL_EPSILON
-#define AC_nxgrid__mod__cparam nxgrid
-#define AC_nygrid__mod__cparam nxgrid
-#define AC_nzgrid__mod__cparam nxgrid
 #define maux__mod__cparam maux
 
 global output real AC_Arms
@@ -195,23 +200,13 @@ const real AC_arms__mod__magnetic = 0.0
 gmem real AC_reac_dust__mod__cdata[1]
 #endif
 
-#if LCHEMISTRY
+#if Lchemistry_MODULE
 #else
 gmem real AC_reac_chem__mod__cdata[1]
 #endif
 
 const real AC_ascale__mod__cdata = 0.0
 
-#define AC_ftopktop__mod__energy AC_FtopKtop__mod__energy
-#define AC_fbotkbot__mod__energy AC_FbotKbot__mod__energy
-#define AC_fbot__mod__energy AC_Fbot__mod__energy 
-#define AC_ftop__mod__energy AC_Ftop__mod__energy 
-#define FbotKbot AC_FbotKbot__mod__energy
-#define Fbot AC_Fbot__mod__energy
-#define fbot Fbot
-#define ftop Ftop
-#define FtopKtop AC_FtopKtop__mod__energy
-#define Ftop AC_Ftop__mod__energy
 #define fbcx AC_fbcx__mod__cdata
 #define fbcy AC_fbcy__mod__cdata
 #define fbcz AC_fbcz__mod__cdata
@@ -236,7 +231,7 @@ const real AC_ascale__mod__cdata = 0.0
 #define AC_lread_oldsnap AC_lread_oldsnap__mod__cdata
 
 #include "../stdlib/bc.h"
-#include "../bcs/funcs_full.h"
+#include "../bcs/funcs.h"
 #include "../bcs/funcs_overload.h"
 #include "../hydro/before_boundary.h"
 
@@ -251,9 +246,8 @@ const bool AC_lallow_bprime_zero__mod__disp_current = false
 #endif
 
 #define AC_iproc_world__mod__cdata (0)
+
 #include "../axionSU2back.h"
-
-
 #include "../backreact_infl.h"
 
 #if LPOLYMER
@@ -268,6 +262,9 @@ const real yhmax = 1-AC_REAL_EPSILON
 //Crucially lmultithread has to be false from the point of view GPU that we don't do some things twice
 const bool AC_lmultithread__mod__cdata = false
 #if Lentropy_MODULE
+Profile<X> AC_ssmx__mod__energy
+Profile<X> AC_del2ssmx__mod__energy
+
 Profile<Z> AC_ssmz__mod__energy
 Profile<Z> AC_del2ssmz__mod__energy
 #endif

@@ -27,8 +27,8 @@ module Persist
   include 'record_types.h'
 !
   interface input_persistent_general
-     module procedure input_persist_general_by_id
-     module procedure input_persist_general_by_label
+    module procedure input_persist_general_by_id
+    module procedure input_persist_general_by_label
   endinterface
 !
   contains
@@ -68,8 +68,8 @@ module Persist
 !
       if (read_persist_id ('INITIAL_BLOCK_ID', id, .true.)) then
         if (.not. present (file)) return
-        if (file == 'var.dat') then
-          if (init_read_persist ('pers_'//file)) return
+        if (file == 'var') then
+          if (init_read_persist ('pers_'//trim(file)//'.dat')) return
         elseif (index (file, 'VAR') == 1) then
           if (init_read_persist ('PERS_'//file(4:))) return
         else
@@ -87,6 +87,7 @@ module Persist
       endif
 !
       if (read_persist_id ('FIRST_BLOCK_ID', id)) return
+
       do while (id /= id_block_PERSISTENT)
         done = .false.
         if (.not. done) call input_persistent_general (id, done)
@@ -168,6 +169,8 @@ module Persist
         case (id_record_SHEAR_DELTA_Y)
           done=read_persist ('SHEAR_DELTA_Y', dely)
           if (.not.done) deltay=dely
+        case (id_record_ITERATION_NUMBER)
+            done=read_persist ('ITERATION_NUMBER', it)
         case (id_record_TIME_STEP)
           if (dt0==0) then
             done=read_persist ('TIME_STEP', dtmp)
@@ -234,6 +237,9 @@ module Persist
           eps_rkf=deps
         endif
       endif
+
+      if (read_persist('ITERATION_NUMBER',it)) &
+        call warning('input_persist_general_by_label','no persistent value of it found')
 !
     endsubroutine input_persist_general_by_label
 !***********************************************************************
@@ -269,8 +275,8 @@ module Persist
             output_persistent_general = .true.
       endif
 !
-      if (.not.lstart.and.(.not.lcourant_dt)) then
-        if(ldt .and. .not. lcourant_dt) then
+      if (.not. lstart.and. .not. lcourant_dt) then
+        if (ldt .and. .not. lcourant_dt) then
           dt_save = dt_next
         else
           dt_save = dt
@@ -282,6 +288,11 @@ module Persist
 !
       if (.not.ldt) then
         if (write_persist ('EPS_RKF', id_record_EPS_RKF, eps_rkf)) &
+          output_persistent_general = .true.
+      endif
+
+      if (.not. lstart) then
+        if (write_persist ('ITERATION_NUMBER', id_record_ITERATION_NUMBER, it)) &
           output_persistent_general = .true.
       endif
 !

@@ -12,7 +12,6 @@ module Timeavg
   include 'timeavg.h'
 !
   integer :: idx_tavg=0         ! just scalar, since unused and no mtavg known
-  real :: tavg=0.0
 !
   contains
 !***********************************************************************
@@ -51,5 +50,16 @@ module Timeavg
       if (present(flist)) call keep_compiler_quiet(flist)
 !
     endsubroutine wsnap_timeavgs
+!***********************************************************************
+    subroutine pushpars2c(p_par)
+
+      use Syscalls, only: copy_addr
+
+      integer, parameter :: n_pars=0
+      integer(KIND=ikind8), dimension(n_pars) :: p_par
+
+      call keep_compiler_quiet(p_par)
+
+    endsubroutine pushpars2c
 !***********************************************************************
 endmodule Timeavg

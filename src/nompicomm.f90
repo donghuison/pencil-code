@@ -10,7 +10,7 @@
 module Mpicomm
 !
   use Cdata
-  use General, only: keep_compiler_quiet
+  use General, only: keep_compiler_quiet, keep_compiler_quiet_dble
 !
   implicit none
 !
@@ -20,13 +20,14 @@ module Mpicomm
 
   include 'mpicomm.h'
 !
-  interface mpireduce_sum_double
-    module procedure mpireduce_sum_double_scl
-    module procedure mpireduce_sum_double_arr
-    module procedure mpireduce_sum_double_arr2
-    module procedure mpireduce_sum_double_arr3
-    module procedure mpireduce_sum_double_arr4
-  endinterface
+  !Not used or public interface
+  !interface mpireduce_sum_double
+  !  module procedure mpireduce_sum_double_scl
+  !  module procedure mpireduce_sum_double_arr
+  !  module procedure mpireduce_sum_double_arr2
+  !  module procedure mpireduce_sum_double_arr3
+  !  module procedure mpireduce_sum_double_arr4
+  !endinterface
 !
 !  interface mpigather_and_out
 !    module procedure mpigather_and_out_real
@@ -233,20 +234,20 @@ module Mpicomm
         c4 = +(frac+2.)*(frac+1.)*frac          *(frac-2.)*(frac-3.)/12.
         c5 = -(frac+2.)*(frac+1.)*frac*(frac-1.)          *(frac-3.)/24.
         c6 = +(frac+2.)*(frac+1.)*frac*(frac-1.)*(frac-2.)          /120.
-        f( 1:l1-1,m1:m2,:,ivar1:ivar2) = &
+        f( 1:l1-1,m1:m2,:,ivar1:ivar2) = real(&
              c1*cshift(f(l2i:l2,m1:m2,:,ivar1:ivar2),-displs+2,2) &
             +c2*cshift(f(l2i:l2,m1:m2,:,ivar1:ivar2),-displs+1,2) &
             +c3*cshift(f(l2i:l2,m1:m2,:,ivar1:ivar2),-displs  ,2) &
             +c4*cshift(f(l2i:l2,m1:m2,:,ivar1:ivar2),-displs-1,2) &
             +c5*cshift(f(l2i:l2,m1:m2,:,ivar1:ivar2),-displs-2,2) &
-            +c6*cshift(f(l2i:l2,m1:m2,:,ivar1:ivar2),-displs-3,2)
-        f(l2+1:mx,m1:m2,:,ivar1:ivar2) = &
+            +c6*cshift(f(l2i:l2,m1:m2,:,ivar1:ivar2),-displs-3,2))
+        f(l2+1:mx,m1:m2,:,ivar1:ivar2) = real(&
              c1*cshift(f(l1:l1i,m1:m2,:,ivar1:ivar2), displs-2,2) &
             +c2*cshift(f(l1:l1i,m1:m2,:,ivar1:ivar2), displs-1,2) &
             +c3*cshift(f(l1:l1i,m1:m2,:,ivar1:ivar2), displs  ,2) &
             +c4*cshift(f(l1:l1i,m1:m2,:,ivar1:ivar2), displs+1,2) &
             +c5*cshift(f(l1:l1i,m1:m2,:,ivar1:ivar2), displs+2,2) &
-            +c6*cshift(f(l1:l1i,m1:m2,:,ivar1:ivar2), displs+3,2)
+            +c6*cshift(f(l1:l1i,m1:m2,:,ivar1:ivar2), displs+3,2))
       endif
 !
     endsubroutine finalize_shearing
@@ -471,7 +472,7 @@ module Mpicomm
 
       recv_array=send_array
 
-      if (ALWAYS_FALSE) print*, sendcnt, proc_src, proc_dest, sendtag, recvtag
+      if (ALWAYS_FALSE) print*, sendcnt, proc_src, proc_dest, sendtag, recvtag, comm
 !
     endsubroutine mpisendrecv_int_arr
 !***********************************************************************
@@ -605,7 +606,7 @@ module Mpicomm
 !
       integer, dimension(2) :: nbcast_array
       real, dimension(nbcast_array(1),nbcast_array(2)) :: bcast_array
-      integer :: proc_src, tag_id, ireq, num_elements
+      integer :: proc_src, tag_id, ireq
 !
       if (ALWAYS_FALSE) print*, bcast_array, proc_src, tag_id, ireq
 !
@@ -776,6 +777,7 @@ module Mpicomm
     integer, optional :: idir
 
     call keep_compiler_quiet(sendtag, recvtag, proc_dest, proc_src)
+    call keep_compiler_quiet(idir)
     call keep_compiler_quiet(send_array,recv_array)
 
     endsubroutine mpisendrecv_real_arr
@@ -791,6 +793,7 @@ module Mpicomm
 
     call keep_compiler_quiet(sendtag, recvtag, proc_dest, proc_src)
     call keep_compiler_quiet(send_array,recv_array)
+    call keep_compiler_quiet(idir)
 
     endsubroutine mpisendrecv_real_arr2
 !***********************************************************************
@@ -1156,6 +1159,36 @@ module Mpicomm
 !
     endsubroutine mpiallreduce_sum_arr_inplace
 !***********************************************************************
+    subroutine mpireduce_max_arr_inplace(fmax,nreduce,comm)
+!
+!  Calculate total maximum for each array element and return to root.
+!
+      integer :: nreduce
+      real, dimension(nreduce) :: fmax
+      integer, optional :: comm
+!
+      call keep_compiler_quiet(fmax)
+      call keep_compiler_quiet(nreduce,comm)
+
+    endsubroutine mpireduce_max_arr_inplace
+!***********************************************************************
+    subroutine mpireduce_maxloc_arr(fmax,maxranks,nreduce,comm)
+!
+!  Calculate total maximum for each array element along with its location and return both to root.
+!
+!  27-apr-26/MR: coded
+!
+      integer :: nreduce
+      real, dimension(nreduce) :: fmax
+      integer, dimension(nreduce) :: maxranks
+      integer, optional :: comm
+
+      maxranks=0
+      call keep_compiler_quiet(fmax)
+      call keep_compiler_quiet(nreduce,comm)
+
+    endsubroutine mpireduce_maxloc_arr
+!***********************************************************************
     subroutine mpiallreduce_sum_int_scl(fsum_tmp,fsum,comm)
 !
       integer :: fsum_tmp, fsum
@@ -1186,6 +1219,19 @@ module Mpicomm
       if (ALWAYS_FALSE) print*, fsum
       
     endsubroutine mpiallreduce_sum_int_arr_inplace
+!***********************************************************************
+    subroutine mpireduce_sum_arr_inplace(fsum,nreduce,idir,comm)
+!
+!  Calculate total sum for each array element and return to root.
+!
+      integer :: nreduce
+      real, dimension(nreduce) :: fsum
+      integer, optional :: idir,comm
+
+      if (ALWAYS_FALSE) print*, fsum
+      if (ALWAYS_FALSE) print*, present(idir), present(comm)
+!
+    endsubroutine mpireduce_sum_arr_inplace
 !***********************************************************************
     subroutine mpiallreduce_max_scl_sgl(fmax_tmp,fmax,comm)
 !
@@ -1312,6 +1358,8 @@ module Mpicomm
       logical, intent(in) :: fland_tmp
       logical, intent(out):: fland
       integer, intent(in), optional :: comm
+
+      call keep_compiler_quiet(comm)
 !
       fland = fland_tmp
 !
@@ -1473,7 +1521,7 @@ module Mpicomm
       logical, optional :: inplace
 !
       fsum=fsum_tmp
-      if (ALWAYS_FALSE) print*, present(idir)
+      if (ALWAYS_FALSE) print*, present(idir),inplace
 !
     endsubroutine mpireduce_sum_arr3
 !***********************************************************************
@@ -1488,49 +1536,54 @@ module Mpicomm
 !
     endsubroutine mpireduce_sum_arr4
 !***********************************************************************
-    subroutine mpireduce_sum_double_scl(dsum_tmp,dsum)
-!
-      real(KIND=rkind8) :: dsum_tmp,dsum
-!
-      dsum=dsum_tmp
-!
-    endsubroutine mpireduce_sum_double_scl
+!Not used so on comment (to suppress compiler warnings)
+!    subroutine mpireduce_sum_double_scl(dsum_tmp,dsum)
+!!
+!      real(KIND=rkind8) :: dsum_tmp,dsum
+!!
+!      dsum=dsum_tmp
+!!
+!    endsubroutine mpireduce_sum_double_scl
 !***********************************************************************
-    subroutine mpireduce_sum_double_arr(dsum_tmp,dsum,nreduce)
-!
-      integer :: nreduce
-      real(KIND=rkind8), dimension(nreduce) :: dsum_tmp,dsum
-!
-      dsum=dsum_tmp
-!
-    endsubroutine mpireduce_sum_double_arr
+!Not used so on comment (to suppress compiler warnings)
+!    subroutine mpireduce_sum_double_arr(dsum_tmp,dsum,nreduce)
+!!
+!      integer :: nreduce
+!      real(KIND=rkind8), dimension(nreduce) :: dsum_tmp,dsum
+!!
+!      dsum=dsum_tmp
+!!
+!    endsubroutine mpireduce_sum_double_arr
 !***********************************************************************
-    subroutine mpireduce_sum_double_arr2(dsum_tmp,dsum,nreduce)
-!
-      integer, dimension(2) :: nreduce
-      real(KIND=rkind8), dimension(nreduce(1),nreduce(2)) :: dsum_tmp,dsum
-!
-      dsum=dsum_tmp
-!
-    endsubroutine mpireduce_sum_double_arr2
+!Not used so on comment (to suppress compiler warnings)
+!    subroutine mpireduce_sum_double_arr2(dsum_tmp,dsum,nreduce)
+!!
+!      integer, dimension(2) :: nreduce
+!      real(KIND=rkind8), dimension(nreduce(1),nreduce(2)) :: dsum_tmp,dsum
+!!
+!      dsum=dsum_tmp
+!!
+!    endsubroutine mpireduce_sum_double_arr2
 !***********************************************************************
-    subroutine mpireduce_sum_double_arr3(dsum_tmp,dsum,nreduce)
-!
-      integer, dimension(3) :: nreduce
-      real(KIND=rkind8), dimension(nreduce(1),nreduce(2),nreduce(3)) :: dsum_tmp,dsum
-!
-      dsum=dsum_tmp
-!
-    endsubroutine mpireduce_sum_double_arr3
+!Not used so on comment (to suppress compiler warnings)
+!    subroutine mpireduce_sum_double_arr3(dsum_tmp,dsum,nreduce)
+!!
+!      integer, dimension(3) :: nreduce
+!      real(KIND=rkind8), dimension(nreduce(1),nreduce(2),nreduce(3)) :: dsum_tmp,dsum
+!!
+!      dsum=dsum_tmp
+!!
+!    endsubroutine mpireduce_sum_double_arr3
 !***********************************************************************
-    subroutine mpireduce_sum_double_arr4(dsum_tmp,dsum,nreduce)
-!
-      integer, dimension(4) :: nreduce
-      real(KIND=rkind8), dimension(nreduce(1),nreduce(2),nreduce(3),nreduce(4)) :: dsum_tmp,dsum
-!
-      dsum=dsum_tmp
-!
-    endsubroutine mpireduce_sum_double_arr4
+!Not used so on comment (to suppress compiler warnings)
+!    subroutine mpireduce_sum_double_arr4(dsum_tmp,dsum,nreduce)
+!!
+!      integer, dimension(4) :: nreduce
+!      real(KIND=rkind8), dimension(nreduce(1),nreduce(2),nreduce(3),nreduce(4)) :: dsum_tmp,dsum
+!!
+!      dsum=dsum_tmp
+!!
+!    endsubroutine mpireduce_sum_double_arr4
 !***********************************************************************
     subroutine mpireduce_or_scl(flor_tmp,flor,comm)
 !
@@ -3026,6 +3079,10 @@ module Mpicomm
       integer, dimension(:) :: counts,dspls
       integer :: nlocal
       integer, optional :: comm
+      
+      call keep_compiler_quiet(counts)
+      call keep_compiler_quiet(dspls)
+      call keep_compiler_quiet(nlocal,comm)
 
       dest=src
 
@@ -3039,6 +3096,7 @@ module Mpicomm
 
       dest=src
       lerr=.false.
+      call keep_compiler_quiet(nlocal)
 
     endfunction mpiscatterv_real
 !***********************************************************************
@@ -3050,6 +3108,7 @@ module Mpicomm
 
       dest=src
       lerr=.false.
+      call keep_compiler_quiet(nlocal)
 
     endfunction mpiscatterv_int
 !***********************************************************************
@@ -3058,6 +3117,7 @@ module Mpicomm
 ! 20-oct-21/MR: coded
 !
       real, dimension(:,:,:,:), allocatable :: frgn_buffer
+      call keep_compiler_quiet(frgn_buffer)
 
     endsubroutine initialize_foreign_comm
 !***********************************************************************
@@ -3071,6 +3131,7 @@ module Mpicomm
 
       call keep_compiler_quiet(nvars)
       call keep_compiler_quiet(frgn_buffer)
+      call keep_compiler_quiet(lnonblock)
 
     endsubroutine get_foreign_snap_initiate
 !***********************************************************************
@@ -3084,6 +3145,7 @@ module Mpicomm
 
       call keep_compiler_quiet(ivar1,ivar2)
       call keep_compiler_quiet(f,frgn_buffer,interp_buffer)
+      call keep_compiler_quiet(lnonblock)
 
     endsubroutine get_foreign_snap_finalize
 !***********************************************************************
@@ -3095,6 +3157,8 @@ module Mpicomm
       real :: dt_foreign
       
       update_foreign_data=.false.
+      call keep_compiler_quiet(dt_foreign)
+      call keep_compiler_quiet_dble(t)
 
     endfunction update_foreign_data
 !***********************************************************************
@@ -3131,5 +3195,19 @@ module Mpicomm
       f(l1:l2,m1:m2,n1:n2,indvar1:indvar2) = a
 
     endsubroutine scatter_snapshot
+!***********************************************************************
+    subroutine fetch_to_process_masked(array,size,mask,ranks,irank)
+
+      integer, intent(in) :: size
+      real, dimension(size), intent(inout) :: array
+      real, dimension(size), intent(in) :: mask
+      integer, dimension(size), intent(in) :: ranks
+      integer, optional, intent(in) :: irank
+
+      call keep_compiler_quiet(size,irank)
+      call keep_compiler_quiet(array,mask)
+      call keep_compiler_quiet(ranks)
+
+    endsubroutine fetch_to_process_masked
 !***********************************************************************
 endmodule Mpicomm

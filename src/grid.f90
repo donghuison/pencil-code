@@ -15,6 +15,7 @@ module Grid
 !
   use Cdata
   use Messages
+  use General, only: idiv
 !
   implicit none
 !
@@ -437,7 +438,7 @@ module Grid
        case ('band','sus')
           a = 1.0
           if (lsymmgrid(1)) then
-            xi1star=nxgrid/2
+            xi1star=idiv(nxgrid,2)
           else
             xi1star=find_star_bisection(a*xi1lo,a*xi1up,x00,x00+Lx,xyz_star(1),grid_func(1),&
                  param2=(/dxi_fact(1), trans_width(1), trans_delta(1)/))/a
@@ -611,8 +612,10 @@ module Grid
               xi2(i)=0.5-nghost+0.5+(ipy*ny+i-1)*&
                 (nygrid+2.*(nghost-0.5)-1)/(nygrid+2.*nghost-1)
             enddo
+            !The max is to avoid division by zero that stops compilation.
+            !It will not influence results as long as nghost > 0
             xi2proc = (/ (real(1 - nghost) + (real(nghost + i * ny) - 0.5) * real(mygrid - 2) &
-                                                                           / real(mygrid - 1), i = 0, nprocy) /)
+                                                                           / max(real(mygrid - 1),1.), i = 0, nprocy) /)
           endif
 !
           call grid_profile(xi2,grid_func(2),g2,g2der1,g2der2,dxyz= &
@@ -655,7 +658,7 @@ module Grid
        case ('band','sus')
           a = 1.0
           if (lsymmgrid(2)) then 
-            xi2star=nygrid/2
+            xi2star=idiv(nygrid,2)
           else
              xi2star=find_star_bisection(a*xi2lo,a*xi2up,y00,y00+Ly,xyz_star(2),grid_func(2),&
                   param2=(/dxi_fact(2), trans_width(2), trans_delta(2)/))/a
@@ -1387,8 +1390,10 @@ module Grid
 !
       if (nzgrid==1) then       ! switch off coarsening if no z-extent
         ncoarse=0
-      elseif (ncoarse>nz/nghost) then
-        ncoarse=nz/nghost
+      !The maxes are to avoid divisions by zero that stop compilation
+      !They will not influence the results as long as nghost > 0
+      elseif (ncoarse>floor(nz/real(max(nghost,1)))) then
+        ncoarse=floor(nz/real(max(nghost,1)))
         call warning('initialize_grid','there are jumped-over processors due to grid coarsening'// &
                      ' -> ncoarse reduced to floor(nz/nghost)='//trim(itoa(ncoarse)))
       endif
@@ -1503,21 +1508,23 @@ module Grid
 !  Not strictly needed but give a slightly
 !  performance boost on equidistant cartesian
 !
-      dx1_scalar = dx_1(nghost)
-      dy1_scalar = dy_1(nghost)
-      dz1_scalar = dz_1(nghost)
+      if(nghost > 0) then
+        dx1_scalar = dx_1(nghost)
+        dy1_scalar = dy_1(nghost)
+        dz1_scalar = dz_1(nghost)
 
-      dx2_scalar = dx1_scalar*dx1_scalar
-      dy2_scalar = dy1_scalar*dy1_scalar
-      dz2_scalar = dz1_scalar*dz1_scalar
+        dx2_scalar = dx1_scalar*dx1_scalar
+        dy2_scalar = dy1_scalar*dy1_scalar
+        dz2_scalar = dz1_scalar*dz1_scalar
 
-      dx4_scalar = dx2_scalar*dx2_scalar
-      dy4_scalar = dy2_scalar*dy2_scalar
-      dz4_scalar = dz2_scalar*dz2_scalar
+        dx4_scalar = dx2_scalar*dx2_scalar
+        dy4_scalar = dy2_scalar*dy2_scalar
+        dz4_scalar = dz2_scalar*dz2_scalar
 
-      dx6_scalar = dx4_scalar*dx2_scalar
-      dy6_scalar = dy4_scalar*dy2_scalar
-      dz6_scalar = dz4_scalar*dz2_scalar
+        dx6_scalar = dx4_scalar*dx2_scalar
+        dy6_scalar = dy4_scalar*dy2_scalar
+        dz6_scalar = dz4_scalar*dz2_scalar
+      endif
 !
     endsubroutine initialize_grid
 !***********************************************************************
@@ -1578,28 +1585,29 @@ if (abs(sum(ws)-1.)>1e-7) write(iproc+40,'(6(e12.5,1x), e12.5)') ws, sum(ws)
 
     endsubroutine coarsegrid_interp
 !***********************************************************************
-    subroutine quintic_interp(nn,a,ninds,dc)
-
-      integer :: nn
-      real, dimension(:,:) :: a
-      integer, dimension(:) :: ninds
-      real :: dc
-! interpolation weights: 1/([-120,24,-12,12,-24,120]*dx^5) =
-! [-0.00833333,0.0416667,-0.0833333,0.0833333,-0.0416667,0.00833333]*dx^-5
-
-      integer :: iv,izu
-      real, dimension(6), parameter :: coefs = &
-            (/-0.00833333,0.0416667,-0.0833333,0.0833333,-0.0416667,0.00833333/)
-
-      izu=ipz*nz+nghost
-
- !     dels=zgrid(inds)-zgrid(nn)
-      do iv=1,mvar
-        a(nn,iv) = sum(a(ninds,iv)*coefs)/dc**(-5)
-      enddo
-
-    endsubroutine quintic_interp
-!***********************************************************************
+!TP: on comment since not used (to suppress compiler warnings)
+!    subroutine quintic_interp(nn,a,ninds,dc)
+!
+!      integer :: nn
+!      real, dimension(:,:) :: a
+!      integer, dimension(:) :: ninds
+!      real :: dc
+!! interpolation weights: 1/([-120,24,-12,12,-24,120]*dx^5) =
+!! [-0.00833333,0.0416667,-0.0833333,0.0833333,-0.0416667,0.00833333]*dx^-5
+!
+!      integer :: iv,izu
+!      real, dimension(6), parameter :: coefs = &
+!            (/-0.00833333,0.0416667,-0.0833333,0.0833333,-0.0416667,0.00833333/)
+!
+!      izu=ipz*nz+nghost
+!
+! !     dels=zgrid(inds)-zgrid(nn)
+!      do iv=1,mvar
+!        a(nn,iv) = sum(a(ninds,iv)*coefs)/dc**(-5)
+!      enddo
+!
+!    endsubroutine quintic_interp
+!!***********************************************************************
     subroutine save_grid(lrestore)
 !
 !  Saves grid into local statics (needed for downsampled output)
@@ -2054,15 +2062,9 @@ if (abs(sum(ws)-1.)>1e-7) write(iproc+40,'(6(e12.5,1x), e12.5)') ws, sum(ws)
       real, optional, dimension(2) :: xistep,delta
       real, optional, dimension(3) :: param2
       real :: m
-      real :: ampl,width,deltai,width_cells,delta_cells
-      real, dimension(size(xi,1))           :: arg1,arg2,band,dx_ratio
-      integer :: i
+      real :: ampl,width,deltai
+      real, dimension(size(xi,1))           :: arg1,arg2
 !
-      real :: alpha, w
-      real :: xc        ! center of refined region (from find_star)
-      real :: xa         ! local shifted coordinate
-      real :: sa, sb, sc  ! SUS cubic transition variables
-      real :: g_mw, g_pw, g_wd ! mapping values at boundaries for continuity
 !
       intent(in)  :: xi,grid_func,param,dxyz,xistep,delta,param2
       intent(out) :: g,gder1,gder2
@@ -2235,39 +2237,39 @@ if (abs(sum(ws)-1.)>1e-7) write(iproc+40,'(6(e12.5,1x), e12.5)') ws, sum(ws)
         if (.not. (present(dxyz) .and. present(xistep) .and. present(delta))) &
             call fatal_error('grid_profile_1D',"'step-linear' needs its parameters.")
         if (xistep(1)/=0.0) then
-          g=                                                                    &
+          g=real(                                                                    &
            dxyz(1)*0.5*(xi-delta(1)*log(cosh(dble((xi-xistep(1))/delta(1))))) + &
            dxyz(2)*0.5*(   delta(1)*log(cosh(dble((xi-xistep(1))/delta(1))))  - &
                            delta(2)*log(cosh(dble((xi-xistep(2))/delta(2)))) )+ &
-           dxyz(3)*0.5*(xi+delta(2)*log(cosh(dble((xi-xistep(2))/delta(2)))) )
+           dxyz(3)*0.5*(xi+delta(2)*log(cosh(dble((xi-xistep(2))/delta(2)))) ))
 !
           if (present(gder1)) then
             gder1=                                                      &
-              dxyz(1)*0.5*(1.0-tanh(dble((xi-xistep(1))/delta(1))) ) +  &
+              real(dxyz(1)*0.5*(1.0-tanh(dble((xi-xistep(1))/delta(1))) ) +  &
               dxyz(2)*0.5*(    tanh(dble((xi-xistep(1))/delta(1)))   -  &
                                tanh(dble((xi-xistep(2))/delta(2))) ) +  &
-              dxyz(3)*0.5*(1.0+tanh(dble((xi-xistep(2))/delta(2))) )
+              dxyz(3)*0.5*(1.0+tanh(dble((xi-xistep(2))/delta(2))) ))
 !
           endif
           if (present(gder2)) then
-            gder2=  &
+            gder2=real(  &
                 + 0.5/delta(1)*(dxyz(2)-dxyz(1))/cosh(dble((xi-xistep(1))/delta(1)))**2 &
-                + 0.5/delta(2)*(dxyz(3)-dxyz(2))/cosh(dble((xi-xistep(2))/delta(2)))**2
+                + 0.5/delta(2)*(dxyz(3)-dxyz(2))/cosh(dble((xi-xistep(2))/delta(2)))**2)
           endif
         else ! if xistep(1)=0.0, only a single step is needed
-          g=                                                                    &
+          g= real(                                                              &
            dxyz(2)*0.5*(xi-delta(2)*log(cosh(dble((xi-xistep(2))/delta(2)))) )+ &
-           dxyz(3)*0.5*(xi+delta(2)*log(cosh(dble((xi-xistep(2))/delta(2)))) )
+           dxyz(3)*0.5*(xi+delta(2)*log(cosh(dble((xi-xistep(2))/delta(2)))) ))
 !
           if (present(gder1)) then
-            gder1=                                                      &
+            gder1= real(                                                &
               dxyz(2)*0.5*(1.0-tanh(dble((xi-xistep(2))/delta(2))) ) +  &
-              dxyz(3)*0.5*(1.0+tanh(dble((xi-xistep(2))/delta(2))) )
+              dxyz(3)*0.5*(1.0+tanh(dble((xi-xistep(2))/delta(2))) ))
 !
           endif
           if (present(gder2)) then
-            gder2=  &
-                + 0.5/delta(2)*(dxyz(3)-dxyz(2))/cosh(dble((xi-xistep(2))/delta(2)))**2
+            gder2=real(  &
+                + 0.5/delta(2)*(dxyz(3)-dxyz(2))/cosh(dble((xi-xistep(2))/delta(2)))**2)
           endif
         endif
 !
@@ -2311,7 +2313,6 @@ if (abs(sum(ws)-1.)>1e-7) write(iproc+40,'(6(e12.5,1x), e12.5)') ws, sum(ws)
       real, dimension(3) :: param2
       
       real :: ampl,width_cells,delta_cells
-      real, dimension(size(xi,1)) :: arg1,arg2
       integer :: i
 !      
       real :: alpha, w
@@ -2611,10 +2612,16 @@ if (abs(sum(ws)-1.)>1e-7) write(iproc+40,'(6(e12.5,1x), e12.5)') ws, sum(ws)
       logical, intent(in), optional :: local
 !
       integer, dimension(size(xi)) :: inear
-      character(len=linelen) :: msg
       logical :: loc
       integer :: shift, inear_max
       real :: h, a, b, c, xiup
+
+      real :: xi_lo, xi_hi, xi_mid, xi_star
+      real :: gmid, glo, gup
+      real :: f_lo, f_mid, f_hi
+      real :: tol
+      integer :: i, it
+      integer, parameter :: maxit = 50
 !
 !  Sanity check.
 !
@@ -2670,6 +2677,64 @@ if (abs(sum(ws)-1.)>1e-7) write(iproc+40,'(6(e12.5,1x), e12.5)') ws, sum(ws)
 !
       case ("log") func
         xi = xiup / log(xyz1(dir) / xyz0(dir)) * log(x / xyz0(dir))
+!
+      case ('sus') func
+!
+!  Stretched-uniform-stretched grid.
+!
+        tol = 1e-10 * xiup
+        xi_star = find_star_bisection( 0.0, xiup,                 &
+             xyz0(dir), xyz0(dir)+Lxyz(dir),                      &
+             xyz_star(dir),                                       &
+             grid_func(dir),                                      &
+             param2=(/dxi_fact(dir), trans_width(dir),            &
+             trans_delta(dir)/) )
+        call grid_profile(0.0      - xi_star, grid_func(dir), glo, &
+             param2=(/dxi_fact(dir), trans_width(dir), trans_delta(dir)/))
+        call grid_profile(xiup     - xi_star, grid_func(dir), gup, &
+             param2=(/dxi_fact(dir), trans_width(dir), trans_delta(dir)/))
+!
+        ! Safety check
+        if (abs(gup - glo) < 1e-14) then
+          print *, 'SUS inverse: normalization collapse'
+          stop
+        endif
+!
+        do i=1,mx
+          xi_lo = 0.0
+          xi_hi = xiup
+          ! lower endpoint
+          call grid_profile(xi_lo - xi_star, grid_func(dir), gmid, &
+               param2=(/dxi_fact(dir), trans_width(dir), trans_delta(dir)/))
+          f_lo = xyz0(dir) + Lxyz(dir)*(gmid - glo)/(gup - glo) - x(i)
+          ! upper endpoint
+          call grid_profile(xi_hi - xi_star, grid_func(dir), gmid, &
+               param2=(/dxi_fact(dir), trans_width(dir), trans_delta(dir)/))
+          f_hi = xyz0(dir) + Lxyz(dir)*(gmid - glo)/(gup - glo) - x(i)
+          ! bracket check
+          if (f_lo * f_hi > 0.0) then
+            print *, "SUS inverse: root not bracketed for i=", i
+            print *, "x(i) =", x(i)
+            print *, "f_lo =", f_lo, "f_hi =", f_hi
+            stop
+          endif
+!
+          do it=1,maxit
+            xi_mid = 0.5*(xi_lo + xi_hi)
+            call grid_profile(xi_mid - xi_star, grid_func(dir), gmid, &
+                 param2=(/dxi_fact(dir), trans_width(dir), trans_delta(dir)/))
+            f_mid = xyz0(dir) + Lxyz(dir)*(gmid - glo)/(gup - glo) - x(i)
+            if (abs(xi_hi - xi_lo) < tol) exit
+            if (f_lo*f_mid < 0.0) then
+              xi_hi = xi_mid
+              f_hi  = f_mid
+            else
+              xi_lo = xi_mid
+              f_lo = f_mid
+            endif
+          enddo
+          xi(i) = 0.5*(xi_lo + xi_hi)
+        enddo
 !
       case default func
         call fatal_error('inverse_grid in grid.f90', &
@@ -2999,11 +3064,10 @@ if (abs(sum(ws)-1.)>1e-7) write(iproc+40,'(6(e12.5,1x), e12.5)') ws, sum(ws)
 
       dc( 1:nghost)  = coors(nghost+2:2*nghost+1)-coors(nghost+1:2*nghost)
       dc(-nghost+1:0)= dc(nghost:1:-1)
-!print*, 'DX,Y,Z=', dx,dy,dz
       call calc_coeffs_1(dc,coeffs(:,BOT))
+!
       dc(-nghost+1:0)= coors(sc-2*nghost+1:sc-nghost)-coors(sc-2*nghost:sc-nghost-1)
       dc( 1:nghost)  = dc(0:-nghost+1:-1)
-
       call calc_coeffs_1(dc,coeffs(:,TOP))
 
     endsubroutine calc_bound_coeffs

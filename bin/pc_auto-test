@@ -71,15 +71,19 @@ my %tests = (
                          helical-MHDturb
                      )],
              2 => [qw(
+                         0d-tests/particles-breakup
+                         0d-tests/reheating
                          0d-tests/heating_ionize
                          0d-tests/heating_noionize
                          0d-tests/reionization-saha
                          0d-tests/schur_triple_decomp
+                         1d-tests/Schwinger-MHD
                          1d-tests/H2_flamespeed
                          1d-tests/horndeski_choiceIII
                          1d-tests/rel-shock
                          1d-tests/inflationary-B-genesis
                          1d-tests/axionSU2back
+			 1d-tests/axionU1back
                          1d-tests/sine-Gordon
                          1d-tests/sine-Gordon_doublet
                          chiral-diffusion
@@ -175,6 +179,7 @@ my %tests = (
                          conv-slab-flat
                          coronae_heatflux_boris
                          helical-MHDturb_HDF5
+                         helical-MHDturb-noncube
                          power_xy/complex
                          power_xy/complex_iodist
                          power_xy/complex_lpowerxyhdf5/nprocx_2
@@ -183,12 +188,14 @@ my %tests = (
                          power_xy/integrate_shell
                          power_xy/integrate_shell_z
                          testfield_nonlin_z
+                         test_farray_alloc
                          spherical-convection
                          spherical-convection-corona
                          small-scale-dynamo_slope-limited-diffusion
                          meanfield_special_e_tensor_GCD
                          dust-accretion
                          superparticle_condensation
+                         mdwarf-ss-running-aver-gpu
                      )],
              # Level 4 for now contains all non-canonical tests that run,
              # but produce wrong results - and need immediate action (fixme)
@@ -257,7 +264,7 @@ my %tests = (
 	    # the test machine
 my @gpu_tests = qw(
                          1d-tests/sine-Gordon_doublet
-                         decay-reconnection
+                         decay-reconnection #not in %tests
                          spherical-gdisk-planet-thermo
 			 interstellar
                          #chiral-diffusion
@@ -278,6 +285,7 @@ my @gpu_tests = qw(
 			 #continuous-forcing-from-file
 			 #1d-tests/sod_10
                          #2d-tests/conv-slab-MLT
+                         mdwarf-ss-running-aver-gpu
                          #1d-tests/conduction/c1_readstrat
                          #1d-tests/conduction/c1_readstrat_ghost
                          1d-tests/conduction/cT1
@@ -304,6 +312,8 @@ my @gpu_tests = qw(
 			 #1d-tests/axionSU2back
 			 2d-tests/chemistry_GrayScott
 			 MRI-turbulence_hyper
+			 1d-tests/axionU1back
+			 #1d-tests/axionSU2back
                    );
 
 		   #Was tested to work but need multi-gpu Fourier 1d-tests/horndeski_choiceIII
@@ -1040,15 +1050,15 @@ sub my_ok {
         # report only first failure:
         $failed{$dir} = $phase unless defined($failed{$dir});
         mark_failed ($dir);
-	if ($gpu) {
-	    if ($phase eq 'compilation') {
-	        system ('cat src/astaroth/ac_build.log >> '.$log_dir.'/'.$dir.'/build.log');
-	    } else {
-	        if (($phase eq 'running') || ($phase eq 'results')) {
-	            system ('cat ac_compilation.log >> '.$log_dir.'/'.$dir.'/run.log');
-	        }
-	    }
-	}
+    if ($gpu && $log_dir) {
+        if ($phase eq 'compilation') {
+            system ('cat src/astaroth/ac_build.log >> '.$log_dir.'/'.$dir.'/build.log');
+        } else {
+            if (($phase eq 'running') || ($phase eq 'results')) {
+                system ('cat ac_compilation.log >> '.$log_dir.'/'.$dir.'/run.log');
+            }
+        }
+    }
     }
 
 
@@ -1485,7 +1495,7 @@ sub test_run {
 # ---------------------------------------------------------------------- #
 sub is_double_precision {
     #Would use dim.dat but that does not exist with HDF5
-    if (-r 'data/DOUBLE_PRECISION_RUN') {
+    if (-r 'data/allprocs/signals/DOUBLE_PRECISION_RUN') {
         return 1;
     }
     return 0;

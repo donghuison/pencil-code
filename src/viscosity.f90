@@ -30,6 +30,7 @@ module Viscosity
   character (len=labellen), dimension(nvisc_max) :: ivisc=''
   character (len=labellen) :: lambda_profile='uniform', tdep_nu_type='powerlaw'
   real :: nu=0.0, nu_cspeed=0.5
+  real :: mu=0.0
   real :: nu_tdep=0.0, nu_tdep_exponent=0.0, nu_tdep_t0=0.0, nu_tdep_toffset=0.0
   real :: nu_tdep_t1=0.0, nu_tdep_t2=0.0, nu_tdep_kcs=0.0, nu_r_reduce=0.0
   real :: zeta=0.0, nu_mol=0.0, nu_hyper2=0.0, nu_hyper3=0.0
@@ -43,12 +44,14 @@ module Viscosity
   real :: rzero_lambda=impossible,wlambda=0.,rmax_lambda=impossible
   real :: offamp_lambda=1.,r1_lambda=impossible,r2_lambda=impossible
   real :: lambda_jump=0.,roffset_lambda=0.
+  real :: PrM=0.0          !PAR_DOC: given value to compute nu based on sigEm_all
   real :: PrM_turb=0.0
   real :: meanfield_nuB=0.0
   real :: nu_infinity=0.,nu0=0.,non_newton_lambda=0.,carreau_exponent=0.
   real :: nu_smag_Ma2_power=0.0
   real :: nu_rcyl_min=impossible
-  real, pointer :: cs_t
+  real, pointer :: cs_t, sigEm_all
+  logical, pointer :: lconservative,lrelativistic
   character (len=labellen) :: nnewton_type='none'
   character (len=labellen) :: div_sld_visc='2nd'
   real :: nnewton_tscale=0.0,nnewton_step_width=0.0
@@ -125,9 +128,12 @@ module Viscosity
   real :: no_visc_heat_z0=max_real, no_visc_heat_zwidth=0.0
   real :: damp_sound=0., nu_tdep_ascale_power=0.
   real :: h_sld_visc=2.0, nlf_sld_visc=1.0
+  logical :: lrate_of_strain_as_aux = .false.
+  integer :: iSij=0
+
 !
   namelist /viscosity_run_pars/ &
-      limplicit_viscosity, nu, nu_tdep_exponent, &
+      limplicit_viscosity, nu, mu, nu_tdep_exponent, &
       lvisc_nu_tdep_t0_norm, nu_tdep_t0, nu_tdep_t1, nu_tdep_t2, nu_tdep_kcs, nu_tdep_toffset, &
       zeta, nu_hyper2, nu_hyper3, ivisc, nu_mol, C_smag, gamma_smag, nu_shock, &
       nu_aniso_hyper3, lvisc_heat_as_aux,nu_jump,znu,xnu,xnu2,widthnu,widthnu2, &
@@ -135,7 +141,7 @@ module Viscosity
       llambda_scale_with_nu, Lambda_V0, Lambda_V1, Lambda_H1, &
       lambda_profile,rzero_lambda,wlambda,r1_lambda,r2_lambda,rmax_lambda, &
       offamp_lambda,lambda_jump,lmeanfield_nu,lmagfield_nu,meanfield_nuB, &
-      PrM_turb, roffset_lambda, nu_spitzer, nu_jump2, nu_spitzer_max, &
+      PrM, PrM_turb, roffset_lambda, nu_spitzer, nu_jump2, nu_spitzer_max, &
       widthnu_shock, znu_shock, xnu_shock, nu_jump_shock, dynu, &
       nnewton_type,nu_infinity,nu0,non_newton_lambda,carreau_exponent, &
       nnewton_tscale,nnewton_step_width,lKit_Olem,damp_sound,luse_nu_rmn_prof, &
@@ -143,7 +149,7 @@ module Viscosity
       lvisc_smag_Ma, nu_smag_Ma2_power, nu_cspeed, lno_visc_heat_zbound, &
       no_visc_heat_z0,no_visc_heat_zwidth, div_sld_visc ,lvisc_forc_as_aux, &
       lvisc_rho_nu_const_prefact, nu_rcyl_min, nu_r_reduce, &
-      tdep_nu_type, nu_tdep_ascale_power
+      tdep_nu_type, nu_tdep_ascale_power,lrate_of_strain_as_aux
 !
 ! diagnostic variable markers (needs to be consistent with reset list below)
 !
@@ -240,7 +246,6 @@ module Viscosity
 !
   integer :: enum_nnewton_type = 0
   integer :: enum_div_sld_visc = 0
-  integer, dimension(nvisc_max) :: enum_ivisc= 0
   character (len=labellen) :: ivis_res
 !
   contains
@@ -306,12 +311,18 @@ module Viscosity
         aux_count=aux_count+3
         ivisc_forcx=ivisc_forc;ivisc_forcy=ivisc_forc+1;ivisc_forcz=ivisc_forc+2
       endif
+
+      if (lrate_of_strain_as_aux) then
+        call farray_register_auxiliary('Sij',iSij,vector=6,communicated=.true.,rhs=.true.)
+      endif
+
 !
 !  Shared variables.
 !
       call put_shared_variable('lvisc_hyper3_nu_const_strict',lvisc_hyper3_nu_const_strict, &
                                caller='register_viscosity')
       call put_shared_variable('nu',nu)
+      call put_shared_variable('nu_tdep',nu_tdep)
 !
 ! Even if there is no lambda_effect, that has to be
 ! communicated to the boundary conditions. In case llambda_effect=T,
@@ -393,6 +404,9 @@ module Viscosity
       lvisc_snr_damp=.false.
       lvisc_spitzer=.false.
       lvisc_slope_limited=.false.
+
+      call get_shared_variable('lconservative',lconservative,caller='initialize_viscosity')
+      call get_shared_variable('lrelativistic',lrelativistic)
 !
 !  For Boussinesq, density is constant, so must use lvisc_simplified.
 !
@@ -413,8 +427,10 @@ module Viscosity
         case ('nu-non-newtonian')
           if (lroot) print*,'viscous force: div(nu*Sij)'
           lvisc_nu_non_newtonian=.true.
-        case ('rho-nu-const','rho_nu-const', '1')
-          if (lroot) print*,'viscous force: mu/rho*(del2u+graddivu/3)'
+        case ('rho-nu-const','rho_nu-const', 'mu-const', '1')
+          if (mu == 0.0) mu = nu
+          if (lvisc_rho_nu_const_prefact .and. lroot) print*,'viscous force: mu*(del2u+graddivu/3)'
+          if (.not. lvisc_rho_nu_const_prefact .and. lroot) print*,'viscous force: mu/rho*(del2u+graddivu/3)'
           lvisc_rho_nu_const=.true.
         case ('rho-nu-const-bulk')
           if (lroot) print*,'viscous force: (zeta/rho)*graddivu'
@@ -589,16 +605,21 @@ module Viscosity
           call fatal_error('calc_viscous_forcing','No such ivisc('//trim(itoa(i))//'): '//trim(ivisc(i)))
         endselect
       enddo
+
 !
 !  If we're timestepping, die or warn if the viscosity coefficient that
 !  corresponds to the chosen viscosity type is not set.
 !
+
       if (lrun) then
-        if ((lvisc_simplified.or.lvisc_rho_nu_const.or. &
+        if ((lvisc_simplified.or. &
              lvisc_sqrtrho_nu_const.or.lvisc_nu_const.or. &
              lvisc_nu_tdep.or.lvisc_nu_cspeed.or. &
              lvisc_mu_cspeed).and.nu==0.0) &
             call warning('initialize_viscosity','Viscosity coefficient nu is zero')
+
+        if (lvisc_rho_nu_const .and. mu==0.0) &
+            call warning('initialize_viscosity','Viscosity coefficient mu is zero')
 
         if ((lvisc_rho_nu_const_bulk.or.lvisc_nu_const_bulk).and.zeta==0.0) &
             call fatal_error('initialize_viscosity','Viscosity coefficient zeta is zero')
@@ -738,6 +759,12 @@ module Viscosity
         endif
       endif
 !
+!  Get sigEm_all if we need it for viscosity calculation.
+!
+      if (lvisc_nu_tdep .and. tdep_nu_type=='PrM_sigEm') then
+        call get_shared_variable('sigEm_all', sigEm_all)
+      endif
+!
 !  Compute mask for x-averaging where x is in vis_xaver_range.
 !  Normalize such that the average over the full domain
 !  gives still unity.
@@ -783,6 +810,7 @@ module Viscosity
           exit
         endif
       enddo
+
 
     endsubroutine initialize_viscosity
 !***********************************************************************
@@ -1000,7 +1028,7 @@ module Viscosity
            lvisc_nu_profr_twosteps .or. lvisc_nu_shock_profz .or. &
            lvisc_nut_from_magnetic .or. lvisc_nu_shock_profr .or. lvisc_mu_cspeed)) &
         lpenc_requested(i_TT1)=.true.
-      if (lvisc_rho_nu_const .or. lvisc_rho_nu_const_bulk .or. &
+      if ((lvisc_rho_nu_const .and. .not. lrate_of_strain_as_aux) .or. lvisc_rho_nu_const_bulk .or. &
           lvisc_sqrtrho_nu_const .or. &
           lvisc_nu_const .or. lvisc_nu_tdep .or. lvisc_nu_cspeed .or. &
           lvisc_nu_prof.or.lvisc_nu_profx.or.lvisc_spitzer .or. &
@@ -1047,7 +1075,7 @@ module Viscosity
       endif
       if (lvisc_nu_profr_powerlaw) lpenc_requested(i_rcyl_mn)=.true.
       if (lvisc_nu_profr_powerlaw.and.luse_nu_rmn_prof) lpenc_requested(i_r_mn)=.true.
-      if (lvisc_rho_nu_const .or. &
+      if ((lvisc_rho_nu_const .and. .not. lrate_of_strain_as_aux) .or. &
           lvisc_sqrtrho_nu_const .or. lvisc_nu_const .or. lvisc_nu_tdep .or. &
           lvisc_smag .or. lvisc_smag_simplified .or. lvisc_smag_cross_simplified .or. &
           lvisc_nu_prof .or. lvisc_nu_profx .or. lvisc_spitzer .or. &
@@ -1262,6 +1290,11 @@ module Viscosity
         lpenc_requested(i_divu)=.true.
         lpenc_requested(i_glnrho)=.true.
       endif
+      if (lvisc_hyper3_polar .or. &
+          lvisc_hyper3_mesh  .or. &
+          lvisc_hyper3_csmesh) then
+          lpenc_requested(i_uij6)=.true.
+      endif
 !
 !  fviscmax has been revised to show absolute maximum rather than component
 !  maximum and largest component negative no longer computed. Sign of the
@@ -1286,6 +1319,81 @@ module Viscosity
 !
     endsubroutine pencil_interdep_viscosity
 !***********************************************************************
+    subroutine calc_visc_slope_limited(f,p)
+!
+!   16-apr-26/TP: carved from calc_pencils_viscosity
+!
+      use Sub, only: calc_slope_diff_flux
+      real, intent(in), contiguous, dimension(:,:,:,:) :: f
+      type(pencil_case), intent(inout) :: p
+
+      real, dimension (nx,3) :: tmp
+      real, dimension (nx) :: div_flux,viscous_heat
+      real, dimension (nx,3,3) :: d_sld_flux
+      integer :: i
+!
+!
+      !p%char_speed_slope=f(l1:l2,m,n,iFF_char_c)            ! old implementation
+      !p%fvisc=p%fvisc-f(l1:l2,m,n,iFF_div_uu:iFF_div_uu+2)  ! old implementation
+!
+!     use sld only in last sub timestep
+!
+      if (lviscosity_heat) then
+        if (lcylindrical_coords .or. lspherical_coords) then
+          do i=1,3
+            call calc_slope_diff_flux(f,iux+(i-1),h_sld_visc,nlf_sld_visc,tmp(:,i),div_sld_visc, &
+                                      HEAT=viscous_heat,HEAT_TYPE='viscose', &
+                                      FLUX1=d_sld_flux(:,1,i),FLUX2=d_sld_flux(:,2,i),FLUX3=d_sld_flux(:,3,i))
+            if (lpencil(i_visc_heat)) p%visc_heat=p%visc_heat+max(0.0,viscous_heat)/p%rho
+          enddo
+          if (lcylindrical_coords) then
+            p%fvisc(:,1)=p%fvisc(:,1)+tmp(:,1)-(d_sld_flux(:,2,2))/x(l1:l2)
+            p%fvisc(:,2)=p%fvisc(:,2)+tmp(:,2)+(d_sld_flux(:,2,1))/x(l1:l2)
+            p%fvisc(:,3)=p%fvisc(:,3)+tmp(:,3)
+          elseif (lspherical_coords) then
+            if (lsld_notensor) then
+              p%fvisc(:,1)=p%fvisc(:,1)+tmp(:,1)
+              p%fvisc(:,2)=p%fvisc(:,2)+tmp(:,2)
+              p%fvisc(:,3)=p%fvisc(:,3)+tmp(:,3)
+            else
+              p%fvisc(:,1)=p%fvisc(:,1)+tmp(:,1)-(d_sld_flux(:,2,2)+d_sld_flux(:,3,3))/x(l1:l2)
+              p%fvisc(:,2)=p%fvisc(:,2)+tmp(:,2)+(d_sld_flux(:,2,1)-d_sld_flux(:,3,3)*cotth(m))/x(l1:l2)
+              p%fvisc(:,3)=p%fvisc(:,3)+tmp(:,3)+(d_sld_flux(:,3,1)+d_sld_flux(:,3,2)*cotth(m))/x(l1:l2)
+            endif
+          endif
+        else
+          do i=1,3
+            call calc_slope_diff_flux(f,iux+(i-1),h_sld_visc,nlf_sld_visc,div_flux,div_sld_visc, &
+                                      HEAT=viscous_heat,HEAT_TYPE='viscose')
+            p%fvisc(:,i)=p%fvisc(:,i) + div_flux 
+            if (lpencil(i_visc_heat)) p%visc_heat=p%visc_heat+max(0.0,viscous_heat)/p%rho
+          enddo
+        endif
+      else
+        if (lcylindrical_coords .or. lspherical_coords) then
+          do i=1,3
+            call calc_slope_diff_flux(f,iux+(i-1),h_sld_visc,nlf_sld_visc,tmp(:,i),div_sld_visc, &
+                                      FLUX1=d_sld_flux(:,1,i),FLUX2=d_sld_flux(:,2,i),FLUX3=d_sld_flux(:,3,i))
+          enddo
+          if (lcylindrical_coords) then
+            p%fvisc(:,1)=p%fvisc(:,1)+tmp(:,1)-(d_sld_flux(:,2,2))/x(l1:l2)
+            p%fvisc(:,2)=p%fvisc(:,2)+tmp(:,2)+(d_sld_flux(:,2,1))/x(l1:l2)
+            p%fvisc(:,3)=p%fvisc(:,3)+tmp(:,3)
+          elseif (lspherical_coords) then
+            p%fvisc(:,1)=p%fvisc(:,1)+tmp(:,1)-(d_sld_flux(:,2,2)+d_sld_flux(:,3,3))/x(l1:l2)
+            p%fvisc(:,2)=p%fvisc(:,2)+tmp(:,2)+(d_sld_flux(:,2,1)-d_sld_flux(:,3,3)*cotth(m))/x(l1:l2)
+            p%fvisc(:,3)=p%fvisc(:,3)+tmp(:,3)+(d_sld_flux(:,3,1)+d_sld_flux(:,3,2)*cotth(m))/x(l1:l2)
+          endif
+        else
+          do i=1,3
+            call calc_slope_diff_flux(f,iux+(i-1),h_sld_visc,nlf_sld_visc,div_flux,div_sld_visc)
+            p%fvisc(:,i)=p%fvisc(:,i) + div_flux 
+          enddo
+        endif
+      endif
+
+    endsubroutine calc_visc_slope_limited
+!***********************************************************************
     subroutine calc_pencils_viscosity(f,p)
 !
 !  Calculate Viscosity pencils.
@@ -1300,7 +1408,7 @@ module Viscosity
       use Diagnostics, only: max_mn_name, sum_mn_name
       use Sub
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       type (pencil_case) :: p
       intent(inout) :: f,p
 !
@@ -1310,7 +1418,7 @@ module Viscosity
       real, dimension (nx) :: lambda_phi,prof,prof2,derprof,derprof2
       real, dimension (nx) :: gradnu_effective,fac,advec_hypermesh_uu
       real, dimension (nx,3) :: deljskl2,fvisc_nnewton2
-      real, dimension (nx,3,3) :: d_sld_flux
+      real, dimension (nx,3) :: divS
 !
       integer :: i,j,ju,ii,jj,kk,ll
       logical :: ldiffus_total, ldiffus_total3
@@ -1387,13 +1495,21 @@ module Viscosity
 !
       if (lvisc_rho_nu_const) then
         if (lvisc_rho_nu_const_prefact) then
-          murho1=nu         !(=mu=dynamical viscosity)
+          murho1=mu         !(=mu=dynamical viscosity)
         else
-          murho1=nu*p%rho1  !(=mu/rho)
+          murho1=mu*p%rho1  !(=mu/rho)
         endif
-        do i=1,3
-          p%fvisc(:,i)=p%fvisc(:,i) + murho1*(p%del2u(:,i)+1.0/3.0*p%graddivu(:,i))
-        enddo
+
+        if (lrate_of_strain_as_aux) then
+          call div_tensor(f,divS,iSij)
+          do i=1,3
+            p%fvisc(:,i) = p%fvisc(:,i) + 2*murho1*divS(:,i)
+          enddo
+        else
+          do i=1,3
+            p%fvisc(:,i)=p%fvisc(:,i) + murho1*(p%del2u(:,i)+1.0/3.0*p%graddivu(:,i))
+          enddo
+        endif
         if (lpencil(i_visc_heat)) p%visc_heat=p%visc_heat+2*murho1*p%sij2
         if (ldiffus_total) p%diffus_total=p%diffus_total+murho1
       endif
@@ -1871,10 +1987,8 @@ module Viscosity
 !
       if (lvisc_hyper3_polar) then
         do j=1,3
-          ju=j+iuu-1
           do i=1,3
-            call der6(f,ju,tmp3,i,IGNOREDX=.true.)
-            p%fvisc(:,j) = p%fvisc(:,j) + nu_hyper3*pi4_1*tmp3*dline_1(:,i)**2
+            p%fvisc(:,j) = p%fvisc(:,j) + nu_hyper3*pi4_1*p%uij6(:,j,i)*dline_1(:,i)**2
           enddo
         enddo
         if (lpencil(i_visc_heat)) then
@@ -1888,13 +2002,11 @@ module Viscosity
 !
       if (lvisc_hyper3_mesh) then
         do j=1,3
-          ju=j+iuu-1
           do i=1,3
-            call der6(f,ju,tmp3,i,IGNOREDX=.true.)
             if (ldynamical_diffusion) then
-              p%fvisc(:,j) = p%fvisc(:,j) + nu_hyper3_mesh * tmp3 * dline_1(:,i)
+              p%fvisc(:,j) = p%fvisc(:,j) + nu_hyper3_mesh * p%uij6(:,j,i) * dline_1(:,i)
             else
-              p%fvisc(:,j) = p%fvisc(:,j) + nu_hyper3_mesh*pi5_1/60.* tmp3 *dline_1(:,i)
+              p%fvisc(:,j) = p%fvisc(:,j) + nu_hyper3_mesh*pi5_1/60.* p%uij6(:,j,i)*dline_1(:,i)
             endif
           enddo
         enddo
@@ -1943,11 +2055,10 @@ module Viscosity
         do j=1,3
           ju=j+iuu-1
           do i=1,3
-            call der6(f,ju,tmp3,i,IGNOREDX=.true.)
             if (ldynamical_diffusion) then
-              p%fvisc(:,j)=p%fvisc(:,j)+nu_hyper3_mesh*sqrt(p%cs2)*tmp3*dline_1(:,i)
+              p%fvisc(:,j)=p%fvisc(:,j)+nu_hyper3_mesh*sqrt(p%cs2)*p%uij6(:,j,i)*dline_1(:,i)
             else
-              p%fvisc(:,j)=p%fvisc(:,j)+nu_hyper3_mesh*sqrt(p%cs2)*pi5_1/60.*tmp3*dline_1(:,i)
+              p%fvisc(:,j)=p%fvisc(:,j)+nu_hyper3_mesh*sqrt(p%cs2)*pi5_1/60.*p%uij6(:,j,i)*dline_1(:,i)
             endif
           enddo
         enddo
@@ -2214,68 +2325,7 @@ module Viscosity
 !  following Rempel (2014). Here the divergence of the flux is used.
 !
       if (lvisc_slope_limited .and. llast) then
-!
-!       tmp3 :  divergence of flux
-!       tmp4 :  heating, switch to turn on heating calc.
-!
-        !p%char_speed_slope=f(l1:l2,m,n,iFF_char_c)            ! old implementation
-        !p%fvisc=p%fvisc-f(l1:l2,m,n,iFF_div_uu:iFF_div_uu+2)  ! old implementation
-!
-!       use sld only in last sub timestep
-!
-        if (lviscosity_heat) then
-          if (lcylindrical_coords .or. lspherical_coords) then
-            do i=1,3
-              call calc_slope_diff_flux(f,iux+(i-1),p,h_sld_visc,nlf_sld_visc,tmp2(:,i),div_sld_visc, &
-                                        HEAT=tmp4,HEAT_TYPE='viscose', &
-                                        FLUX1=d_sld_flux(:,1,i),FLUX2=d_sld_flux(:,2,i),FLUX3=d_sld_flux(:,3,i))
-              if (lpencil(i_visc_heat)) p%visc_heat=p%visc_heat+max(0.0,tmp4)/p%rho
-            enddo
-            if (lcylindrical_coords) then
-              p%fvisc(:,1)=p%fvisc(:,1)+tmp2(:,1)-(d_sld_flux(:,2,2))/x(l1:l2)
-              p%fvisc(:,2)=p%fvisc(:,2)+tmp2(:,2)+(d_sld_flux(:,2,1))/x(l1:l2)
-              p%fvisc(:,3)=p%fvisc(:,3)+tmp2(:,3)
-            elseif (lspherical_coords) then
-              if (lsld_notensor) then
-                p%fvisc(:,1)=p%fvisc(:,1)+tmp2(:,1)
-                p%fvisc(:,2)=p%fvisc(:,2)+tmp2(:,2)
-                p%fvisc(:,3)=p%fvisc(:,3)+tmp2(:,3)
-              else
-                p%fvisc(:,1)=p%fvisc(:,1)+tmp2(:,1)-(d_sld_flux(:,2,2)+d_sld_flux(:,3,3))/x(l1:l2)
-                p%fvisc(:,2)=p%fvisc(:,2)+tmp2(:,2)+(d_sld_flux(:,2,1)-d_sld_flux(:,3,3)*cotth(m))/x(l1:l2)
-                p%fvisc(:,3)=p%fvisc(:,3)+tmp2(:,3)+(d_sld_flux(:,3,1)+d_sld_flux(:,3,2)*cotth(m))/x(l1:l2)
-              endif
-            endif
-          else
-            do i=1,3
-              call calc_slope_diff_flux(f,iux+(i-1),p,h_sld_visc,nlf_sld_visc,tmp3,div_sld_visc, &
-                                        HEAT=tmp4,HEAT_TYPE='viscose')
-              p%fvisc(:,i)=p%fvisc(:,i) + tmp3
-              if (lpencil(i_visc_heat)) p%visc_heat=p%visc_heat+max(0.0,tmp4)/p%rho
-            enddo
-          endif
-        else
-          if (lcylindrical_coords .or. lspherical_coords) then
-            do i=1,3
-              call calc_slope_diff_flux(f,iux+(i-1),p,h_sld_visc,nlf_sld_visc,tmp2(:,i),div_sld_visc, &
-                                        FLUX1=d_sld_flux(:,1,i),FLUX2=d_sld_flux(:,2,i),FLUX3=d_sld_flux(:,3,i))
-            enddo
-            if (lcylindrical_coords) then
-              p%fvisc(:,1)=p%fvisc(:,1)+tmp2(:,1)-(d_sld_flux(:,2,2))/x(l1:l2)
-              p%fvisc(:,2)=p%fvisc(:,2)+tmp2(:,2)+(d_sld_flux(:,2,1))/x(l1:l2)
-              p%fvisc(:,3)=p%fvisc(:,3)+tmp2(:,3)
-            elseif (lspherical_coords) then
-              p%fvisc(:,1)=p%fvisc(:,1)+tmp2(:,1)-(d_sld_flux(:,2,2)+d_sld_flux(:,3,3))/x(l1:l2)
-              p%fvisc(:,2)=p%fvisc(:,2)+tmp2(:,2)+(d_sld_flux(:,2,1)-d_sld_flux(:,3,3)*cotth(m))/x(l1:l2)
-              p%fvisc(:,3)=p%fvisc(:,3)+tmp2(:,3)+(d_sld_flux(:,3,1)+d_sld_flux(:,3,2)*cotth(m))/x(l1:l2)
-            endif
-          else
-            do i=1,3
-              call calc_slope_diff_flux(f,iux+(i-1),p,h_sld_visc,nlf_sld_visc,tmp3,div_sld_visc)
-              p%fvisc(:,i)=p%fvisc(:,i) + tmp3
-            enddo
-          endif
-        endif
+        call calc_visc_slope_limited(f,p)
       endif
 !
 !  viscous force: in Schur-223 flow we use
@@ -2358,9 +2408,12 @@ module Viscosity
       if (lupdate_courant_dt) then
 
         diffus_nu = p%diffus_total*dxyz_2
+        maxdiffus =max(maxdiffus,diffus_nu)
+
         !if (ldynamical_diffusion .and. lvisc_hyper3_mesh) then
 !2026-01-01/axel: put everthing under lvisc_hyper3_mesh, because otherwise diffus_nu3 would be set while lvisc_hyper3_mesh=F
 !2026-01-03/axel: included also lvisc_hyper3_rho_nu_const_symm and a few, but others may still be needed.
+!2026-05-07/axel: moved the line maxdiffus3=max(maxdiffus3,diffus_nu3) under "if (lvisc_hyper3_mesh ..."
         if (lvisc_hyper3_mesh .or. lvisc_hyper3_simplified .or. lvisc_hyper3_simplified_tdep .or. &
             lvisc_hyper3_mesh_residual .or. lvisc_hyper3_mesh .or. lvisc_hyper3_rho_nu_const .or. &
             lvisc_hyper3_mu_const_strict .or. lvisc_hyper3_nu_const .or. &
@@ -2372,10 +2425,11 @@ module Viscosity
           else
             diffus_nu3 = p%diffus_total3*dxyz_6
           endif
+          maxdiffus3=max(maxdiffus3,diffus_nu3)
         endif
-        maxdiffus =max(maxdiffus ,diffus_nu)
-        maxdiffus2=max(maxdiffus2,p%diffus_total2*dxyz_4)
-        maxdiffus3=max(maxdiffus3,diffus_nu3)
+
+        if (lvisc_hyper2_simplified.or.lvisc_hyper2_simplified_tdep) &
+          maxdiffus2=max(maxdiffus2,p%diffus_total2*dxyz_4)
 
       endif
 !
@@ -2394,12 +2448,15 @@ module Viscosity
 
 !
       use Sub, only: div, calc_all_diff_fluxes, grad, dot_mn, calc_sij2, &
-                     stagger_to_base_interp_1st, stagger_to_base_interp_3rd
+                     stagger_to_base_interp_1st, stagger_to_base_interp_3rd, &
+                     gij_v_times_s, gij, traceless_strain
       use General, only: reduce_grad_dim,notanumber
       use DensityMethods, only: getrho
       use Boundcond, only: update_ghosts
 
-      real, dimension(mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
+      real, dimension (nx,3,3) :: uij,Sij
+      real, dimension (nx) :: divu
 
       real, dimension(nx) :: rho, tmp
 
@@ -2433,6 +2490,34 @@ module Viscosity
 !
       endif
 !
+! Calculates the viscous stress tensor
+!
+      if (lrate_of_strain_as_aux) then
+        if (.not.lcartesian_coords) &
+           call not_implemented('viscosity_after_boundary','for curvilinear coordinates')
+
+        do m=m1,m2
+        do n=n1,n2
+          if (lconservative) then
+            call gij_v_times_s(f,iuu,irho,uij)
+          else
+            call gij(f,iuu,uij,1)
+          endif
+          divu = uij(:,1,1) + uij(:,2,2) + uij(:,3,3)
+
+          call traceless_strain(uij,divu,Sij)
+
+          f(l1:l2,m,n,iSij+0) = Sij(:,1,1)
+          f(l1:l2,m,n,iSij+1) = Sij(:,2,2)
+          f(l1:l2,m,n,iSij+2) = Sij(:,3,3)
+          f(l1:l2,m,n,iSij+3) = Sij(:,1,2)
+          f(l1:l2,m,n,iSij+4) = Sij(:,1,3)
+          f(l1:l2,m,n,iSij+5) = Sij(:,2,3)
+        enddo
+        enddo
+
+      endif
+!
 !  The following allows us to let nu change with time, t-nu_tdep_toffset.
 !  The nu_tdep_toffset is used in cosmology where time starts at t=1.
 !  lresi_nu_tdep_t0_norm is not the default because of backward compatbility.
@@ -2454,6 +2539,9 @@ module Viscosity
           else
             nu_tdep=cs_t/nu_tdep_kcs
           endif
+        case ('PrM_sigEm')
+          nu_tdep=min(nu,PrM/sigEm_all)
+          !nu_tdep=nu
         case default
           call fatal_error('viscosity_after_boundary','unknown value of tdep_nu_type')
         endselect
@@ -2609,7 +2697,7 @@ module Viscosity
 !
       use Sub, only: cubic_step
 !
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: df
       type (pencil_case) :: p
       real, dimension (nx),intent(inout) :: Hmax
 !
@@ -2658,23 +2746,28 @@ module Viscosity
 !
       use Diagnostics, only: max_mn_name
 !
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: df
       type (pencil_case) :: p
 !
       intent (in) :: p
       intent (inout) :: df
+      real, dimension(nx,3) :: fvisc
 !
       integer :: i
 !
 !  Add viscosity to equation of motion
 !
-      if (lmagfield_nu) then
-        do i=1,3
-          df(l1:l2,m,n,iux+i-1) = df(l1:l2,m,n,iux+i-1) + p%fvisc(:,i)/(1.+p%b2/meanfield_nuB**2)
-        enddo
-      else
-        df(l1:l2,m,n,iux:iuz) = df(l1:l2,m,n,iux:iuz) + p%fvisc
+      fvisc = p%fvisc
+      if (lmagfield_nu) then; do i=1,3; fvisc(:,i) = fvisc(:,i)/(1.+p%b2/meanfield_nuB**2); enddo; endif
+!
+!  All viscous forces are based on the velocity and represent accelerations.
+!  Hence, for lconservative=T, we have to multiply with rho.
+!
+      if (.not. lrelativistic .and. lconservative) then
+        do i=1,3; fvisc(:,i) = fvisc(:,i)*p%rho; enddo
       endif
+
+      df(l1:l2,m,n,iux:iuz) = df(l1:l2,m,n,iux:iuz) + fvisc
 
       call calc_diagnostics_viscosity(p)
 
@@ -2689,6 +2782,10 @@ module Viscosity
 !
       real, dimension (nx)  :: Reshock, fvisc2, uus, tmp, qfvisc
       real, dimension (nx,3):: nuD2uxb, fluxv
+      logical :: ldiffus_total, ldiffus_total3
+!
+      ldiffus_total = lupdate_courant_dt .or. lpencil(i_diffus_total)
+      ldiffus_total3 = lupdate_courant_dt .or. lpencil(i_diffus_total3)
 !
 !  Diagnostic output
 !
@@ -2697,8 +2794,10 @@ module Viscosity
         if (idiag_nu_tdep/=0) call sum_mn_name(spread(nu_tdep,1,nx),idiag_nu_tdep)
 !        if (lvisc_smag_simplified) nu_smag=(C_smag*dxmax)**2.*sqrt(2*p%sij2)
 !        if (lvisc_smag_cross_simplified) nu_smag=(C_smag*dxmax)**2.*p%ss12
-        if (idiag_meshRemax/=0) call max_mn_name(sqrt(p%u2(:))*dxmax_pencil/p%diffus_total,idiag_meshRemax)
-        if (idiag_mesh3Remax/=0) call max_mn_name(sqrt(p%u2(:))*(dxmax_pencil/pi)**5/p%diffus_total3,idiag_mesh3Remax)
+        if (ldiffus_total.and.idiag_meshRemax/=0) &
+            call max_mn_name(sqrt(p%u2(:))*dxmax_pencil/p%diffus_total,idiag_meshRemax)
+        if (ldiffus_total3.and.idiag_mesh3Remax/=0) &
+            call max_mn_name(sqrt(p%u2(:))*(dxmax_pencil/pi)**5/p%diffus_total3,idiag_mesh3Remax)
         if (idiag_Reshock/=0) then
           where (abs(p%shock) > tini)
             Reshock = dxmax_pencil*sqrt(p%u2)/(nu_shock*p%shock)
@@ -2765,7 +2864,7 @@ module Viscosity
         call sum_mn_name(p%nu,idiag_num)
         call max_mn_name(p%nu,idiag_numax)
         call max_mn_name(-p%nu,idiag_numin,lneg=.true.)
-        
+
         if (idiag_qfviscm/=0) then
           call dot(p%curlo,p%fvisc,qfvisc)
           call sum_mn_name(qfvisc,idiag_qfviscm)
@@ -2888,7 +2987,7 @@ module Viscosity
       use Sub, only: get_radial_distance
       use Gravity, only: acceleration
 !
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: df
       type (pencil_case) :: p
 !
       real, dimension (nx) :: diss,rr_sph,rr_cyl,g_r,OO2
@@ -2928,7 +3027,6 @@ module Viscosity
       real, optional, intent(out) :: nu_input
       real, dimension(nx), optional, intent(out) :: nu_pencil
       character (len=labellen), optional :: ivis
-      integer :: i
 !
       if (present(nu_input)) nu_input=nu
       if (present(ivis)) then
@@ -2982,7 +3080,7 @@ module Viscosity
 !
       use ImplicitDiffusion, only: integrate_diffusion
 !
-      real, dimension(mx,my,mz,mfarray), intent(inout) :: f
+      real, contiguous, dimension(:,:,:,:), intent(inout) :: f
 !
       if (limplicit_viscosity) call integrate_diffusion(get_viscosity_implicit, f, iux, iuz)
 !
@@ -2998,6 +3096,8 @@ module Viscosity
       real, dimension(ndc), intent(out) :: diffus_coeff
       integer, intent(in), optional :: iz
 !
+
+      call keep_compiler_quiet(iz)
       if (lvisc_simplified) then
         diffus_coeff = nu
       else
@@ -3093,7 +3193,7 @@ module Viscosity
     integer, parameter :: n_pars=200
     integer(KIND=ikind8), dimension(n_pars) :: p_par
 
-    call copy_addr(nu,p_par(1))
+    call copy_addr(nu,p_par(1)) ! real dconst
     call copy_addr(zeta,p_par(2))
     call copy_addr(nu_hyper3,p_par(3))
     call copy_addr(nu_shock,p_par(4))
@@ -3204,8 +3304,8 @@ module Viscosity
 
     call copy_addr(nu_r_reduce,p_par(107))
     call copy_addr(lvisc_nu_reduce_ddr,p_par(108)) ! bool
-    call copy_addr(h_sld_visc,p_par(109))
-    call copy_addr(nlf_sld_visc,p_par(110))
+    call copy_addr(h_sld_visc,p_par(109)) ! real dconst
+    call copy_addr(nlf_sld_visc,p_par(110)) ! real dconst
     call copy_addr(lambda_v0b,p_par(111))
     call copy_addr(lambda_v1b,p_par(112))
     call copy_addr(lambda_v0t,p_par(113))
@@ -3213,6 +3313,14 @@ module Viscosity
     call copy_addr(nu_y,p_par(115))        ! (my)
     call copy_addr(gnu_y,p_par(116))       ! (my)
     call copy_addr(lvisc_nu_const_bulk,p_par(117)) ! bool
+    call copy_addr(mu,p_par(118))
+    call copy_addr(lrate_of_strain_as_aux,p_par(119)) ! bool
+    call copy_addr(iSij,p_par(120)) ! int
+
+    call keep_compiler_quiet(lKit_Olem)
+    call keep_compiler_quiet(nu_mol)
+    call keep_compiler_quiet(r1_lambda)
+    call keep_compiler_quiet(r2_lambda)
 
     endsubroutine pushpars2c
 !***********************************************************************

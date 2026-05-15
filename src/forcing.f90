@@ -202,9 +202,9 @@ module Forcing
   integer :: idiag_ruzfzm=0
   integer :: idiag_ruxfym=0
   integer :: idiag_ruyfxm=0
-  integer :: idiag_fxbxm=0
-  integer :: idiag_fxbym=0
-  integer :: idiag_fxbzm=0
+  !integer :: idiag_fxbxm=0
+  !integer :: idiag_fxbym=0
+  !integer :: idiag_fxbzm=0
 !
 ! Auxiliaries
 !
@@ -226,6 +226,8 @@ module Forcing
   integer :: KS_modes = 25
 !
   integer, dimension(n_forcing_cont_max) :: enum_iforcing_cont = 0
+  logical, pointer :: lconservative_ptr
+  logical :: lconservative_hydro = .false.
 
   contains
 !
@@ -269,7 +271,7 @@ module Forcing
 !                      in the horizontal direction.  
 !
       use General, only: bessj,itoa
-      use SharedVariables, only: get_shared_variable
+      use SharedVariables, only: get_shared_variable 
       use Sub, only: step,erfunc,stepdown,register_report_aux
       use EquationOfState, only: cs20
       use Hdf5_io, only: file_close_hdf5, file_open_hdf5, input_hdf5
@@ -283,6 +285,14 @@ module Forcing
       character (len=labellen) :: tmp
       real, dimension(3) :: fcont_from_file_read_input
       character (len=fnlen) :: filename
+      integer :: ierr = 0
+
+      if(lhydro) then
+        call get_shared_variable('lconservative',lconservative_ptr,ierr,caller='initialize_forcing')
+        if(ierr == 0) then
+          lconservative_hydro = lconservative_ptr
+        endif
+      endif
 
       cs0=sqrt(cs20)
 !
@@ -943,8 +953,8 @@ module Forcing
           endif
           ang_intv=pi/n_axisrot_angles
           do ilist=1,nlist_ck
-            emm = cklist(ilist,1)
-            Legendrel = cklist(ilist,2)
+            emm = int(cklist(ilist,1))
+            Legendrel = int(cklist(ilist,2))
             do iangle=1,n_axisrot_angles
               do n=1,mz
                 do m=1,my
@@ -1005,8 +1015,8 @@ module Forcing
           endif
 
           do ilist=1,nlist_ck
-            emm = cklist(ilist,1)
-            Legendrel = cklist(ilist,2)
+            emm = int(cklist(ilist,1))
+            Legendrel = int(cklist(ilist,2))
             do n=1,mz
               do m=1,my
                 call sp_harm_real(RYlm,Legendrel,emm,y(m),z(n))
@@ -1290,6 +1300,7 @@ module Forcing
       where( Lxyz/=0.) k1xyz=2.*pi/Lxyz
 !
       if (r_ff /=0. .or. rcyl_ff/=0.) profz_k = tanh(z/width_ff)
+
 !
     endsubroutine initialize_forcing
 !***********************************************************************
@@ -1299,7 +1310,7 @@ module Forcing
 !  Since forcing is constant during one time step,
 !  this can be added as an Euler 1st order step
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
 !
       logical, save :: lfirstforce=.true., lfirstforce2=.true.
       logical, save :: llastforce=.true., llastforce2=.true.
@@ -1394,7 +1405,7 @@ module Forcing
       use General, only: random_number_wrapper
       use EquationOfState, only: cs20
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       integer :: iran1,iran2,kx1,ky1,kx2,ky2
       real, dimension(nx,3) :: forcing_rhs
       real, dimension(nx) :: xkx1,xkx2
@@ -1409,30 +1420,30 @@ module Forcing
       call random_number_wrapper(fran,CHANNEL=channel_force)
       phase1=pi*(2*fran(1)-1.)
       phase2=pi*(2*fran(2)-1.)
-      iran1=random2d_nmodes*(.9999*fran(3))+1
-      iran2=random2d_nmodes*(.9999*fran(4))+1
+      iran1=int(random2d_nmodes*(.9999*fran(3))+1)
+      iran2=int(random2d_nmodes*(.9999*fran(4))+1)
 !
 !  normally we want to use the wavevectors as they are,
 !  but in some cases, e.g. when the box is bigger than 2pi,
 !  we want to rescale k so that k=1 now corresponds to a smaller value.
 !
       if (lscale_kvector_fac) then
-        kx1=random2d_kmodes(1,iran1)*scale_kvectorx
-        ky1=random2d_kmodes(2,iran1)*scale_kvectory
-        kx2=random2d_kmodes(1,iran2)*scale_kvectorx
-        ky2=random2d_kmodes(2,iran2)*scale_kvectory
+        kx1=int(random2d_kmodes(1,iran1)*scale_kvectorx)
+        ky1=int(random2d_kmodes(2,iran1)*scale_kvectory)
+        kx2=int(random2d_kmodes(1,iran2)*scale_kvectorx)
+        ky2=int(random2d_kmodes(2,iran2)*scale_kvectory)
         pi_over_Lx=0.5
       elseif (lscale_kvector_tobox) then
-        kx1=random2d_kmodes(1,iran1)*(2.*pi/Lxyz(1))
-        ky1=random2d_kmodes(2,iran1)*(2.*pi/Lxyz(2))
-        kx2=random2d_kmodes(1,iran2)*(2.*pi/Lxyz(1))
-        ky2=random2d_kmodes(2,iran2)*(2.*pi/Lxyz(2))
+        kx1=int(random2d_kmodes(1,iran1)*(2.*pi/Lxyz(1)))
+        ky1=int(random2d_kmodes(2,iran1)*(2.*pi/Lxyz(2)))
+        kx2=int(random2d_kmodes(1,iran2)*(2.*pi/Lxyz(1)))
+        ky2=int(random2d_kmodes(2,iran2)*(2.*pi/Lxyz(2)))
         pi_over_Lx=pi/Lxyz(1)
       else
-        kx1=random2d_kmodes(1,iran1)
-        ky1=random2d_kmodes(2,iran1)
-        kx2=random2d_kmodes(1,iran2)
-        ky2=random2d_kmodes(2,iran2)
+        kx1=int(random2d_kmodes(1,iran1))
+        ky1=int(random2d_kmodes(2,iran1))
+        kx2=int(random2d_kmodes(1,iran2))
+        ky2=int(random2d_kmodes(2,iran2))
         pi_over_Lx=0.5
       endif
 !
@@ -1495,7 +1506,7 @@ module Forcing
       use Sub, only: step
       use EquationOfState, only: cs20
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       real, dimension(nx,3) :: forcing_rhs
       real, dimension(nx) :: xkx
       real,dimension(4) :: fran
@@ -1551,7 +1562,7 @@ module Forcing
       use Sub, only: del2v_etc,dot,dot_mn
       use Mpicomm, only: mpireduce_sum
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       real :: kx0,kx,ky,kz,force_ampl,pi_over_Lx
       real :: phase,ffnorm
       real, dimension (2) :: fran
@@ -1567,7 +1578,7 @@ module Forcing
       do
         call random_number_wrapper(fran,CHANNEL=channel_force)
         phase=pi*(2*fran(1)-1.)
-        ik=nk*(.9999*fran(2))+1
+        ik=int(nk*(.9999*fran(2))+1)
 !
 !  if lavoid_xymean=T and wavevector is close enough to [0,0,kz] discard it
 !  and look for a new one
@@ -1713,7 +1724,7 @@ module Forcing
 !  The routine fconst_coefs_hel generates various coefficients, including the phase.
 !
       call fconst_coefs_hel(force,kkx,kky,kkz,nk,kav,coef1,coef2,coef3,kk,phase,fact,fda)
-      call fxyz_coefs_hel(coef1,coef2,coef3,kk,phase,fact,fx,fy,fz)
+      call fxyz_coefs_hel(kk,phase,fact,fx,fy,fz)
 
     endsubroutine forcing_coefs_hel
 !***********************************************************************
@@ -1755,7 +1766,7 @@ module Forcing
 !  of those in subroutine forcing_coefs_hel
 !
       call fconst_coefs_hel(force_double,kkx2,kky2,kkz2,nk2,kav2,coef1,coef2,coef3,kk,phase,fact,fda)
-      call fxyz_coefs_hel(coef1,coef2,coef3,kk,phase,fact,fx,fy,fz)
+      call fxyz_coefs_hel(kk,phase,fact,fx,fy,fz)
 !
     endsubroutine forcing_coefs_hel2
 !***********************************************************************
@@ -1802,7 +1813,7 @@ module Forcing
 !if (lroot) write(20,*) 'forcing: seed=', seed(1:nseed)
           phase=pi*(2*fran(1)-1.)
 !AB: to add time-dependence XX
-          ik=nk*(.9999*fran(2))+1
+          ik=int(nk*(.9999*fran(2))+1)
         endif
 !
 !  if lavoid_xymean=T and wavevector is close enough to [0,0,kz] discard it
@@ -1989,13 +2000,13 @@ module Forcing
 !
     endsubroutine fconst_coefs_hel
 !**************************************************************************
-    subroutine fxyz_coefs_hel(coef1,coef2,coef3,kk,phase,fact,fx,fy,fz)
+    subroutine fxyz_coefs_hel(kk,phase,fact,fx,fy,fz)
 !
 !  08-aug-19/MR: carved out to produce fx,fy,fz from the other parameters.
 ! 
       use General, only: itoa
 
-      real,    dimension (3), intent(in ) :: coef1,coef2,coef3,kk
+      real,    dimension (3), intent(in ) :: kk
       real,                   intent(in ) :: phase, fact
       complex, dimension (mx),intent(out) :: fx
       complex, dimension (my),intent(out) :: fy
@@ -2086,7 +2097,7 @@ module Forcing
       use DensityMethods, only: getrho1
       use Diagnostics, only: sum_mn_name
 !
-      real, dimension (mx,my,mz,mfarray), intent(INOUT) :: f
+      real, contiguous,dimension(:,:,:,:), intent(INOUT) :: f
 
       real, dimension (nx) :: rho1, ruf, rho, force_ampl, bdotf, jdotf
       real, dimension (nx,3) :: variable_rhs,forcing_rhs,forcing_rhs2
@@ -2265,6 +2276,10 @@ module Forcing
                   forcing_rhs2(:,j) = force_ampl*real(cmplx(0.,coef3(j)))*fda(j) 
                 else
                   forcing_rhs2(:,j) = force_ampl*real(cmplx(0.,coef3(j))*fxyz)*fda(j)
+                endif
+
+                if(lconservative_hydro .and. (jf == iux .or. jf == iuy .or. jf == iuz)) then
+                  forcing_rhs(:,j) = forcing_rhs(:,j)*f(l1:l2,m,n,irho)
                 endif
 !
 !  Choice of different possibilities.
@@ -2482,8 +2497,8 @@ module Forcing
       real, dimension (nx) :: rho1,ff,uf,of,qf,rho
       real, dimension (mz) :: kfscl
       real, dimension (nx,3) :: variable_rhs,forcing_rhs,forcing_rhs2
-      real, dimension (nx,3) :: fda,uu,oo,bb,fxb,curlo
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, dimension (nx,3) :: fda,uu,oo,curlo
+      real, contiguous,dimension(:,:,:,:) :: f
       complex, dimension (mx) :: fx
       complex, dimension (my) :: fy
       complex, dimension (mz) :: fz
@@ -2501,7 +2516,7 @@ module Forcing
 !
       call random_number_wrapper(fran,CHANNEL=channel_force)
       phase=pi*(2*fran(1)-1.)
-      ik=nk*(.9999*fran(2))+1
+      ik=int(nk*(.9999*fran(2))+1)
       if (ip<=6) then
         print*,'forcing_hel_kprof: ik,phase=',ik,phase
         print*,'forcing_hel_kprof: kx,ky,kz=',kkx(ik),kky(ik),kkz(ik)
@@ -2839,9 +2854,15 @@ module Forcing
             if (lforce_always_all_compomemts .or. lactive_dimension(j)) then
               jf=j+ifff-1
               sig = relhel*profz_k(n)
-              coef1(1)=cmplx(k*kex,sig*kkex)
-              coef1(2)=cmplx(k*key,sig*kkey)
-              coef1(3)=cmplx(k*kez,sig*kkez)
+              !TP: since coef1 is real there is not really any point to construct a complex number and immediately take its real
+              !argument
+              !coef1(1)=cmplx(k*kex,sig*kkex)
+              !coef1(2)=cmplx(k*key,sig*kkey)
+              !coef1(3)=cmplx(k*kez,sig*kkez)
+
+              coef1(1)=k*kex
+              coef1(2)=k*key
+              coef1(3)=k*kez
               do m=m1,m2
 !
 !  In the past we always forced the du/dt, but in some cases
@@ -2912,7 +2933,7 @@ module Forcing
       real, dimension (2) :: fran
       real, dimension (nx) :: rho1
       real, dimension (nx,3) :: variable_rhs,forcing_rhs
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       complex, dimension (mx) :: fx
       complex, dimension (my) :: fy
       complex, dimension (mz) :: fz
@@ -2923,17 +2944,13 @@ module Forcing
       real, dimension(3) :: e1,e2,ee,kk
       real :: norm,phi,pi_over_Lx
 !
-!  additional stuff for test fields
-!
-      integer :: jtest
-!
 !  generate random coefficients -1 < fran < 1
 !  ff=force*Re(exp(i(kx+phase)))
 !  |k_i| < akmax
 !
       call random_number_wrapper(fran,CHANNEL=channel_force)
       phase=pi*(2*fran(1)-1.)
-      ik=nk*(.9999*fran(2))+1
+      ik=int(nk*(.9999*fran(2))+1)
       if (ip<=6) then 
         print*,'forcing_hel_both: ik,phase=',ik,phase
         print*,'forcing_hel_both: kx,ky,kz=',kkx(ik),kky(ik),kkz(ik)
@@ -3112,7 +3129,7 @@ module Forcing
       use General, only: random_number_wrapper
       use Sub
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       !
       real, dimension(3) :: ee
       real, dimension(nx,3) :: capitalT,capitalS,capitalH,psi
@@ -3135,8 +3152,8 @@ module Forcing
         lmindex=nint(rindex*(nlist_ck-1))+1
       endif
 !
-      emm = cklist(lmindex,1)
-      Legendrel = cklist(lmindex,2)
+      emm = int(cklist(lmindex,1))
+      Legendrel = int(cklist(lmindex,2))
 !
       call random_number_wrapper(ralpha,CHANNEL=channel_force)
       aindex=nint(ralpha*2)
@@ -3243,17 +3260,16 @@ module Forcing
       use Sub
       use Mpicomm
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       !
       real, dimension(3) :: ee
       real, dimension(nx,3) :: capitalT,capitalS,psi
       real, dimension(nx,3,3) :: psi_ij,Tij
-      integer :: emm,l,j,jf,Legendrel,lmindex,aindex,ell_rand,raindex
+      integer :: emm,l,Legendrel,lmindex,aindex,ell_rand,raindex
       real :: a_ell,anum,adenom,jlm_ff,ylm_ff,rphase1,fnorm,alphar,Balpha,psilm,RYlm,IYlm
-      real :: rz,rindex,ralpha,rphase2,thphase,sthphase,cthphase,costhprime,phprime,alphap,&
+      real :: rindex,ralpha,thphase,sthphase,cthphase,costhprime,phprime,alphap,&
               ralpha2,ellSR,fmaxloc,fmax,gindex,crphase1,srphase1
       real, dimension(mx) :: Z_psi
-      real, dimension(nx) :: Smod
 !
       if (lhelical_test) then
         if (icklist==nlist_ck) &
@@ -3265,8 +3281,8 @@ module Forcing
         lmindex=nint(rindex*(nlist_ck-1))+1
       endif
 !
-      emm = cklist(lmindex,1)
-      Legendrel = cklist(lmindex,2)
+      emm = int(cklist(lmindex,1))
+      Legendrel = int(cklist(lmindex,2))
 !
       call random_number_wrapper(ralpha,CHANNEL=channel_force)
       aindex=nint(ralpha*(ncol-3))
@@ -3395,10 +3411,9 @@ module Forcing
 !
       real, dimension (nx) :: ruf,rho
       real, dimension (nx,3) :: variable_rhs,forcing_rhs,force_all
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       real, dimension (mx) :: cosx,sinx
       real :: cost,sint,cosym,sinym
-      integer :: j,jf
       real :: fact
 !
 !  The default for omega_ff is now (12-jan-2018) changed from 1 to 0.
@@ -3467,10 +3482,9 @@ module Forcing
 !
       real, dimension (nx) :: ruf,rho
       real, dimension (nx,3) :: variable_rhs,forcing_rhs,force_all
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       real, dimension (mx) :: cosx,sinx
       real :: cost,sint,cosym,sinym
-      integer :: j,jf
       real :: fact
 !
 !  The default for omega_ff is now (12-jan-2018) changed from 1 to 0.
@@ -3539,7 +3553,7 @@ module Forcing
 !
       real, dimension (nx) :: ruf,rho
       real, dimension (nx,3) :: variable_rhs,forcing_rhs,force_all
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       real, dimension (mx), save :: sinx,cosx
       real, dimension (my), save :: siny,cosy
       real, dimension (mz), save :: cosz
@@ -3618,15 +3632,14 @@ module Forcing
       use Mpicomm, only: mpireduce_sum
       use Sub
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
 !
       real, dimension (nx) :: ruf,rho
-      real, dimension (nx,3) :: variable_rhs,forcing_rhs,force_all,bb,fxb
+      real, dimension (nx,3) :: variable_rhs,forcing_rhs,force_all
       real, dimension (mx), save :: sinx,cosx
       real, dimension (my), save :: siny,cosy
       real, dimension (mz), save :: sinz,cosz
       logical, save :: lfirst_call=.true.
-      integer :: j,jf
       real :: fact
 !
 !  at the first step, the sin and cos functions are calculated for all
@@ -3706,7 +3719,7 @@ module Forcing
 !
 !  17-jul-06/axel: coded
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
 !
       real :: fact, om
       integer :: m,n
@@ -3742,7 +3755,7 @@ module Forcing
 !
       real, dimension (nx) :: ruf,rho
       real, dimension (nx,3) :: variable_rhs,forcing_rhs,force_all
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       real, dimension (mx), save :: sinx
       real, dimension (my), save :: siny
       real, dimension (mz), save :: sinz
@@ -3821,7 +3834,7 @@ module Forcing
       use Mpicomm, only: mpireduce_sum
       use Sub, only: multsv_mn,dot_mn,del2v_etc
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       real :: force_ampl, force_tmp
 !
       real, dimension (3) :: fran
@@ -4047,7 +4060,7 @@ module Forcing
       use Mpicomm, only: mpireduce_sum
       use Sub
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       real :: force_ampl, force_tmp
 !
       real, dimension (3) :: fran
@@ -4232,7 +4245,7 @@ module Forcing
       use Mpicomm, only: mpireduce_sum
       use Sub
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       real :: ampl
 !
       real, dimension (nx) :: r,p,tmp,rho,ruf
@@ -4322,7 +4335,7 @@ module Forcing
       use DensityMethods, only: getrho
       use Mpicomm, only: mpiallreduce_sum
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       real, dimension (nx,3) :: uu
       real, dimension (nx) :: rho,udotf
       complex, dimension (mx) :: fx
@@ -4360,274 +4373,276 @@ module Forcing
 !
     endfunction calc_force_ampl
 !***********************************************************************
-    subroutine forcing_hel_noshear(f)
-!
-!  add helical forcing function, using a set of precomputed wavevectors
-!
-!  10-apr-00/axel: coded
-!  06-dec-13/nishant: made kkx etc allocatable
-!
-      use General, only: random_number_wrapper
-      use Sub
-!
-      real :: phase,ffnorm
-      real, dimension (2) :: fran
-      real, dimension (nx) :: radius,tmpx
-!      real, dimension (mz) :: tmpz
-      real, dimension (mx,my,mz,mfarray) :: f
-      complex, dimension (mx) :: fx
-      complex, dimension (my) :: fy
-      complex, dimension (mz) :: fz
-      complex, dimension (3) :: coef
-      integer :: ik,j,jf,kx,ky,kz,kex,key,kez,kkex,kkey,kkez
-      real :: k2,k,ex,ey,ez,kde,sig,fact
-      real, dimension(3) :: e1,e2,ee,kk
-      real :: norm,phi
-!
-!  generate random coefficients -1 < fran < 1
-!  ff=force*Re(exp(i(kx+phase)))
-!  |k_i| < akmax
-!
-      call random_number_wrapper(fran,CHANNEL=channel_force)
-      phase=pi*(2*fran(1)-1.)
-      ik=nk*.9999*fran(2)+1
-      if (ip<=6) print*,'force_hel_noshear: ik,phase,kk=',ik,phase,kkx(ik),kky(ik),kkz(ik),dt
-!
-      kx=kkx(ik)
-      ky=kky(ik)
-      kz=kkz(ik)
-      if (ip<=4) print*, 'force_hel_noshear: kx,ky,kz=',kx,ky,kz
-!
-      k2=float(kx**2+ky**2+kz**2)
-      k=sqrt(k2)
-!
-! Find e-vector
-!
-      !
-      ! Start with old method (not isotropic) for now.
-      ! Pick e1 if kk not parallel to ee1. ee2 else.
-      !
-      if ((ky==0).and.(kz==0)) then
-        ex=0; ey=1; ez=0
-      else
-        ex=1; ey=0; ez=0
-      endif
-      if (.not. old_forcing_evector) then
-        !
-        !  Isotropize ee in the plane perp. to kk by
-        !  (1) constructing two basis vectors for the plane perpendicular
-        !      to kk, and
-        !  (2) choosing a random direction in that plane (angle phi)
-        !  Need to do this in order for the forcing to be isotropic.
-        !
-        kk = (/kx, ky, kz/)
-        ee = (/ex, ey, ez/)
-        call cross(kk,ee,e1)
-        call dot2(e1,norm); e1=e1/sqrt(norm) ! e1: unit vector perp. to kk
-        call cross(kk,e1,e2)
-        call dot2(e2,norm); e2=e2/sqrt(norm) ! e2: unit vector perp. to kk, e1
-        call random_number_wrapper(phi,CHANNEL=channel_force); phi = phi*2*pi
-        ee = cos(phi)*e1 + sin(phi)*e2
-        ex=ee(1); ey=ee(2); ez=ee(3)
-      endif
-!
-!  k.e
-!
-      call dot(kk,ee,kde)
-!
-!  k x e
-!
-      kex=ky*ez-kz*ey
-      key=kz*ex-kx*ez
-      kez=kx*ey-ky*ex
-!
-!  k x (k x e)
-!
-      kkex=ky*kez-kz*key
-      kkey=kz*kex-kx*kez
-      kkez=kx*key-ky*kex
-!
-!  ik x (k x e) + i*phase
-!
-!  Normalise ff; since we don't know dt yet, we finalize this
-!  within timestep where dt is determined and broadcast.
-!
-!  This does already include the new sqrt(2) factor (missing in B01).
-!  So, in order to reproduce the 0.1 factor mentioned in B01
-!  we have to set force=0.07.
-!
-      ffnorm=sqrt(2.)*k*sqrt(k2-kde**2)/sqrt(kav*cs0**3)
-      if (ip<=12) then
-        print*,'force_hel_noshear: k,kde,ffnorm,kav,dt,cs0=',k,kde,ffnorm,kav,dt,cs0
-        print*,'force_hel_noshear: k*sqrt(k2-kde**2)=',k*sqrt(k2-kde**2)
-      endif
-      !!(debug...) write(21,'(f10.4,3i3,f7.3)') t,kx,ky,kz,phase
-!
-!  need to multiply by dt (for Euler step), but it also needs to be
-!  divided by sqrt(dt), because square of forcing is proportional
-!  to a delta function of the time difference
-!
-      fact=force/ffnorm*sqrt(dt)
-!
-!  The wavevector is for the case where Lx=Ly=Lz=2pi. If that is not the
-!  case one needs to scale by 2pi/Lx, etc.
-!
-      fx=exp(cmplx(0.,2*pi/Lx*kx*x+phase))*fact
-      fy=exp(cmplx(0.,2*pi/Ly*ky*y))
-      fz=exp(cmplx(0.,2*pi/Lz*kz*z))
-!
-!  possibly multiply forcing by z-profile
-!
-!-    if (height_ff/=0.) then
-!-      if (lroot) print*,'forcing_hel_noshear: include z-profile'
-!-      tmpz=(z/height_ff)**2
-!-      fz=fz*exp(-tmpz**5/max(1.-tmpz,1e-5))
-!-    endif
-!
-!  need to discuss with axel
-!
-!  possibly multiply forcing by sgn(z) and radial profile
-!
-!      if (r_ff/=0.) then
-!        if (lroot) print*,'forcing_hel_noshear: applying sgn(z)*xi(r) profile'
-!        !
-!        ! only z-dependent part can be done here; radial stuff needs to go
-!        ! into the loop
-!        !
-!        tmpz = tanh(z/width_ff)
-!        fz = fz*tmpz
+!    On comment since not used (to suppress compiler warnings)
+!    subroutine forcing_hel_noshear(f)
+!!
+!!  add helical forcing function, using a set of precomputed wavevectors
+!!
+!!  10-apr-00/axel: coded
+!!  06-dec-13/nishant: made kkx etc allocatable
+!!
+!      use General, only: random_number_wrapper
+!      use Sub
+!!
+!      real :: phase,ffnorm
+!      real, dimension (2) :: fran
+!      real, dimension (nx) :: radius,tmpx
+!!      real, dimension (mz) :: tmpz
+!      real, contiguous,dimension(:,:,:,:) :: f
+!      complex, dimension (mx) :: fx
+!      complex, dimension (my) :: fy
+!      complex, dimension (mz) :: fz
+!      complex, dimension (3) :: coef
+!      integer :: ik,j,jf,kx,ky,kz,kex,key,kez,kkex,kkey,kkez
+!      real :: k2,k,ex,ey,ez,kde,sig,fact
+!      real, dimension(3) :: e1,e2,ee,kk
+!      real :: norm,phi
+!!
+!!  generate random coefficients -1 < fran < 1
+!!  ff=force*Re(exp(i(kx+phase)))
+!!  |k_i| < akmax
+!!
+!      call random_number_wrapper(fran,CHANNEL=channel_force)
+!      phase=pi*(2*fran(1)-1.)
+!      ik=nk*.9999*fran(2)+1
+!      if (ip<=6) print*,'force_hel_noshear: ik,phase,kk=',ik,phase,kkx(ik),kky(ik),kkz(ik),dt
+!!
+!      kx=kkx(ik)
+!      ky=kky(ik)
+!      kz=kkz(ik)
+!      if (ip<=4) print*, 'force_hel_noshear: kx,ky,kz=',kx,ky,kz
+!!
+!      k2=float(kx**2+ky**2+kz**2)
+!      k=sqrt(k2)
+!!
+!! Find e-vector
+!!
+!      !
+!      ! Start with old method (not isotropic) for now.
+!      ! Pick e1 if kk not parallel to ee1. ee2 else.
+!      !
+!      if ((ky==0).and.(kz==0)) then
+!        ex=0; ey=1; ez=0
+!      else
+!        ex=1; ey=0; ez=0
 !      endif
-!
-      if (ip<=5) then
-        print*,'force_hel_noshear: fx=',fx
-        print*,'force_hel_noshear: fy=',fy
-        print*,'force_hel_noshear: fz=',fz
-      endif
-!
-!  prefactor
-!
-      sig=relhel
-      coef(1)=cmplx(k*float(kex),sig*float(kkex))
-      coef(2)=cmplx(k*float(key),sig*float(kkey))
-      coef(3)=cmplx(k*float(kez),sig*float(kkez))
-      if (ip<=5) print*,'force_hel_noshear: coef=',coef
-!
-! loop the two cases separately, so we don't check for r_ff during
-! each loop cycle which could inhibit (pseudo-)vectorisation
-!
-      if (r_ff == 0) then       ! no radial profile
-        do j=1,3
-          jf=j+ifff-1
-          do n=n1,n2
-            do m=m1,m2
-              f(l1:l2,m,n,jf) = f(l1:l2,m,n,jf)+real(coef(j)*fx(l1:l2)*fy(m)*fz(n))
-            enddo
-          enddo
-        enddo
-      else                      ! with radial profile
-        do j=1,3
-          jf=j+ifff-1
-          do n=n1,n2
-!---        sig = relhel*tmpz(n)
-!AB: removed tmpz factor
-              sig = relhel
-            call fatal_error('forcing_hel_noshear','radial profile should be quenched')
-            coef(1)=cmplx(k*float(kex),sig*float(kkex))
-            coef(2)=cmplx(k*float(key),sig*float(kkey))
-            coef(3)=cmplx(k*float(kez),sig*float(kkez))
-            do m=m1,m2
-              radius = sqrt(x(l1:l2)**2+y(m)**2+z(n)**2)
-              tmpx = 0.5*(1.-tanh((radius-r_ff)/width_ff))
-              f(l1:l2,m,n,jf) = f(l1:l2,m,n,jf) + real(coef(j)*tmpx*fx(l1:l2)*fy(m)*fz(n))
-            enddo
-          enddo
-        enddo
-      endif
-!
-      if (ip<=12) print*,'force_hel_noshear: forcing OK'
-!
-    endsubroutine forcing_hel_noshear
+!      if (.not. old_forcing_evector) then
+!        !
+!        !  Isotropize ee in the plane perp. to kk by
+!        !  (1) constructing two basis vectors for the plane perpendicular
+!        !      to kk, and
+!        !  (2) choosing a random direction in that plane (angle phi)
+!        !  Need to do this in order for the forcing to be isotropic.
+!        !
+!        kk = (/kx, ky, kz/)
+!        ee = (/ex, ey, ez/)
+!        call cross(kk,ee,e1)
+!        call dot2(e1,norm); e1=e1/sqrt(norm) ! e1: unit vector perp. to kk
+!        call cross(kk,e1,e2)
+!        call dot2(e2,norm); e2=e2/sqrt(norm) ! e2: unit vector perp. to kk, e1
+!        call random_number_wrapper(phi,CHANNEL=channel_force); phi = phi*2*pi
+!        ee = cos(phi)*e1 + sin(phi)*e2
+!        ex=ee(1); ey=ee(2); ez=ee(3)
+!      endif
+!!
+!!  k.e
+!!
+!      call dot(kk,ee,kde)
+!!
+!!  k x e
+!!
+!      kex=ky*ez-kz*ey
+!      key=kz*ex-kx*ez
+!      kez=kx*ey-ky*ex
+!!
+!!  k x (k x e)
+!!
+!      kkex=ky*kez-kz*key
+!      kkey=kz*kex-kx*kez
+!      kkez=kx*key-ky*kex
+!!
+!!  ik x (k x e) + i*phase
+!!
+!!  Normalise ff; since we don't know dt yet, we finalize this
+!!  within timestep where dt is determined and broadcast.
+!!
+!!  This does already include the new sqrt(2) factor (missing in B01).
+!!  So, in order to reproduce the 0.1 factor mentioned in B01
+!!  we have to set force=0.07.
+!!
+!      ffnorm=sqrt(2.)*k*sqrt(k2-kde**2)/sqrt(kav*cs0**3)
+!      if (ip<=12) then
+!        print*,'force_hel_noshear: k,kde,ffnorm,kav,dt,cs0=',k,kde,ffnorm,kav,dt,cs0
+!        print*,'force_hel_noshear: k*sqrt(k2-kde**2)=',k*sqrt(k2-kde**2)
+!      endif
+!      !!(debug...) write(21,'(f10.4,3i3,f7.3)') t,kx,ky,kz,phase
+!!
+!!  need to multiply by dt (for Euler step), but it also needs to be
+!!  divided by sqrt(dt), because square of forcing is proportional
+!!  to a delta function of the time difference
+!!
+!      fact=force/ffnorm*sqrt(dt)
+!!
+!!  The wavevector is for the case where Lx=Ly=Lz=2pi. If that is not the
+!!  case one needs to scale by 2pi/Lx, etc.
+!!
+!      fx=exp(cmplx(0.,2*pi/Lx*kx*x+phase))*fact
+!      fy=exp(cmplx(0.,2*pi/Ly*ky*y))
+!      fz=exp(cmplx(0.,2*pi/Lz*kz*z))
+!!
+!!  possibly multiply forcing by z-profile
+!!
+!!-    if (height_ff/=0.) then
+!!-      if (lroot) print*,'forcing_hel_noshear: include z-profile'
+!!-      tmpz=(z/height_ff)**2
+!!-      fz=fz*exp(-tmpz**5/max(1.-tmpz,1e-5))
+!!-    endif
+!!
+!!  need to discuss with axel
+!!
+!!  possibly multiply forcing by sgn(z) and radial profile
+!!
+!!      if (r_ff/=0.) then
+!!        if (lroot) print*,'forcing_hel_noshear: applying sgn(z)*xi(r) profile'
+!!        !
+!!        ! only z-dependent part can be done here; radial stuff needs to go
+!!        ! into the loop
+!!        !
+!!        tmpz = tanh(z/width_ff)
+!!        fz = fz*tmpz
+!!      endif
+!!
+!      if (ip<=5) then
+!        print*,'force_hel_noshear: fx=',fx
+!        print*,'force_hel_noshear: fy=',fy
+!        print*,'force_hel_noshear: fz=',fz
+!      endif
+!!
+!!  prefactor
+!!
+!      sig=relhel
+!      coef(1)=cmplx(k*float(kex),sig*float(kkex))
+!      coef(2)=cmplx(k*float(key),sig*float(kkey))
+!      coef(3)=cmplx(k*float(kez),sig*float(kkez))
+!      if (ip<=5) print*,'force_hel_noshear: coef=',coef
+!!
+!! loop the two cases separately, so we don't check for r_ff during
+!! each loop cycle which could inhibit (pseudo-)vectorisation
+!!
+!      if (r_ff == 0) then       ! no radial profile
+!        do j=1,3
+!          jf=j+ifff-1
+!          do n=n1,n2
+!            do m=m1,m2
+!              f(l1:l2,m,n,jf) = f(l1:l2,m,n,jf)+real(coef(j)*fx(l1:l2)*fy(m)*fz(n))
+!            enddo
+!          enddo
+!        enddo
+!      else                      ! with radial profile
+!        do j=1,3
+!          jf=j+ifff-1
+!          do n=n1,n2
+!!---        sig = relhel*tmpz(n)
+!!AB: removed tmpz factor
+!              sig = relhel
+!            call fatal_error('forcing_hel_noshear','radial profile should be quenched')
+!            coef(1)=cmplx(k*float(kex),sig*float(kkex))
+!            coef(2)=cmplx(k*float(key),sig*float(kkey))
+!            coef(3)=cmplx(k*float(kez),sig*float(kkez))
+!            do m=m1,m2
+!              radius = sqrt(x(l1:l2)**2+y(m)**2+z(n)**2)
+!              tmpx = 0.5*(1.-tanh((radius-r_ff)/width_ff))
+!              f(l1:l2,m,n,jf) = f(l1:l2,m,n,jf) + real(coef(j)*tmpx*fx(l1:l2)*fy(m)*fz(n))
+!            enddo
+!          enddo
+!        enddo
+!      endif
+!!
+!      if (ip<=12) print*,'force_hel_noshear: forcing OK'
+!!
+!    endsubroutine forcing_hel_noshear
 !***********************************************************************
-    subroutine forcing_roberts(f)
-!
-!  add some artificial fountain flow
-!  (to check for example small scale magnetic helicity loss)
-!
-!  30-may-02/axel: coded
-!
-      real, dimension (mx,my,mz,mfarray) :: f
-      real, dimension (nx) :: sxx,cxx
-      real, dimension (mx) :: sx,cx
-      real, dimension (my) :: sy,cy
-      real, dimension (mz) :: sz,cz,tmpz,gz,gg,ss,gz1
-      real :: kx,ky,kz,ffnorm,fac
-!
-!  identify ourselves
-!
-      if (headtt.or.ldebug) print*,'forcing_roberts: ENTER'
-!
-!  need to multiply by dt (for Euler step), but it also needs to be
-!  divided by sqrt(dt), because square of forcing is proportional
-!  to a delta function of the time difference
-!
-      kx=kfountain
-      ky=kfountain
-      kz=1.
-!
-      sx=sin(kx*x); cx=cos(kx*x)
-      sy=sin(ky*y); cy=cos(ky*y)
-      sz=sin(kz*z); cz=cos(kz*z)
-!
-!  abbreviation
-!
-      sxx=sx(l1:l2)
-      cxx=cx(l1:l2)
-!
-!  g(z) and g'(z)
-!  use z-profile to cut off
-!
-      if (height_ff/=0.) then
-        tmpz=(z/height_ff)**2
-        gz=sz*exp(-tmpz**5/max(1.-tmpz,1e-5))
-!
-        fac=1./(60.*dz)
-        gg(1:3)=0.; gg(mz-2:mz)=0. !!(border pts to zero)
-        gg(4:mz-3)=fac*(45.*(gz(5:mz-2)-gz(3:mz-4)) &
-                        -9.*(gz(6:mz-1)-gz(2:mz-5)) &
-                           +(gz(7:mz)  -gz(1:mz-6)))
-      else
-        gz=0
-        gg=0
-      endif
-!
-!  make sign antisymmetric
-!
-      where(z<0)
-        ss=-1.
-      elsewhere
-        ss=1.
-      endwhere
-      gz1=-ss*gz !!(negative for z>0)
-!
-!AB: removed nu dependence here. This whole routine is probably not
-!AB: needed at the moment, because it is superseded by continuous forcing
-!AB: in hydro.f90
-!
-      !ffnorm=fountain*nu*dt
-      ffnorm=fountain*dt
-!
-!  set forcing function
-!
-      do n=n1,n2
-      do m=m1,m2
-        f(l1:l2,m,n,iffx)=f(l1:l2,m,n,iffx)+ffnorm*(+sxx*cy(m)*gz1(n)+cxx*sy(m)*gg(n))
-        f(l1:l2,m,n,iffy)=f(l1:l2,m,n,iffy)+ffnorm*(-cxx*sy(m)*gz1(n)+sxx*cy(m)*gg(n))
-        f(l1:l2,m,n,iffz)=f(l1:l2,m,n,iffz)+ffnorm*sxx*sy(m)*gz(n)*2.
-      enddo
-      enddo
-!
-    endsubroutine forcing_roberts
-!***********************************************************************
+!    On comment since not used (to suppress compiler warnings)
+!    subroutine forcing_roberts(f)
+!!
+!!  add some artificial fountain flow
+!!  (to check for example small scale magnetic helicity loss)
+!!
+!!  30-may-02/axel: coded
+!!
+!      real, contiguous,dimension(:,:,:,:) :: f
+!      real, dimension (nx) :: sxx,cxx
+!      real, dimension (mx) :: sx,cx
+!      real, dimension (my) :: sy,cy
+!      real, dimension (mz) :: sz,cz,tmpz,gz,gg,ss,gz1
+!      real :: kx,ky,kz,ffnorm,fac
+!!
+!!  identify ourselves
+!!
+!      if (headtt.or.ldebug) print*,'forcing_roberts: ENTER'
+!!
+!!  need to multiply by dt (for Euler step), but it also needs to be
+!!  divided by sqrt(dt), because square of forcing is proportional
+!!  to a delta function of the time difference
+!!
+!      kx=kfountain
+!      ky=kfountain
+!      kz=1.
+!!
+!      sx=sin(kx*x); cx=cos(kx*x)
+!      sy=sin(ky*y); cy=cos(ky*y)
+!      sz=sin(kz*z); cz=cos(kz*z)
+!!
+!!  abbreviation
+!!
+!      sxx=sx(l1:l2)
+!      cxx=cx(l1:l2)
+!!
+!!  g(z) and g'(z)
+!!  use z-profile to cut off
+!!
+!      if (height_ff/=0.) then
+!        tmpz=(z/height_ff)**2
+!        gz=sz*exp(-tmpz**5/max(1.-tmpz,1e-5))
+!!
+!        fac=1./(60.*dz)
+!        gg(1:3)=0.; gg(mz-2:mz)=0. !!(border pts to zero)
+!        gg(4:mz-3)=fac*(45.*(gz(5:mz-2)-gz(3:mz-4)) &
+!                        -9.*(gz(6:mz-1)-gz(2:mz-5)) &
+!                           +(gz(7:mz)  -gz(1:mz-6)))
+!      else
+!        gz=0
+!        gg=0
+!      endif
+!!
+!!  make sign antisymmetric
+!!
+!      where(z<0)
+!        ss=-1.
+!      elsewhere
+!        ss=1.
+!      endwhere
+!      gz1=-ss*gz !!(negative for z>0)
+!!
+!!AB: removed nu dependence here. This whole routine is probably not
+!!AB: needed at the moment, because it is superseded by continuous forcing
+!!AB: in hydro.f90
+!!
+!      !ffnorm=fountain*nu*dt
+!      ffnorm=fountain*dt
+!!
+!!  set forcing function
+!!
+!      do n=n1,n2
+!      do m=m1,m2
+!        f(l1:l2,m,n,iffx)=f(l1:l2,m,n,iffx)+ffnorm*(+sxx*cy(m)*gz1(n)+cxx*sy(m)*gg(n))
+!        f(l1:l2,m,n,iffy)=f(l1:l2,m,n,iffy)+ffnorm*(-cxx*sy(m)*gz1(n)+sxx*cy(m)*gg(n))
+!        f(l1:l2,m,n,iffz)=f(l1:l2,m,n,iffz)+ffnorm*sxx*sy(m)*gz(n)*2.
+!      enddo
+!      enddo
+!!
+!    endsubroutine forcing_roberts
+!!***********************************************************************
     subroutine forcing_fountain(f)
 !
 !  add some artificial fountain flow
@@ -4635,7 +4650,7 @@ module Forcing
 !
 !  30-may-02/axel: coded
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       real, dimension (nx) :: sxx,cxx
       real, dimension (mx) :: sx,cx
       real, dimension (my) :: sy,cy
@@ -4714,7 +4729,7 @@ module Forcing
 !
 !  19-jun-02/axel+bertil: coded
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       real, dimension (nx) :: fx
       real, dimension (mz) :: fz
       real :: kx,ffnorm
@@ -4744,7 +4759,7 @@ module Forcing
 !
 !  19-jul-02/axel: coded
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       real, dimension (nx,nz) :: xx,zz,r2,tmp,fx,fz
       real :: ffnorm,ry2,fy,ytwist1,ytwist2
 !
@@ -4798,7 +4813,7 @@ module Forcing
 !
 !  26-jul-02/axel: coded
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       real, dimension (nx,nz) :: fx,fz,tmp
       real :: force_ampl,ffnorm,ffnorm2
 !
@@ -4842,7 +4857,7 @@ module Forcing
 !
       use Sub
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       real, save :: tforce=0.
       logical, save :: lfirst_call=.true.
       integer, save :: nforce=0
@@ -4879,13 +4894,10 @@ module Forcing
       use Sub
       use General, only: random_number_wrapper
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       real, save :: t_next_blob=1.
       logical, save :: lfirst_call=.true.
       integer, parameter :: t_interval_blobs=50.
-      logical :: lforce
-      character (len=intlen) :: ch
-      character (len=fnlen) :: file
       real, dimension (3) :: fran
       real :: scaled_interval
 !
@@ -4939,15 +4951,17 @@ module Forcing
 !  06-dec-13/nishant: made kkx etc allocatable
 !  23-dec-18/axel: forcing_helicity has now similar capabilities
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
 
-      real, dimension (mx,my,mz,3) :: force_vec
       real, dimension (nx) :: ruf,rho
       real, dimension (nx,3) :: variable_rhs,forcing_rhs,force_all
       real :: phase1,phase2,p_weight
       real :: kx01,ky1,kz1,kx02,ky2,kz2
       real :: mulforce_vec
-      integer :: ik1,ik2,ik
+      integer :: ik1,ik2
+      real, allocatable, dimension (:,:,:,:) :: force_vec
+
+      if(.not. allocated(force_vec)) allocate(force_vec(mx,my,mz,3))
 !
 !  Re-calculate forcing wave numbers if necessary
 !
@@ -4963,12 +4977,12 @@ module Forcing
         tsforce=t+dtforce
       endif
       phase1=pi*(2*fran1(1)-1.)
-      ik1=nk*.9999*fran1(2)+1
+      ik1=int(nk*.9999*fran1(2)+1)
       kx01=kkx(ik1)
       ky1=kky(ik1)
       kz1=kkz(ik1)
       phase2=pi*(2*fran2(1)-1.)
-      ik2=nk*.9999*fran2(2)+1
+      ik2=int(nk*.9999*fran2(2)+1)
       kx02=kkx(ik2)
       ky2=kky(ik2)
       kz2=kkz(ik2)
@@ -5048,13 +5062,12 @@ module Forcing
       use Mpicomm, only: mpireduce_sum
       use Sub
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
 !
       real :: force_ampl
       real, dimension (nx) :: ruf,rho,rho1
       real, dimension (nx,3) :: variable_rhs,forcing_rhs,force_all
-      real, dimension (nx,3) :: bb,fxb
-      integer :: j,jf,l
+      integer :: l
       real :: fact, dist3
 !
 !  Normalize ff; since we don't know dt yet, we finalize this
@@ -5153,7 +5166,7 @@ module Forcing
       use General, only: random_number_wrapper
       use Sub
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       real :: kx0,ky,kz
       real :: phase
       real :: kav
@@ -5460,7 +5473,7 @@ module Forcing
 !***********************************************************************
     subroutine forcing_after_boundary(f)
 !
-      real, dimension (mx,my,mz,mfarray),intent(OUT) :: f
+      real, contiguous,dimension(:,:,:,:),intent(OUT) :: f
 !
       if (lforcing_cont) call forcing_cont_after_boundary
 !
@@ -5545,7 +5558,7 @@ module Forcing
 !
       use Sub, only: multsv_mn, gij, curl_mn
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       type (pencil_case) :: p
 !
       intent(inout) :: f,p
@@ -5597,118 +5610,119 @@ module Forcing
 !
     endsubroutine calc_pencils_forcing
 !***********************************************************************
-    subroutine random_isotropic_KS_setup(initpower,kmin,kmax)
-!
-!  Produces random, isotropic field from energy spectrum following the
-!  KS method (Malik and Vassilicos, 1999.)
-!
-!  More to do; unsatisfactory so far - at least for a steep power-law
-!  energy spectrum.
-!
-!  27-may-05/tony: modified from snod's KS hydro initial
-!  03-feb-06/weezy: Attempted rewrite to guarantee periodicity of KS modes.
-!
-      use Sub, only: cross, dot2
-      use General, only: random_number_wrapper
-!
-      integer :: modeN
-!
-      real, dimension (3) :: k_unit
-      real, dimension (3) :: ee,e1,e2
-      real, dimension (6) :: r
-      real :: initpower,kmin,kmax
-      real, dimension(KS_modes) :: k,dk,energy,ps
-      real :: theta,phi,alpha,beta
-      real :: ex,ey,ez,norm,a
-!
-      if (.not.allocated(KS_k)) then
-        allocate(KS_k(3,KS_modes))
-        allocate(KS_A(3,KS_modes))
-        allocate(KS_B(3,KS_modes))
-        allocate(KS_omega(KS_modes))
-      endif
-!
-      kmin=2.*pi      !/(1.0*Lxyz(1))
-      kmax=128.*pi    !nx*pi
-      a=(kmax/kmin)**(1./(KS_modes-1.))
-!
-!  Loop over all modes.
-!
-      do modeN=1,KS_modes
-!
-!  Pick wavenumber.
-!
-        k=kmin*(a**(modeN-1.))
-!
-!  Pick 4 random angles for each mode.
-!
-        call random_number_wrapper(r);
-        theta=pi*(r(1) - 0.)
-        phi=pi*(2*r(2) - 0.)
-        alpha=pi*(2*r(3) - 0.)
-        beta=pi*(2*r(4) - 0.)
-!
-!  Make a random unit vector by rotating fixed vector to random position
-!  (alternatively make a random transformation matrix for each k).
-!
-        k_unit(1)=sin(theta)*cos(phi)
-        k_unit(2)=sin(theta)*sin(phi)
-        k_unit(3)=cos(theta)
-!
-        energy=(((k/kmin)**2. +1.)**(-11./6.))*(k**2.)*exp(-0.5*(k/kmax)**2.)
-!
-!  Make a vector KS_k of length k from the unit vector for each mode.
-!
-        KS_k(:,modeN)=k*k_unit(:)
-        KS_omega(:)=sqrt(energy(:)*(k(:)**3.))
-!
-!  Construct basis for plane having rr normal to it
-!  (bit of code from forcing to construct x', y').
-!
-      if ((k_unit(2)==0).and.(k_unit(3)==0)) then
-          ex=0.; ey=1.; ez=0.
-        else
-          ex=1.; ey=0.; ez=0.
-        endif
-        ee = (/ex, ey, ez/)
-!
-        call cross(k_unit(:),ee,e1)
-!  e1: unit vector perp. to KS_k
-        call dot2(e1,norm); e1=e1/sqrt(norm)
-        call cross(k_unit(:),e1,e2)
-!  e2: unit vector perp. to KS_k, e1
-        call dot2(e2,norm); e2=e2/sqrt(norm)
-!
-!  Make two random unit vectors KS_B and KS_A in the constructed plane.
-!
-        KS_A(:,modeN) = cos(alpha)*e1 + sin(alpha)*e2
-        KS_B(:,modeN) = cos(beta)*e1  + sin(beta)*e2
-!
-!  Make sure dk is set.
-!
-        call error('random_isotropic_KS_setup', 'Using uninitialized dk')
-        dk=0.                     ! to make compiler happy
-!
-        ps=sqrt(2.*energy*dk)   !/3.0)
-!
-!  Give KS_A and KS_B length ps.
-!
-        KS_A(:,modeN)=ps*KS_A(:,modeN)
-        KS_B(:,modeN)=ps*KS_B(:,modeN)
-!
-      enddo
-!
-!  Form RA = RA x k_unit and RB = RB x k_unit.
-!  Note: cannot reuse same vector for input and output.
-!
-      do modeN=1,KS_modes
-        call cross(KS_A(:,modeN),k_unit(:),KS_A(:,modeN))
-        call cross(KS_B(:,modeN),k_unit(:),KS_B(:,modeN))
-      enddo
-!
-      call keep_compiler_quiet(initpower)
-!
-    endsubroutine random_isotropic_KS_setup
+!    on comment since not used (to suppress compiler warnings)
+!    subroutine random_isotropic_KS_setup(initpower,kmin,kmax)
+!!
+!!  Produces random, isotropic field from energy spectrum following the
+!!  KS method (Malik and Vassilicos, 1999.)
+!!
+!!  More to do; unsatisfactory so far - at least for a steep power-law
+!!  energy spectrum.
+!!
+!!  27-may-05/tony: modified from snod's KS hydro initial
+!!  03-feb-06/weezy: Attempted rewrite to guarantee periodicity of KS modes.
+!!
+!      use Sub, only: cross, dot2
+!      use General, only: random_number_wrapper
+!!
+!      integer :: modeN
+!!
+!      real, dimension (3) :: k_unit
+!      real, dimension (3) :: ee,e1,e2
+!      real, dimension (6) :: r
+!      real :: initpower,kmin,kmax
+!      real, dimension(KS_modes) :: k,dk,energy,ps
+!      real :: theta,phi,alpha,beta
+!      real :: ex,ey,ez,norm,a
+!!
+!      if (.not.allocated(KS_k)) then
+!        allocate(KS_k(3,KS_modes))
+!        allocate(KS_A(3,KS_modes))
+!        allocate(KS_B(3,KS_modes))
+!        allocate(KS_omega(KS_modes))
+!      endif
+!!
+!      kmin=2.*pi      !/(1.0*Lxyz(1))
+!      kmax=128.*pi    !nx*pi
+!      a=(kmax/kmin)**(1./(KS_modes-1.))
+!!
+!!  Loop over all modes.
+!!
+!      do modeN=1,KS_modes
+!!
+!!  Pick wavenumber.
+!!
+!        k=kmin*(a**(modeN-1.))
+!!
+!!  Pick 4 random angles for each mode.
+!!
+!        call random_number_wrapper(r);
+!        theta=pi*(r(1) - 0.)
+!        phi=pi*(2*r(2) - 0.)
+!        alpha=pi*(2*r(3) - 0.)
+!        beta=pi*(2*r(4) - 0.)
+!!
+!!  Make a random unit vector by rotating fixed vector to random position
+!!  (alternatively make a random transformation matrix for each k).
+!!
+!        k_unit(1)=sin(theta)*cos(phi)
+!        k_unit(2)=sin(theta)*sin(phi)
+!        k_unit(3)=cos(theta)
+!!
+!        energy=(((k/kmin)**2. +1.)**(-11./6.))*(k**2.)*exp(-0.5*(k/kmax)**2.)
+!!
+!!  Make a vector KS_k of length k from the unit vector for each mode.
+!!
+!        KS_k(:,modeN)=k*k_unit(:)
+!        KS_omega(:)=sqrt(energy(:)*(k(:)**3.))
+!!
+!!  Construct basis for plane having rr normal to it
+!!  (bit of code from forcing to construct x', y').
+!!
+!      if ((k_unit(2)==0).and.(k_unit(3)==0)) then
+!          ex=0.; ey=1.; ez=0.
+!        else
+!          ex=1.; ey=0.; ez=0.
+!        endif
+!        ee = (/ex, ey, ez/)
+!!
+!        call cross(k_unit(:),ee,e1)
+!!  e1: unit vector perp. to KS_k
+!        call dot2(e1,norm); e1=e1/sqrt(norm)
+!        call cross(k_unit(:),e1,e2)
+!!  e2: unit vector perp. to KS_k, e1
+!        call dot2(e2,norm); e2=e2/sqrt(norm)
+!!
+!!  Make two random unit vectors KS_B and KS_A in the constructed plane.
+!!
+!        KS_A(:,modeN) = cos(alpha)*e1 + sin(alpha)*e2
+!        KS_B(:,modeN) = cos(beta)*e1  + sin(beta)*e2
+!!
+!!  Make sure dk is set.
+!!
+!        call error('random_isotropic_KS_setup', 'Using uninitialized dk')
+!        dk=0.                     ! to make compiler happy
+!!
+!        ps=sqrt(2.*energy*dk)   !/3.0)
+!!
+!!  Give KS_A and KS_B length ps.
+!!
+!        KS_A(:,modeN)=ps*KS_A(:,modeN)
+!        KS_B(:,modeN)=ps*KS_B(:,modeN)
+!!
+!      enddo
+!!
+!!  Form RA = RA x k_unit and RB = RB x k_unit.
+!!  Note: cannot reuse same vector for input and output.
+!!
+!      do modeN=1,KS_modes
+!        call cross(KS_A(:,modeN),k_unit(:),KS_A(:,modeN))
+!        call cross(KS_B(:,modeN),k_unit(:),KS_B(:,modeN))
+!      enddo
+!!
+!      call keep_compiler_quiet(initpower)
+!!
+!    endsubroutine random_isotropic_KS_setup
 !***********************************************************************
     subroutine random_isotropic_KS_setup_test
 !
@@ -5839,9 +5853,10 @@ module Forcing
       real, dimension (nx) :: tmp
       real :: fact, fact1, fact2, fpara, dfpara, sqrt21k1
       real :: kf, kx, ky, kz, nu, arg, ecost, esint
-      integer :: i2d1,i2d2,i2d3,modeN
+      integer :: modeN
       real, dimension(nx) :: kdotxwt, cos_kdotxwt, sin_kdotxwt
 !
+        call keep_compiler_quiet(rho1)
         select case (iforcing_cont(i))
         case('Fy=const')
           force(:,1)=0.
@@ -5992,7 +6007,7 @@ module Forcing
           !force(:,i2d2)=+fact*sin(k2d*x(l1:l2))*cos(k2d*y(m))
           !force(:,i2d3)= 0.
           !TP: wrote out in full to help transpilation
-          !TP: preserved l2dxz even though seems wrong in the sense that first second index is initialized and later zerod?
+          !    preserved l2dxz even though seems wrong in the sense that first second index is initialized and later zeroed?
           if (l2dxz) then
             force(:,2)=-fact*cos(k2d*x(l1:l2))*sin(k2d*y(m))
             force(:,1)=+fact*sin(k2d*x(l1:l2))*cos(k2d*y(m))
@@ -6019,7 +6034,7 @@ module Forcing
           force(:,2)=+fact*kx*sinx(l1:l2,i)*cosy(m,i) - fact2*kx*siny(m,i)*cosy(m,i)
           force(:,3)=+fact*relhel*kf*cosx(l1:l2,i)*cosy(m,i)
 !
-          if ( Omega/=0. .and. theta==0. ) then  ! Obs, only implemented for rotation axis in z direction.
+          if (lrotation .and. theta==0. ) then  ! Obs, only implemented for rotation axis in z direction.
             fact = 2.*ampl_ff(i)*Omega
             force(:,1)= force(:,1)-fact*kx*sinx(l1:l2,i)*cosy(m,i)
             force(:,2)= force(:,2)-fact*ky*cosx(l1:l2,i)*siny(m,i)
@@ -6373,7 +6388,6 @@ module Forcing
 !
       type (pencil_case), intent(IN) :: p
 
-      real, dimension (nx,3) :: fxb
       real, dimension (nx) :: tmp
 !
 !  diagnostics
@@ -6679,17 +6693,20 @@ module Forcing
     do i = 1,n_forcing_cont_max
         call string_to_enum(enum_iforcing_cont(i),iforcing_cont(i))
     enddo
-    call copy_addr(enum_iforcing_cont,p_par(74)) ! int (n_forcing_cont_max)
-    if (allocated(fcont_from_file)) call copy_addr(fcont_from_file,p_par(75)) ! (nx) (ny) (nz) (3)
-    if (allocated(ks_k)) call copy_addr(ks_k,p_par(76)) ! (3) (ks_modes)
-    if (allocated(ks_a)) call copy_addr(ks_a,p_par(77)) ! (3) (ks_modes)
-    if (allocated(ks_b)) call copy_addr(ks_b,p_par(78)) ! (3) (ks_modes)
-    if (allocated(ks_omega)) call copy_addr(ks_omega,p_par(79)) ! (ks_modes)
-    call copy_addr(lforce_helical,p_par(80)) ! bool (2)
-    call copy_addr(lsecond_force,p_par(81)) ! bool
-    call copy_addr(torus,p_par(82)) ! torus_rect
-    call copy_addr(lfcont_as_comaux,p_par(83)) ! bool
-    call copy_addr(ifcont_aux,p_par(84)) ! int (n_forcing_cont_max)
+    call copy_addr(enum_iforcing_cont,p_par(76)) ! int (n_forcing_cont_max)
+    if (allocated(fcont_from_file)) call copy_addr(fcont_from_file,p_par(77)) ! (nx) (ny) (nz) (3)
+    if (allocated(ks_k)) call copy_addr(ks_k,p_par(78)) ! (3) (ks_modes)
+    if (allocated(ks_a)) call copy_addr(ks_a,p_par(79)) ! (3) (ks_modes)
+    if (allocated(ks_b)) call copy_addr(ks_b,p_par(80)) ! (3) (ks_modes)
+    if (allocated(ks_omega)) call copy_addr(ks_omega,p_par(81)) ! (ks_modes)
+    call copy_addr(lforce_helical,p_par(82)) ! bool (2)
+    call copy_addr(lsecond_force,p_par(83)) ! bool
+    call copy_addr(torus,p_par(84)) ! torus_rect
+    call copy_addr(lfcont_as_comaux,p_par(85)) ! bool
+    call copy_addr(ifcont_aux,p_par(86)) ! int (n_forcing_cont_max)
+
+    call keep_compiler_quiet(x1_fcont)
+    call keep_compiler_quiet(x2_fcont)
 
     endsubroutine pushpars2c
 !*******************************************************************

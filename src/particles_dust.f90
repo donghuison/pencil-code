@@ -190,10 +190,13 @@ module Particles
 !  real :: A3=0., A2=0., G_condensation=0.
   real :: A3=0., A2=0.
   real, target :: G_condensation=0.0
-  real :: nucleation_threshold
+  real :: nucleation_threshold=0.0
   logical :: ascalar_ngp=.false., ascalar_cic=.false.
   real :: diffusion_coefficient=0.0
-  real :: rpinit_int=-impossible, rpinit_ext=-impossible
+  real :: rpinit_int=impossible, rpinit_ext=impossible
+!
+  logical :: laccretion_removal=.false.,lsmooth_gravity_companion=.false.
+  real :: frac_hill=1.0
 !
   namelist /particles_init_pars/ &
       initxxp, initvvp, xp0, yp0, zp0, vpx0, vpy0, vpz0, delta_vp0, &
@@ -301,7 +304,7 @@ module Particles
       lcondensation_rate, vapor_mixing_ratio_qvs, lfollow_gas, &
       ltauascalar, rhoa, G_condensation, lpartnucleation, nucleation_threshold, &
       redfrac, lset_df_insert_nucleii, it_insert_nuclei, nucl_thr_inc_pow, &
-      Ntau,diffusion_coefficient
+      Ntau,diffusion_coefficient,laccretion_removal,frac_hill,lsmooth_gravity_companion
 !
   integer :: idiag_xpm=0, idiag_ypm=0, idiag_zpm=0      ! DIAG_DOC: $x_{part}$
   integer :: idiag_xpmin=0, idiag_ypmin=0, idiag_zpmin=0      ! DIAG_DOC: $x_{part}$
@@ -846,11 +849,12 @@ module Particles
 !  vorticity oo)
 !
       if (lnostore_uu) then
-        if (ldraglaw_steadystate .or. lparticles_spin .or. lsolid_ogrid) &
+        if (ldraglaw_steadystate .or. ldraglaw_stokesschiller .or. lparticles_spin .or. lsolid_ogrid) &
             call fatal_error('initialize_particles', 'lnostore_uu = F required')
         interp%luu = .false.
       else
-        interp%luu = ldragforce_dust_par .or. ldraglaw_steadystate .or. lparticles_spin .or. lsolid_ogrid
+        interp%luu = ldragforce_dust_par .or. ldraglaw_steadystate .or. &
+            ldraglaw_stokesschiller .or. lparticles_spin .or. lsolid_ogrid
       endif
       interp%loo = .false.
       interp%lTT = (lbrownian_forces .and.(brownian_T0 == 0.0)) &
@@ -1426,13 +1430,13 @@ module Particles
 ! Allow for initializing the particles at a different range (rpinit_[int/ext]) than
 ! the migration/removal range (rp_[int/ext])
 !               
-              if (rpinit_int==-impossible) then
+              if (rpinit_int==impossible) then
                 !default values
                 rpar_int = xyz0_loc(1)              
               else
                 rpar_int = rpinit_int
               endif
-              if (rpinit_ext==-impossible) then
+              if (rpinit_ext==impossible) then
                 rpar_ext = xyz1_loc(1)
               else
                 rpar_ext = rpinit_ext                 
@@ -4097,9 +4101,9 @@ module Particles
 !
       real, dimension(mx,my,mz,mfarray), intent(in) :: f
       real, dimension(mx,my,mz,mvar), intent(inout) :: df
-      real, dimension(mpar_loc,mparray), intent(in) :: fp
-      real, dimension(mpar_loc,mpvar), intent(inout) :: dfp
-      integer, dimension(mpar_loc,3), intent(in) :: ineargrid
+      real, dimension(mpar_loc,mparray)  :: fp
+      real, dimension(mpar_loc,mpvar) :: dfp
+      integer, dimension(mpar_loc,3) :: ineargrid
       real :: c2, s2, g2, rrcyl, rr2, gp
       real :: sint, cost, sinp, cosp
       logical :: lcentrifugal_force_gravity=.true.,lcoriolis_force_gravity=.true.,lindirect_terms=.true.
@@ -4146,7 +4150,18 @@ module Particles
         else
           call not_implemented("secondary_body_gravity","for Cartesian")
         endif
-        gp = -g1*(rr2+rp1_smooth**2)**(-1.5)
+
+        if (laccretion_removal) then
+          if (rr2 .le. (frac_hill*(g1/3.)**(1./3))**2) then
+            call remove_particle(fp,ipar,k,dfp,ineargrid)
+          endif
+        endif
+!
+        if (lsmooth_gravity_companion) then
+          gp = -g1*(rr2+rp1_smooth**2)**(-1.5)
+        else
+          gp = -g1*rr2**(-1.5)
+        endif
 !
         if (lcylindrical_coords) then
           ggp(1) =  gp * (fp(k,ixp)-rp1*cosp)

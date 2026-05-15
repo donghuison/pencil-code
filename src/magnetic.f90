@@ -19,7 +19,7 @@
 ! PENCILS PROVIDED b2; b21; bf2; bij(3,3); del2a(3); graddiva(3); jj(3); jj_ohm(3); (3)
 ! PENCILS PROVIDED curlb(3); e3xa(3)
 ! PENCILS PROVIDED el(3); e2; bijtilde(3,3),bij_cov_corr(3,3)
-! PENCILS PROVIDED j2; jb; ujxb; va2; jxb(3); jxbr(3); jxbr2; ub; uj; ob; uxb(3); uxbb(3); uxb2
+! PENCILS PROVIDED j2; jb; va2; jxb(3); jxbr(3); jxbr2; ub; uj; ob; uxb(3); uxbb(3); uxb2
 ! PENCILS PROVIDED uxj(3); chibp; beta; beta1; uga(3); uuadvec_gaa(3); djuidjbi; jo
 ! PENCILS PROVIDED StokesI; StokesQ; StokesU; StokesQ1; StokesU1
 ! PENCILS PROVIDED ujxb; oxuxb(3); jxbxb(3); jxbrxb(3)
@@ -33,6 +33,7 @@
 ! PENCILS PROVIDED hjparallel; hjperp; nu_ni1
 ! PENCILS PROVIDED gamma_A2; clight2; gva(3); vmagfric(3)
 ! PENCILS PROVIDED bb_sph(3); advec_va2; Lam; gLam(3)
+! PENCILS EXPECTED infl_dphi
 !***************************************************************
 module Magnetic
 !
@@ -126,8 +127,10 @@ module Magnetic
   real, dimension(2) :: magnetic_xaver_range=(/-max_real,max_real/)
   real, dimension(2) :: magnetic_yaver_range=(/-max_real,max_real/)
   real, dimension(2) :: magnetic_zaver_range=(/-max_real,max_real/)
-  real, dimension(nx) :: xmask_mag, xmask1_mag
+  real, dimension(nx) :: xmask_mag
+  logical, dimension(nx) :: lxmask_mag=.true.
   real, dimension(ny) :: ymask_mag
+  logical, dimension(ny) :: lymask_mag=.true.
   real, dimension(nz) :: zmask_mag
   real, dimension(3,3) :: bij_0D_test=0.
   real :: B0_ext_z=0.0, B0_ext_z_H=0.0
@@ -183,6 +186,8 @@ module Magnetic
   real :: z1_aa=0., z2_aa=0.
   real :: Pm_smag1=1., k1hel=0., k2hel=max_real, qexp_aa=0.
   real :: nfact_aa=4.
+  real :: alpf_MHD=0.  !PAR_DOC: axion coupling (in MHD, if not defined in disp_current)
+  real :: limiter_fact=1.  !PAR_DOC: limiter factor
   real :: r_inner=0., r_outer=0.
   real :: eta_tdep_loverride_ee=0.
   real :: r_dip=1 , epsi_dip=0.1, angle_dip=0., je_heating_factor=1.
@@ -268,6 +273,7 @@ module Magnetic
   logical :: lfactors_aa=.false., lvacuum=.false., ldensity_add_je_heating=.false.
   logical :: loverride_ee=.false., loverride_ee2=.false., loverride_ee_decide=.false.
   logical :: lignore_1rho_in_Lorentz=.false., lnorm_aa_kk=.false., lohm_evolve=.false.
+  logical :: llimiter=.false.
 !
   namelist /magnetic_init_pars/ &
       B_ext, B0_ext, B0_ext_z, B0_ext_z_H, t_bext, t0_bext, J_ext, lohmic_heat, radius, epsilonaa, &
@@ -277,7 +283,7 @@ module Magnetic
       robflow_aa, coefaa, coefbb, phase_aa, phasex_aa, phasey_aa, phasez_aa, inclaa, &
       lpress_equil, lpress_equil_via_ss, lset_AxAy_zero, ladd_bb_init, &
       mu_r, mu_ext_pot, lB_ext_pot, &
-      alp_aniso, ljj_as_comaux, lsmooth_jj, &
+      alpf_MHD, alp_aniso, ljj_as_comaux, lsmooth_jj, &
       lforce_free_test, ampl_B0, N_modes_aa, lno_noise_aa, &
       initpower_aa, initpower2_aa, cutoff_aa, ncutoff_aa, kpeak_aa, &
       lscale_tobox, lsquash_aa, kgaussian_aa, lrandom_ampl_aa, z1_aa, z2_aa, &
@@ -302,7 +308,8 @@ module Magnetic
       lcoulomb, lcoulomb_apply, learly_set_el_pencil, &
       qexp_aa, nfact_aa, lfactors_aa, lvacuum, ldensity_add_je_heating, l2d_aa, &
       loverride_ee_decide, eta_tdep_loverride_ee, z0_gaussian, width_gaussian, &
-      lnorm_aa_kk, lohm_evolve, lhubble_magnetic,r_dip, epsi_dip, angle_dip
+      lnorm_aa_kk, lohm_evolve, lhubble_magnetic,r_dip, epsi_dip, angle_dip, &
+      llimiter, limiter_fact
 !
 ! Run parameters
 !
@@ -409,7 +416,7 @@ module Magnetic
       center1_x, center1_y, center1_z, lcheck_positive_va2, &
       lmean_friction, llocal_friction, LLambda_aa, bthresh_per_brms, &
       iresistivity, lweyl_gauge, ladvective_gauge, ladvective_gauge2, lupw_aa, &
-      alphaSSm,eta_int, eta_ext, eta_shock, eta_va,eta_j, eta_j2, eta_jrho, &
+      alpf_MHD, alphaSSm, eta_int, eta_ext, eta_shock, eta_va,eta_j, eta_j2, eta_jrho, &
       eta_min, eta_max, wresistivity, eta_xy_max, rhomin_jxb, va2max_jxb, va2max_boris, &
       va_min, cmin,va2power_jxb, llorentzforce, linduction, ldiamagnetism, &
       B2_diamag, reinitialize_aa, rescale_aa, initaa, amplaa, lcovariant_magnetic, &
@@ -451,7 +458,8 @@ module Magnetic
       loverride_ee_decide, eta_tdep_loverride_ee, loverride_ee2, lignore_1rho_in_Lorentz, &
       lbext_moving_layer, zbot_moving_layer, ztop_moving_layer, speed_moving_layer, edge_moving_layer, &
       luse_bgb_as_jxb, lno_eta_tdep, luse_scale_factor_in_sigma, ell_jj, tau_jj, lhubble_magnetic, &
-      scl_uxb_in_ohm, eta_tdep_ascale_power,r_dip, epsi_dip, angle_dip, lreset_vart_only_at_start
+      scl_uxb_in_ohm, eta_tdep_ascale_power,r_dip, epsi_dip, angle_dip, lreset_vart_only_at_start, &
+      llimiter, limiter_fact
 !
 ! Diagnostic variables (need to be consistent with reset list below)
 !
@@ -650,8 +658,10 @@ module Magnetic
   integer :: idiag_betam = 0    ! DIAG_DOC: $\langle\beta\rangle$
   integer :: idiag_betamax = 0  ! DIAG_DOC: $\max\beta$
   integer :: idiag_betamin = 0  ! DIAG_DOC: $\min\beta$
-  integer :: idiag_Azmid_min=0  ! DIAG_DOC: $\min A_z^{\rm mid}$
-  integer :: idiag_Azmid_max=0  ! DIAG_DOC: $\max A_z^{\rm mid}$
+  integer :: idiag_Azmid_min=0  ! DIAG_DOC: $\min A_z^{\rm mid}(x)$
+  integer :: idiag_Azmid_max=0  ! DIAG_DOC: $\max A_z^{\rm mid}(x)$
+  integer :: idiag_Azmid_ymin=0 ! DIAG_DOC: $\min A_z^{\rm mid}(y)$
+  integer :: idiag_Azmid_ymax=0 ! DIAG_DOC: $\max A_z^{\rm mid}(y)$
   integer :: idiag_bxm=0        ! DIAG_DOC: $\left<B_x\right>$
   integer :: idiag_bym=0        ! DIAG_DOC: $\left<B_y\right>$
   integer :: idiag_bzm=0        ! DIAG_DOC: $\left<B_z\right>$
@@ -730,6 +740,7 @@ module Magnetic
   integer :: idiag_jx4m=0       ! DIAG_DOC: $\left< J_x^4 \right>$
   integer :: idiag_jy4m=0       ! DIAG_DOC: $\left< J_y^4 \right>$
   integer :: idiag_jz4m=0       ! DIAG_DOC: $\left< J_z^4 \right>$
+  integer :: idiag_jz3m=0       ! DIAG_DOC: $\left< J_z^3 \right>$
   integer :: idiag_jh2m1=0      ! DIAG_DOC: $\left< J_\perp^2 \right>^{I}$
   integer :: idiag_jx2m1=0      ! DIAG_DOC: $\left< J_x^2 \right>^{I}$
   integer :: idiag_jy2m1=0      ! DIAG_DOC: $\left< J_y^2 \right>^{I}$
@@ -1148,6 +1159,9 @@ module Magnetic
   real, dimension(-nghost:nghost,-nghost:nghost,-nghost:nghost) :: kern_jjsmooth
 !
   real, dimension(nz,nprocz) :: z_allprocs
+
+  real, dimension(mz) :: Bz_stratified
+
 !
 ! for continuous forcing
 !
@@ -1168,10 +1182,9 @@ module Magnetic
   integer :: enum_borderaa(3) = 0
   integer :: enum_iforcing_continuous_aa = 0
 
-  !TP: moved here from saved variable
-  real, dimension(mz) :: Bz_stratified
 
   logical :: lrelaxprof_glob_scaled
+  logical :: lnonzero_eta = .false.
 
   contains
 !***********************************************************************
@@ -1371,6 +1384,8 @@ module Magnetic
       if (lspecial) then
         call put_shared_variable('B0_ext_z', B0_ext_z)
         call put_shared_variable('Bz_stratified', Bz_stratified)
+   !    if (iex==0) &
+   !      call put_shared_variable('alpf_MHD',alpf_MHD,caller='register_magnetic')
       endif
 
     endsubroutine register_magnetic
@@ -1387,6 +1402,7 @@ module Magnetic
 !   7-jun-16/MR: modifications in z average removal for Yin-Yang, yet inoperational
 !  24-jun-17/MR: moved calculation of clight2_zdep from calc_pencils to initialize
 !  28-feb-18/piyali: moved back the calculation of clight2_zdep to calc_pencils to use va2 pencil
+!  24-mar-26/axel: corrected mask1 so that it works even if only one point is valid.
 !
       use Sub, only: register_report_aux, write_zprof, step, get_smooth_kernel   !, coeff_ydep
       use Magnetic_meanfield, only: initialize_magn_mf
@@ -1398,10 +1414,12 @@ module Magnetic
       use Forcing, only: n_forcing_cont
       use Yinyang_mpi, only: initialize_zaver_yy
       use Slices_methods, only: alloc_slice_buffers
+      integer :: l,m,n
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: i, j, nyl, nycap, ierr
       real :: eta_zdep_exponent
+      real, dimension(nz) :: Ax_xyaver
 !
       call get_gamma_etc(gamma)
       gamma1=1./gamma; gamma_m1=gamma-1.
@@ -1431,7 +1449,7 @@ module Magnetic
 !  Set ljj_as_comaux=T and get kernels
 !   if lsmooth_jj is used
 !
-      if(lsmooth_jj) then
+      if (lsmooth_jj) then
         ljj_as_comaux=lsmooth_jj
         call get_smooth_kernel(kern_jjsmooth,LGAUSS=.true.)
       endif
@@ -1446,19 +1464,20 @@ module Magnetic
         call warning('initialize_magnetic','B_ext,x /= 0 with shear is not implemented')
 !
 !  Compute mask for x-averaging where x is in magnetic_xaver_range.
-!  Normalize such that the average over the full domain
-!  gives still unity.
+!  Normalize such that the average over the full domain gives still unity.
+!  This is not the case for xmask1_mag, which is just 1 inside the range.
 !
       if (l1 == l2) then
         xmask_mag = 1.
       else
-        where (      x(l1:l2) >= magnetic_xaver_range(1) &
-               .and. x(l1:l2) <= magnetic_xaver_range(2))
+        where (      x(l1:l2) > magnetic_xaver_range(1) &
+               .and. x(l1:l2) < magnetic_xaver_range(2))
           xmask_mag = 1.
+          lxmask_mag = .true.
         elsewhere
           xmask_mag = 0.
+          lxmask_mag = .false.
         endwhere
-        xmask1_mag = xmask_mag
         magnetic_xaver_range(1) = max(magnetic_xaver_range(1), xyz0(1))
         magnetic_xaver_range(2) = min(magnetic_xaver_range(2), xyz1(1))
         if (lspherical_coords) then
@@ -1481,10 +1500,14 @@ module Magnetic
       if (m1 == m2) then
         ymask_mag = 1.
       else
-        where (y(m1:m2) >= magnetic_yaver_range(1) .and. y(m1:m2) <= magnetic_yaver_range(2))
+        !where (y(m1:m2) >= magnetic_yaver_range(1) .and. y(m1:m2) <= magnetic_yaver_range(2))
+!AB: changed this in analogy to x so as to have at least one point.
+        where (y(m1:m2) > magnetic_yaver_range(1) .and. y(m1:m2) < magnetic_yaver_range(2))
           ymask_mag = 1.
+          lymask_mag = .true.
         elsewhere
           ymask_mag = 0.
+          lymask_mag = .false.
         endwhere
         magnetic_yaver_range(1) = max(magnetic_yaver_range(1), xyz0(2))
         magnetic_yaver_range(2) = min(magnetic_yaver_range(2), xyz1(2))
@@ -1577,7 +1600,7 @@ module Magnetic
 !  Speed of light, sometimes used for displacement current correction
 !
       if (c_light/=impossible) then
-        c_light2=c_light**2
+        c_light2=real(c_light**2)
         c_light21=1./c_light2
       endif
 !
@@ -1599,15 +1622,20 @@ module Magnetic
         do j=1,ninit
           select case (initaa(j))
           case ('rescale'); f(:,:,:,iax:iaz)=rescale_aa*f(:,:,:,iax:iaz)
-          case ('remove_xyaver_from_Ax'); f(l1:l2,m1:m2,n1:n2,iax)=f(l1:l2,m1:m2,n1:n2,iax)- &
-            spread(spread(sum(sum(f(l1:l2,m1:m2,n1:n2,iax),dim=2)/ny,dim=1)/nx,1,nx),2,ny)
+          case ('remove_xyaver_from_Ax')
+             Ax_xyaver = sum(sum(f(l1:l2,m1:m2,n1:n2,iax),dim=2),dim=1)/(nx*ny)
+             do l=l1,l2; do m=m1,m2; do n=n1,n2
+               f(l,m,n,iax)=f(l,m,n,iax)-Ax_xyaver(n-nghost)
+             enddo; enddo; enddo
           case ('gaussian-noise'); call gaunoise(amplaa(j),f,iax,iaz)
           case ('hor-tube'); call htube(amplaa(j),f,iax,iaz,radius,epsilonaa,center1_x,center1_z)
           case ('cosxcosy'); call cosx_cosy_cosz(amplaa(j),f,iaz,kx_aa(j),ky_aa(j),kz_aa(j))
           case ('coswave-Ay-kx'); call coswave(amplaa(j),f,iay,kx=kx_aa(j))
           case ('sinwave-Ax-kz'); call sinwave(amplaa(j),f,iax,kz=kz_aa(j))
-          case ('toroidal'); f(:,:,:,iax)=-amplaa(j)*spread(spread( 1.0/x, 2,my),3,mz) &
-                                                    *spread(spread( y,     1,mx),3,mz)
+          case ('toroidal'); 
+            do l=1,mx; do m=1,my; do n=1,mz;
+              f(l,m,n,iax)=-amplaa(j)*(1.0/x(l))*y(m)
+            enddo; enddo; enddo
           case default
           endselect
         enddo
@@ -1834,6 +1862,9 @@ module Magnetic
                            trim(iresistivity(i)))
         endselect
       enddo
+
+      if (lresi_eta_xtdep) call fatal_error('initialize_magnetic', &
+               'lresi_eta_tdep must be false if lresi_eta_xtdep is true')
 !
 !  The case tdep_eta_type='mean-field' is related to Schwinger effect, not to mean-field electrodynamics.
 !
@@ -2035,25 +2066,13 @@ module Magnetic
            borderaa(1)/='nothing' .and. &
            borderaa(2)=='nothing' .and. &
            borderaa(3)=='nothing') then
-        borderaa(2)=borderaa(1)
-        borderaa(3)=borderaa(1)
+        borderaa(2:3)=borderaa(1)
       endif
 !
 !  Tell the BorderProfiles module if we intend to use border driving, so
 !  that the module can request the right pencils.
 !
-      do j=1,3
-!
-        select case (borderaa(j))
-        case ('zero','0','initial-condition')
-          call request_border_driving(borderaa(j))
-        case ('nothing')
-          if (lroot.and.ip<=5) print*,"set_border_magnetic: borderaa='nothing'"
-        case default
-          call fatal_error('initialize_magnetic','No such borderaa: '//trim(borderaa(j)))
-        end select
-
-      enddo
+      call request_border_driving(borderaa,'initialize_magnetic',iax,iaz)
 !
 !  Initialize individual modules, but need to do this only if
 !  lmagn_mf is true.
@@ -2233,6 +2252,8 @@ module Magnetic
        Bz_stratified = 0.
      endif
 
+     lnonzero_eta = eta /= 0.
+
     endsubroutine initialize_magnetic
 !***********************************************************************
     subroutine init_aa(f)
@@ -2255,7 +2276,7 @@ module Magnetic
       use General, only: yin2yang_coors, transform_thph_yy
       use File_io, only: read_zaver
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
 !
       real, dimension (nz) :: tmp
       real, dimension (nx,3) :: bb
@@ -2279,6 +2300,9 @@ module Magnetic
         case ('zero', '0'); f(:,:,:,iax:iaz) = 0.0
         case ('rescale'); f(:,:,:,iax:iaz)=amplaa(j)*f(:,:,:,iax:iaz)
         case ('tanhxy'); call tanh_hyperbola(amplaa(j),f,iaa,sheet_position,sheet_thickness,sheet_hyp)
+        case ('sech2x'); call sech2x(amplaa(j),f,iaa,sheet_thickness)
+        case ('coalesce_tubes'); call coalesce_tubes(amplaa(j),f,iaa,sheet_thickness,cs20)
+        case ('coalesce_tubes_pe'); call coalesce_tubes_pe(amplaa(j),f,iaa,sheet_thickness,cs20)
         case ('exponential'); call exponential(amplaa(j),f,iaa,kz_aa(j))
         case ('bsiny'); call acosy(amplaa(j),f,iaa,ky_aa(j))
         case ('mode'); call modev(amplaa(j),coefaa,f,iaa,kx_aa(j),ky_aa(j),kz_aa(j))
@@ -2490,6 +2514,10 @@ module Magnetic
         case ('Az=x2')
           do n=n1,n2; do m=m1,m2
             f(l1:l2,m,n,iaz)=.25*pi_1*amplaa(j)*(x(l1:l2)/Lxyz(1))**2
+          enddo; enddo
+        case ('Az-x2')
+          do n=n1,n2; do m=m1,m2
+            f(l1:l2,m,n,iaz)= (x(l1:l2))**2 / 2
           enddo; enddo
         case ('Ay=x')
 !
@@ -2775,10 +2803,14 @@ module Magnetic
 !
 !  In 2-D with nzgrid=1, setting Ax=Ay=0 makes sense, but shouldn't
 !  be compulsory, so allow for this possibility in 2-D.
+!  Note that such a switch was letter also introduced as l2d_aa=T,
+!  but that only works for power_randomphase_hel.
+!  If lhydro=T, put also uz=0.0.
 !
       if (lset_AxAy_zero) then
         if (nzgrid==1) then
           f(:,:,:,iax:iay)=0.0
+          if (lhydro) f(:,:,:,iuz)=0.0
         else
           call fatal_error("init_aa","lset_AxAy_zero=T only allowed with nzgrid=1")
         endif
@@ -3198,6 +3230,16 @@ module Magnetic
         lpenc_requested(i_evth)=.true.
         lpenc_requested(i_phix)=.true.
         lpenc_requested(i_phiy)=.true.
+      endif
+!
+!  Request pencils for axion coupling.
+!
+      if (alpf_MHD/=0.) then
+        if (iex>0) then
+          call fatal_error('daa_dt','alpf_MHD is to be used only without displacement current')
+        else
+          lpenc_requested(i_infl_dphi)=.true.
+        endif
       endif
 !
 !  diagnostics pencils
@@ -3814,7 +3856,7 @@ module Magnetic
       use Mpicomm, only: mpiallreduce_sum
       use Poisson
 
-      real, dimension(mx,my,mz,mfarray), intent(inout) :: f
+      real, contiguous, dimension(:,:,:,:), intent(inout) :: f
 
       real :: fact
       integer :: l,j,ml,nl
@@ -3870,7 +3912,7 @@ module Magnetic
 !
         fact=1./nxygrid
         do j=1,3
-          do nl=n1,n2
+          do nl=1,mz
             aamz(nl,j)=fact*sum(f(l1:l2,m1:m2,nl,iax+j-1))
           enddo
         enddo
@@ -4065,7 +4107,7 @@ module Magnetic
 !      use General, only: staggered_max_scal
 !      use Density, only: calc_pencils_density
 !
-!      real, dimension (mx,my,mz,mfarray), intent(inout) :: f
+!      real, contiguous, dimension(:,:,:,:), intent(inout) :: f
 !!
 !      type(pencil_case) :: p
 !      logical, dimension(npencils) :: lpenc_loc=.false.
@@ -4100,7 +4142,7 @@ module Magnetic
 !
 !  Standard version (_std): global variable lpencil contains information about needed pencils.
 !
-      real, dimension (mx,my,mz,mfarray), intent(inout):: f
+      real, contiguous, dimension(:,:,:,:), intent(inout):: f
       type (pencil_case),                 intent(out)  :: p
 !
       call calc_pencils_magnetic_pencpar(f,p,lpencil)
@@ -4113,7 +4155,7 @@ module Magnetic
 !
       use SharedVariables, only: get_shared_variable
 
-      real, dimension(mx,my,mz,mfarray), intent(in) :: f
+      real, contiguous, dimension(:,:,:,:), intent(in) :: f
       type(pencil_case), intent(in) :: p
 
       real, dimension (nx) :: Eabs, Babs
@@ -4235,7 +4277,7 @@ module Magnetic
       use General, only: notanumber
       use Sub
 !
-      real, dimension (mx,my,mz,mfarray), intent(inout):: f
+      real, contiguous, dimension(:,:,:,:), intent(inout):: f
       type (pencil_case),                 intent(out)  :: p
       logical, dimension(:),              intent(in)   :: lpenc_loc
 !
@@ -4305,7 +4347,7 @@ module Magnetic
           call get_bext(B_ext,j_ext)
           if (any(B_ext/=0.)) then
             if (lhubble_magnetic) then
-              do j = 1,3; if(B_ext(j) /= 0.0) p%bb(:,j) = p%bb(:,j) + B_ext(j)/ascale**2; enddo;
+              do j = 1,3; if (B_ext(j) /= 0.0) p%bb(:,j) = p%bb(:,j) + B_ext(j)/ascale**2; enddo;
             else
               do j = 1,3; p%bb(:,j) = p%bb(:,j) + B_ext(j); enddo;
             endif
@@ -4323,9 +4365,9 @@ module Magnetic
 !
         if (dipole_moment /= 0.) then
           c=cos(inclaa*pi/180); s=sin(inclaa*pi/180)
-          p%bb(:,1) = p%bb(:,1) + dipole_moment*2*(c*costh(m) + s*sinth(m)*cos(z(n)-omega_Bz_ext*t))*p%r_mn1**3
-          p%bb(:,2) = p%bb(:,2) + dipole_moment*  (c*sinth(m) - s*costh(m)*cos(z(n)-omega_Bz_ext*t))*p%r_mn1**3
-          p%bb(:,3) = p%bb(:,3) + dipole_moment*  (             s*         sin(z(n)-omega_Bz_ext*t))*p%r_mn1**3
+          p%bb(:,1) = real(p%bb(:,1) + dipole_moment*2*(c*costh(m) + s*sinth(m)*cos(z(n)-omega_Bz_ext*t))*p%r_mn1**3)
+          p%bb(:,2) = real(p%bb(:,2) + dipole_moment*  (c*sinth(m) - s*costh(m)*cos(z(n)-omega_Bz_ext*t))*p%r_mn1**3)
+          p%bb(:,3) = real(p%bb(:,3) + dipole_moment*  (             s*         sin(z(n)-omega_Bz_ext*t))*p%r_mn1**3)
         endif
 !
 !  Add the external potential field.
@@ -4508,39 +4550,27 @@ module Magnetic
 !
           if (lresi_eta_tdep .or. lresi_eta_xtdep .or. lresi_hyper2_tdep .or. lresi_hyper3_tdep) then
             call get_eta_t_and_xtdep(f,p)
-!
-!  endif from lresi_eta_tdep
-!
           endif
-        endif
 !
 !  Check whether or not the displacement current is being computed.
 !  When iex>0, eta_total is not yet set, so we must do it here.
 !  Note, however, that p%jj_ohm can also be computed in disp_current,
 !  so we must not overwrite it here.
 !
-        if (ldisp_current) then
-          if (lresi_eta_tdep) then
-            if (lresi_eta_xtdep) call fatal_error('calc_pencils_magnetic_pencpar', &
-                'lresi_eta_tdep must be false if lresi_eta_xtdep is true')
-            eta_total=eta_tdep
-          elseif (lresi_eta_xtdep) then
-            eta_total=eta_xtdep
-          else
+          if (ldisp_current) then
+            if (lresi_eta_tdep) then
+              eta_total=eta_tdep
+            elseif (lresi_eta_xtdep) then
+              eta_total=eta_xtdep
+            else
 !
 !  Must not overwrite jj_ohm here.
 !  Need to check that it is still always initialized.
 !
-            !p%jj=0.
-            !p%jj_ohm=0.
-            eta_total=eta
-          endif
-!
-          if (lvacuum) then
-            p%jj=0.
-            p%jj_ohm=0.
-            eta_total=huge1
-          else
+              !p%jj=0.
+              if (it==1) p%jj_ohm=0.
+              eta_total=eta
+            endif
 !
 !  The Ohm's current is independent of loverride_ee2, etc.
 !  AB: eta_total and the rest are pencils, but it complains about inconsistent ranks. So I put (1).
@@ -4548,7 +4578,7 @@ module Magnetic
 !  Whether it works with lohm_evolve needs to be checked.
 !  learly_set_el_pencil=T is needed in all cases with displacement current.
 !
-            if (lresi_eta_tdep .or. lresi_eta_xtdep .or. eta/=0.) then
+            if (lresi_eta_tdep .or. lresi_eta_xtdep .or. lnonzero_eta) then
               if (lohm_evolve) then
                 p%jj_ohm=f(l1:l2,m,n,ijx:ijz)
               else
@@ -4592,34 +4622,34 @@ module Magnetic
 !
               p%jj=p%jj_ohm
             endif
-          endif
-        else
+          else
 !
 !  Go here in standard MHD if no displacement current exists.
 !  In that case, no ohmic current is needed or used and p%jj is set to mu01*p%curlb.
 !
-          p%jj=mu01*p%curlb
-          p%jj_ohm=0.
-        endif
+            p%jj=mu01*p%curlb
+            p%jj_ohm=0.
+          endif
 !
 !  Add external j-field.
 !
-        do j=1,3
-          if (iglobal_jext(j)/=0) p%jj(:,j)=p%jj(:,j)+f(l1:l2,m,n,iglobal_jext(j))
-        enddo
+          do j=1,3
+            if (iglobal_jext(j)/=0) p%jj(:,j)=p%jj(:,j)+f(l1:l2,m,n,iglobal_jext(j))
+          enddo
 !
 !  Add an external J-field (for the Bell instability).
 !
-        if (lJ_ext) then
-          if (J_ext_quench/=0) then
-            quench=1./(1.+J_ext_quench*p%b2)
-            do j=1,3
-              p%jj(:,j)=p%jj(:,j)-J_ext(j)*quench
-            enddo
-          else
-            do j=1,3
-              p%jj(:,j)=p%jj(:,j)-J_ext(j)
-            enddo
+          if (lJ_ext) then
+            if (J_ext_quench/=0) then
+              quench=1./(1.+J_ext_quench*p%b2)
+              do j=1,3
+                p%jj(:,j)=p%jj(:,j)-J_ext(j)*quench
+              enddo
+            else
+              do j=1,3
+                p%jj(:,j)=p%jj(:,j)-J_ext(j)
+              enddo
+            endif
           endif
         endif
       endif
@@ -4892,7 +4922,7 @@ module Magnetic
       if (lpenc_loc(i_ss12)) p%ss12=sqrt(abs(p%sj))
 ! vmagfric
       if (lpenc_loc(i_vmagfric).and.numag/=0.0) then
-        tmp1=mu01/(numag*(B0_magfric/unit_magnetic**2+p%b2))
+        tmp1=real(mu01/(numag*(B0_magfric/unit_magnetic**2+p%b2)))
         do i=1,3
           p%vmagfric(:,i)=abs(p%jxb(:,i))*tmp1
         enddo
@@ -4954,7 +4984,7 @@ module Magnetic
          p%clight2=spread(va2max_boris,1,nx)
        else
          if (lcartesian_coords) then
-           p%clight2 = max(dble(cmin)**2,c_light**2/(1.+max(z(n),0.0)**8)+max(25.0*maxval(p%u2),maxval(p%cs2)))
+           p%clight2 = real(max(dble(cmin)**2,c_light**2/(1.+max(z(n),0.0)**8)+max(25.0*maxval(p%u2),maxval(p%cs2))))
          else if (lspherical_coords) then
            p%clight2 = spread(max(cmin**2,25*maxval(p%u2),maxval(p%cs2)),1,nx)
          endif
@@ -5116,7 +5146,7 @@ module Magnetic
 !  before_boundary or after_boundary
 !
       real, dimension(nx,3) :: aa_xyaver
-      real, dimension(mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: j
       integer, parameter :: nxy=nxgrid*nygrid
 
@@ -5126,7 +5156,7 @@ module Magnetic
     endsubroutine calc_aaxyaver
 !***********************************************************************
     subroutine calc_eta_total(f,p)
-      real, dimension(mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       type(pencil_case), intent(IN) :: p
       real, dimension(nx)   :: eta_mn
       real, dimension(nx,3) :: geta
@@ -5149,6 +5179,87 @@ module Magnetic
         eta_total = eta_total + eta
       endif
     endsubroutine calc_eta_total
+!***********************************************************************
+    subroutine calc_magnetic_slope_limited(f,df,p)
+!
+!  16-apr-2026/TP: carved from daa_dt
+!
+
+      use Sub, only: calc_slope_diff_flux, dot
+
+      real, intent(in), contiguous, dimension(:,:,:,:) :: f
+      real, intent(out), contiguous, dimension(:,:,:,:) :: df
+      type (pencil_case), intent(in) :: p
+!
+      real, dimension (nx,3,3) :: d_sld_flux
+      real, dimension (nx)   :: tmp1
+      real, dimension (nx,3) :: tmp2
+      integer :: j
+!     if (lmagnetic_slope_limited) then
+      if (lsld_bb) then
+!
+!   Using diffusive flux of B on A
+!   Idea: DA_i/dt  = ... - e_ikl Dsld_k B_l
+!     where Dsld is the SLD operator
+!   normal way:  DA_i/dt = ... partial_j Dsld_j A_l
+!
+        do j=1,3
+          call calc_slope_diff_flux(f,ibx+(j-1),h_sld_magn,nlf_sld_magn,tmp1,div_sld_magn, &
+                                    FLUX1=d_sld_flux(:,1,j),FLUX2=d_sld_flux(:,2,j),FLUX3=d_sld_flux(:,3,j))
+        enddo
+!
+        tmp2(:,1)= (-d_sld_flux(:,2,3) + d_sld_flux(:,3,2))*fac_sld_magn
+        tmp2(:,2)= (-d_sld_flux(:,3,1) + d_sld_flux(:,1,3))*fac_sld_magn
+        tmp2(:,3)= (-d_sld_flux(:,1,2) + d_sld_flux(:,2,1))*fac_sld_magn
+!
+        fres=fres + tmp2
+      else
+!
+        if (lcylindrical_coords .or. lspherical_coords) then
+          do j=1,3
+            call calc_slope_diff_flux(f,iax+(j-1),h_sld_magn,nlf_sld_magn,tmp2(:,j),div_sld_magn, &
+                                      FLUX1=d_sld_flux(:,1,j),FLUX2=d_sld_flux(:,2,j),FLUX3=d_sld_flux(:,3,j))
+          enddo
+!
+          if (lcylindrical_coords) then
+            fres(:,1)=fres(:,1)+tmp2(:,1)-(d_sld_flux(:,2,2))/x(l1:l2)
+            fres(:,2)=fres(:,2)+tmp2(:,2)+(d_sld_flux(:,2,1))/x(l1:l2)
+            fres(:,3)=fres(:,3)+tmp2(:,3)
+          elseif (lspherical_coords) then
+            fres(:,1)=fres(:,1)+tmp2(:,1)-(d_sld_flux(:,2,2)+d_sld_flux(:,3,3))/x(l1:l2)
+            fres(:,2)=fres(:,2)+tmp2(:,2)+(d_sld_flux(:,2,1)-d_sld_flux(:,3,3)*cotth(m))/x(l1:l2)
+            fres(:,3)=fres(:,3)+tmp2(:,3)+(d_sld_flux(:,3,1)+d_sld_flux(:,3,2)*cotth(m))/x(l1:l2)
+          endif
+        else
+          do j=1,3
+            call calc_slope_diff_flux(f,iax+(j-1),h_sld_magn,nlf_sld_magn,tmp2(:,j),div_sld_magn)
+          enddo
+            fres=fres+tmp2
+        endif
+      endif
+!
+!     Heating is jj*divF_sld
+!     or Heating is just jj*(-e_ijk Dsld_k B_l) (for lsld_bb=T)
+!
+      if (lohmic_heat) then
+        call dot(tmp2,p%jj,tmp1)
+        if (lentropy) then
+          if (pretend_lnTT) then
+            df(l1:l2,m,n,iss) = df(l1:l2,m,n,iss) + p%cv1*max(0.0,tmp1)*p%rho1*p%TT1
+          else
+            df(l1:l2,m,n,iss) = df(l1:l2,m,n,iss) + max(0.0,tmp1)*p%rho1*p%TT1
+          endif
+        else if (ltemperature) then
+          if (ltemperature_nolog) then
+            df(l1:l2,m,n,iTT)   = df(l1:l2,m,n,iTT) + p%cv1*max(0.0,tmp1)*p%rho1
+          else
+            df(l1:l2,m,n,ilnTT) = df(l1:l2,m,n,ilnTT) + p%cv1*max(0.0,tmp1)*p%rho1*p%TT1
+          endif
+        else if (lthermal_energy) then
+          df(l1:l2,m,n,ieth) = df(l1:l2,m,n,ieth) + max(0.0,tmp1)
+        endif
+      endif
+    endsubroutine calc_magnetic_slope_limited
 !***********************************************************************
     subroutine daa_dt(f,df,p)
 !
@@ -5179,8 +5290,8 @@ module Magnetic
       use Sub
       use General, only: transform_thph_yy, notanumber
 
-      real, dimension (mx,my,mz,mfarray) :: f
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: f
+      real, contiguous, dimension(:,:,:,:) :: df
       type (pencil_case) :: p
 !
       intent(in)   :: p
@@ -5190,14 +5301,13 @@ module Magnetic
       real, dimension (nx,3) :: aa_xyaver
       real, dimension (nx,3) :: geta,uxb_upw,tmp2
       real, dimension (nx,3) :: dAdt, gradeta_shock, aa1, uu1, dJdt, del2jj
-      real, dimension (nx,3,3) :: d_sld_flux
       real, dimension (nx) :: ftot, dAtot
       real, dimension (nx) :: peta_shock
       real, dimension (nx) :: sign_jo,tmp1
       real, dimension (nx) :: eta_mn,etaSS,eta_heat
       real, dimension (nx) :: vdrift
       real, dimension (nx) :: del2aa_ini,tanhx2,advec_hall,advec_hypermesh_aa
-      real, dimension(nx) :: eta_BB, prof
+      real, dimension(nx) :: eta_BB, prof, dlnBrmsdt, limiter
       real, dimension(3) :: B_ext
       real :: tmp, eta_out1, cosalp, sinalp, hall_term_, tau1_jj
       real, parameter :: OmegaSS=1.0
@@ -5212,22 +5322,22 @@ module Magnetic
         call identify_bcs('Ax',iax)
         call identify_bcs('Ay',iay)
         call identify_bcs('Az',iaz)
-        if(lbb_as_comaux) then
+        if (lbb_as_comaux) then
           call identify_bcs('Bx',ibx)
           call identify_bcs('By',iby)
           call identify_bcs('Bz',ibz)
         endif
-        if(ljj_as_comaux) then
+        if (ljj_as_comaux) then
           call identify_bcs('Jx',ijx)
           call identify_bcs('Jy',ijy)
           call identify_bcs('Jz',ijz)
         endif
-        if(lslope_limit_diff) then
+        if (lslope_limit_diff) then
           call identify_bcs('sld_char',isld_char)
         endif
       endif
 !
-! set dAdt to zero at the beginning of each execution of this routine
+! Set dAdt to zero at the beginning of each execution of this routine.
 !
       dAdt=0.
       Fmax=1./impossible
@@ -5240,14 +5350,16 @@ module Magnetic
       call get_bext(B_ext)
 !
 !  Add jxb/rho to momentum equation.
+!  The following 60 lines affect Du/Dt or Dlnrho/Dt, but not the magnetic field.
+!  They are needed regardless of whether or not the displacement current is included.
 !
       if (lhydro) then
         if (.not.lkinematic) then
           if (llorentzforce) then
             if (lboris_correction) then
 !
-!  Following Eq. 34 of Gombosi et al. 2002 for Boris correction. Can work with
-!  only const gravity at present
+!  Following Eq. (34) of Gombosi et al. (2002) for the Boris correction.
+!  Can work with only const gravity at present.
 !
                 df(l1:l2,m,n,iux)=df(l1:l2,m,n,iux)+p%gamma_A2*p%jxbr(:,1)+&
                                   (p%ugu(:,1)+p%rho1gpp(:,1)-p%gg(:,1))*(1-p%gamma_A2)-&
@@ -5305,6 +5417,7 @@ module Magnetic
 !
 !  The following is only needed when the displacement current is not being solved for.
 !  To check this, we check whether ldisp_current=T.
+!  The following lines have not (yet) been correctly indented, because they are so many (1103 lines).
 !
       if ((.not. ldisp_current) .or. loverride_ee) then
 !
@@ -5708,6 +5821,8 @@ module Magnetic
         eta_total = eta_total + p%etajrho
       endif
 !
+!  Resistive Smagorinsky term. But is it correct to reset fres through multsv here?
+!
       if (lresi_smagorinsky) then
         if (.not.lweyl_gauge) then
           if (letasmag_as_aux) then
@@ -5789,7 +5904,7 @@ module Magnetic
         endif
       endif
 !
-! Temperature dependent resistivity for the solar corona (Spitzer 1969)
+! Temperature-dependent resistivity for the solar corona (Spitzer 1969)
 !
       if (lresi_spitzer) then
         if (lweyl_gauge) then
@@ -5899,70 +6014,7 @@ module Magnetic
 !   Slope limited diffusion for magnetic field
 !
       if (lmagnetic_slope_limited.and.llast) then
-!       if (lmagnetic_slope_limited) then
-        if (lsld_bb) then
-!
-!   Using diffusive flux of B on A
-!   Idea: DA_i/dt  = ... - e_ikl Dsld_k B_l
-!     where Dsld is the SLD operator
-!   normal way:  DA_i/dt = ... partial_j Dsld_j A_l
-!
-          do j=1,3
-            call calc_slope_diff_flux(f,ibx+(j-1),p,h_sld_magn,nlf_sld_magn,tmp1,div_sld_magn, &
-                                      FLUX1=d_sld_flux(:,1,j),FLUX2=d_sld_flux(:,2,j),FLUX3=d_sld_flux(:,3,j))
-          enddo
-!
-          tmp2(:,1)= (-d_sld_flux(:,2,3) + d_sld_flux(:,3,2))*fac_sld_magn
-          tmp2(:,2)= (-d_sld_flux(:,3,1) + d_sld_flux(:,1,3))*fac_sld_magn
-          tmp2(:,3)= (-d_sld_flux(:,1,2) + d_sld_flux(:,2,1))*fac_sld_magn
-!
-          fres=fres + tmp2
-        else
-!
-          if (lcylindrical_coords .or. lspherical_coords) then
-            do j=1,3
-              call calc_slope_diff_flux(f,iax+(j-1),p,h_sld_magn,nlf_sld_magn,tmp2(:,j),div_sld_magn, &
-                                        FLUX1=d_sld_flux(:,1,j),FLUX2=d_sld_flux(:,2,j),FLUX3=d_sld_flux(:,3,j))
-            enddo
-!
-            if (lcylindrical_coords) then
-              fres(:,1)=fres(:,1)+tmp2(:,1)-(d_sld_flux(:,2,2))/x(l1:l2)
-              fres(:,2)=fres(:,2)+tmp2(:,2)+(d_sld_flux(:,2,1))/x(l1:l2)
-              fres(:,3)=fres(:,3)+tmp2(:,3)
-            elseif(lspherical_coords) then
-              fres(:,1)=fres(:,1)+tmp2(:,1)-(d_sld_flux(:,2,2)+d_sld_flux(:,3,3))/x(l1:l2)
-              fres(:,2)=fres(:,2)+tmp2(:,2)+(d_sld_flux(:,2,1)-d_sld_flux(:,3,3)*cotth(m))/x(l1:l2)
-              fres(:,3)=fres(:,3)+tmp2(:,3)+(d_sld_flux(:,3,1)+d_sld_flux(:,3,2)*cotth(m))/x(l1:l2)
-            endif
-          else
-            do j=1,3
-              call calc_slope_diff_flux(f,iax+(j-1),p,h_sld_magn,nlf_sld_magn,tmp2(:,j),div_sld_magn)
-            enddo
-              fres=fres+tmp2
-          endif
-        endif
-!
-!     Heating is jj*divF_sld
-!     or Heating is just jj*(-e_ijk Dsld_k B_l) (for lsld_bb=T)
-!
-        if (lohmic_heat) then
-          call dot(tmp2,p%jj,tmp1)
-          if (lentropy) then
-            if (pretend_lnTT) then
-              df(l1:l2,m,n,iss) = df(l1:l2,m,n,iss) + p%cv1*max(0.0,tmp1)*p%rho1*p%TT1
-            else
-              df(l1:l2,m,n,iss) = df(l1:l2,m,n,iss) + max(0.0,tmp1)*p%rho1*p%TT1
-            endif
-          else if (ltemperature) then
-            if (ltemperature_nolog) then
-              df(l1:l2,m,n,iTT)   = df(l1:l2,m,n,iTT) + p%cv1*max(0.0,tmp1)*p%rho1
-            else
-              df(l1:l2,m,n,ilnTT) = df(l1:l2,m,n,ilnTT) + p%cv1*max(0.0,tmp1)*p%rho1*p%TT1
-            endif
-          else if (lthermal_energy) then
-            df(l1:l2,m,n,ieth) = df(l1:l2,m,n,ieth) + max(0.0,tmp1)
-          endif
-        endif
+        call calc_magnetic_slope_limited(f,df,p)
       endif
 !
 !  Special contributions to this module are called here.
@@ -6007,10 +6059,10 @@ module Magnetic
 !
       do j=1,3
         if (lfrozen_bb_bot(j)) then
-                if(lfirst_proc_z.and.n==n1) fres(:,j)=0.
+          if (lfirst_proc_z.and.n==n1) fres(:,j)=0.
         endif
         if (lfrozen_bb_top(j)) then
-                if (llast_proc_z.and.n==n2) fres(:,j)=0.
+          if (llast_proc_z.and.n==n2) fres(:,j)=0.
         endif
       enddo
 !
@@ -6061,6 +6113,9 @@ module Magnetic
                                          p%uu(:,3)*p%aa(:,3)*cotth(m))*r1_mn
             endif
 !
+!  Here is where fres is added to the rhs of the dA/dt equation.
+!  But this is only true when ".not.lupw_aa" and if "linduction" are true.
+!
             if (.not.lfargo_advection) then
               dAdt = dAdt-p%uga-ujiaj+fres
             else
@@ -6071,7 +6126,10 @@ module Magnetic
             endif
 !            df(l1:l2,m,n,iax:iaz)=df(l1:l2,m,n,iax:iaz)-p%uga-ujiaj+fres
 !
-!  ladvective_gauge2
+!  ladvective_gauge2. This switch solves for the regular advective gauge,
+!  which was also found to lead to the accumulation of large gradients in A;
+!  see Candelaresi, Hubbard, Brandenburg, & Mitra (2012, Phys. Plasmas 18, 012903)
+!  "Magnetic helicity transport in the advective gauge family".
 !
           elseif (ladvective_gauge2) then
             if (lua_as_aux) then
@@ -6080,11 +6138,11 @@ module Magnetic
             else
               call fatal_error('daa_dt','must put lua_as_aux=T for advective_gauge2')
             endif
+          else
 !
 !  ladvective_gauge=F, so just the normal uxb term plus resistive term.
+!  This is the normal configuration.
 !
-          else
-            !print*,'this, right?'
             dAdt = dAdt+ p%uxb+fres
           endif
 !
@@ -6155,11 +6213,22 @@ module Magnetic
 !
 !  limp_alpha=T, add artificial z dependent alpha dynamo.
 !
-      if(limp_alpha) then
+      if (limp_alpha) then
         if (abs(z(n))<=imp_halpha/2) then
           dAdt = dAdt+imp_alpha0*sin(pi*z(n)/imp_halpha)*p%bb
         else
           dAdt = dAdt+sign(imp_alpha0,z(n))*exp(-((2*z(n)-sign(imp_halpha,z(n)))/imp_halpha)**2)*p%bb
+        endif
+      endif
+!
+!  Add field amplification from coupling to axion field. This only works when iex>0.
+!  In that case, we have to get the dphi pencil.
+!
+      if (alpf_MHD/=0.) then
+        if (iex>0) then
+          call fatal_error('daa_dt','alpf_MHD is to be used only without displacement current')
+        else
+          call multsv_add(dAdt,eta*alpf_MHD*p%infl_dphi,p%bb,dAdt)
         endif
       endif
 !
@@ -6213,7 +6282,7 @@ module Magnetic
 !AB: Piyali, I think the mu01 should be removed
 !
       if (lmagneto_friction.and.(.not.lhydro).and.numag/=0.0) then
-         tmp1=mu01/(numag*(B0_magfric/unit_magnetic**2+p%b2))
+         tmp1=real(mu01/(numag*(B0_magfric/unit_magnetic**2+p%b2)))
          do i=1,3
            dAdt(:,i) = dAdt(:,i) + p%jxbxb(:,i)*tmp1
          enddo
@@ -6265,7 +6334,7 @@ module Magnetic
 !
         if (lA_relprof_global) then
 !
-!  use the directly the global external vector potential
+!  Use directly the global external vector potential.
 !
           dAdt = dAdt-(p%aa-f(l1:l2,m,n,iglobal_ax_ext:iglobal_az_ext))*tau_relprof1
         else
@@ -6336,6 +6405,14 @@ module Magnetic
         call fatal_error('daa_dt','setting lhubble_magnetic=T is not correct')
       endif
 !
+!  Limiter
+!
+      if (llimiter) then
+        dlnBrmsdt=sqrt(max(0.,eta*wav1*(abs(alpf_MHD*p%infl_dphi)-wav1)))
+        limiter=1./(1.+limiter_fact*eta*dlnBrmsdt)
+        call multsv_mn(limiter,dAdt,dAdt)
+      endif
+!
 !  Now add all the contribution to dAdt so far into df.
 !  This is done here, such that contribution from mean-field models are not added to
 !  the electric field. This may need review later.
@@ -6399,11 +6476,14 @@ module Magnetic
 !
       endif
 !
-!  The following is the endif from "((.not. ldisp_current) .or. loverride_ee) then"
+!  The following is the endif from "((.not. ldisp_current) .or. loverride_ee) then".
+!  As indicated above, the block above has not (yet) been indented correctly,
+!  because the number of lines is so large (1103 lines).
 !
       endif
 !
-!  If ldensity and ldensity_add_je_heating, then compute J.E and add it:
+!  If ldensity and ldensity_add_je_heating, then compute J.E and add it.
+!  This would only make sense if the equation for the displacement current is solved.
 !
       if (ldensity .and. ldensity_add_je_heating) then
         if (ldisp_current) then
@@ -6417,7 +6497,7 @@ module Magnetic
 !
 !  Evolve current density.
 !
-      if (lresi_eta_tdep .or. lresi_eta_xtdep .or. eta/=0.) then
+      if (lresi_eta_tdep .or. lresi_eta_xtdep .or. lnonzero_eta) then
       if (lohm_evolve) then
 print*,'AXEL2: should not be here (eta) ... '
         if (tau_jj>0) then
@@ -6597,10 +6677,18 @@ print*,'AXEL2: should not be here (eta) ... '
       call max_mn_name(p%beta1,idiag_beta1max)
       call sum_mn_name(p%beta, idiag_betam)
       call max_mn_name(p%beta, idiag_betamax)
-
+!
       if (idiag_betamin /= 0) call max_mn_name(-p%beta, idiag_betamin, lneg=.true.)
-      if (idiag_Azmid_min /= 0) call max_mn_name(-p%aa(:,3)*xmask1_mag, idiag_Azmid_min, lneg=.true.)
-      call max_mn_name( p%aa(:,3),idiag_Azmid_max)
+!
+!  Use lxmask_mag and lymask_mag to isolate a line through a given point (e.g., 0, as given by the mask).
+!  This is useful for reconnection experiments where one wants to plot the time derivative of Azmin
+!  to compute the reconnection time. The y in the names idiag_Azmid_ymin and idiag_Azmid_ymax
+!  indicate that the cut is taken for y-const, i.e., along x in this case.
+!
+      if (idiag_Azmid_min /=0) call max_mn_name(-p%aa(:,3), idiag_Azmid_min, lneg=.true., mask=lxmask_mag)
+      if (idiag_Azmid_max /=0) call max_mn_name( p%aa(:,3), idiag_Azmid_max, mask=lxmask_mag)
+      if (idiag_Azmid_ymin/=0) call max_mn_name(-p%aa(:,3), idiag_Azmid_ymin, lneg=.true., mask=spread(lymask_mag(m-nghost),1,nx))
+      if (idiag_Azmid_ymax/=0) call max_mn_name( p%aa(:,3), idiag_Azmid_ymax, mask=spread(lymask_mag(m-nghost),1,nx))
 
       if (.not.lmultithread) then
 !
@@ -6889,6 +6977,7 @@ print*,'AXEL2: should not be here (eta) ... '
       if (idiag_jx4m/=0) call sum_mn_name(p%jj(:,1)**4,idiag_jx4m)
       if (idiag_jy4m/=0) call sum_mn_name(p%jj(:,2)**4,idiag_jy4m)
       if (idiag_jz4m/=0) call sum_mn_name(p%jj(:,3)**4,idiag_jz4m)
+      if (idiag_jz3m/=0) call sum_mn_name(p%jj(:,3)**3,idiag_jz3m)
       if (idiag_bxbym/=0) call sum_mn_name(p%bbb(:,1)*p%bbb(:,2),idiag_bxbym)
       if (idiag_bxbzm/=0) call sum_mn_name(p%bbb(:,1)*p%bbb(:,3),idiag_bxbzm)
       if (idiag_bybzm/=0) call sum_mn_name(p%bbb(:,2)*p%bbb(:,3),idiag_bybzm)
@@ -6944,7 +7033,7 @@ print*,'AXEL2: should not be here (eta) ... '
       if (lmultithread .and. (idiag_epsM /= 0 .or. idiag_epsM2 /= 0 &
           .or. idiag_epsM3 /= 0 .or. idiag_epsM4 /= 0 .or. idiag_dteta /= 0)) then
           call calc_eta_total(f,p)
-          if(idiag_dteta /= 0) diffus_eta =eta_total *dxyz_2
+          if (idiag_dteta /= 0) diffus_eta =eta_total *dxyz_2
       endif
 !
 ! <J.B>
@@ -7319,8 +7408,13 @@ print*,'AXEL2: should not be here (eta) ... '
 !
 !  current density components at one point (=pt).
 !
-      if (lroot.and.m==mpoint.and.n==npoint) then
+      !if (lroot.and.m==mpoint.and.n==npoint) then
         !MR: i.e., only pointwise data from root proc domain can be obtained! Intended?
+        !AB: no, changed this (30-mar-2026)
+      if (m==mpoint.and.n==npoint) then
+        if (idiag_axpt/=0) call save_name(p%aa(lpoint2-nghost,1),idiag_axpt)
+        if (idiag_aypt/=0) call save_name(p%aa(lpoint2-nghost,2),idiag_aypt)
+        if (idiag_azpt/=0) call save_name(p%aa(lpoint2-nghost,3),idiag_azpt)
         call save_name(p%bb(lpoint-nghost,1),idiag_bxpt)
         call save_name(p%bb(lpoint-nghost,2),idiag_bypt)
         call save_name(p%bb(lpoint-nghost,3),idiag_bzpt)
@@ -7342,6 +7436,9 @@ print*,'AXEL2: should not be here (eta) ... '
 !  current density components at point 2 (=p2).
 !
       if (lroot.and.m==mpoint2.and.n==npoint2) then
+        if (idiag_axp2/=0) call save_name(p%aa(lpoint2-nghost,1),idiag_axp2)
+        if (idiag_ayp2/=0) call save_name(p%aa(lpoint2-nghost,2),idiag_ayp2)
+        if (idiag_azp2/=0) call save_name(p%aa(lpoint2-nghost,3),idiag_azp2)
         if (idiag_bxp2/=0) call save_name(p%bb(lpoint2-nghost,1),idiag_bxp2)
         if (idiag_byp2/=0) call save_name(p%bb(lpoint2-nghost,2),idiag_byp2)
         if (idiag_bzp2/=0) call save_name(p%bb(lpoint2-nghost,3),idiag_bzp2)
@@ -7796,7 +7893,7 @@ print*,'AXEL2: should not be here (eta) ... '
 !  21-may-21/alberto: possibility of ltime_integrals_always=F to compute <b(t,x).b(t0,x)> adapted from hydro
 !   2-jul-21/hongzhe: possibility of resetting bbt every dtcor time
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       type (pencil_case) :: p
 !
       intent(inout) :: f
@@ -7872,7 +7969,7 @@ print*,'AXEL2: should not be here (eta) ... '
       use Diagnostics, only: sum_mn_name
       use Sub
 !
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: df
       type (pencil_case) :: p
 !
       real, dimension (nx,3) :: uudot,aadot,udotxb,B1_gradu
@@ -7916,7 +8013,7 @@ print*,'AXEL2: should not be here (eta) ... '
       use Diagnostics, only: save_name
       use Sub, only: div, calc_all_diff_fluxes, dot2_mn, vecout_initialize
 !
-      real, dimension(mx,my,mz,mfarray), intent(inout) :: f
+      real, contiguous, dimension(:,:,:,:), intent(inout) :: f
 
       real, dimension(nx) :: tmp
       real, save :: phase_beltrami_before=impossible
@@ -7999,9 +8096,9 @@ print*,'AXEL2: should not be here (eta) ... '
 !
       use BorderProfiles, only: border_driving,set_border_initcond
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       type (pencil_case) :: p
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: df
       real, dimension (nx,3) :: f_target
       integer :: j
 !
@@ -8019,7 +8116,6 @@ print*,'AXEL2: should not be here (eta) ... '
           call set_border_initcond(f,iaa+j-1,f_target(:,j))
           call border_driving(f,df,p,f_target(:,j),iaa+j-1)
 !
-        case ('nothing')
         endselect
       enddo
 !
@@ -8031,7 +8127,7 @@ print*,'AXEL2: should not be here (eta) ... '
 !
 !  16-apr-21/axel: adapted from gravitational_waves_hTXk.f90
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (:) :: spectrum,spectrum_hel
       logical :: lfirstcall
       character(LEN=3) :: kind
@@ -8156,7 +8252,7 @@ print*,'AXEL2: should not be here (eta) ... '
 !
       use Sub, only: update_snaptime, read_snaptime
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       character (len=fnlen) :: file
       logical :: lmagnetic_out
       logical, save :: lfirst_call=.true.
@@ -8170,7 +8266,7 @@ print*,'AXEL2: should not be here (eta) ... '
         if (lfirst_call) then
           call read_snaptime(trim(file),taareset,naareset,daareset,t)
           if (taareset==0 .or. taareset < t-daareset) then
-            taareset=t+daareset
+            taareset=real(t+daareset)
           endif
           lfirst_call=.false.
         endif
@@ -8195,8 +8291,8 @@ print*,'AXEL2: should not be here (eta) ... '
 !
       use Gravity, only: zgrav
 !
-      real, dimension (mx,my,mz,mfarray) :: f
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: f
+      real, contiguous, dimension(:,:,:,:) :: df
       real :: scl
       integer :: j
 !
@@ -8371,7 +8467,7 @@ print*,'AXEL2: should not be here (eta) ... '
       use Mpicomm, only: mpibcast_real
       use Sub
 !
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: df
 
       real, dimension (nx) :: phi
       real :: fact
@@ -8428,7 +8524,7 @@ print*,'AXEL2: should not be here (eta) ... '
       use General, only: transform_thph_yy_other
       use Slices_methods, only: assign_slices_vec, assign_slices_scal
 
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       type (slice_data) :: slices
 !
 !  Loop over slices
@@ -9194,7 +9290,7 @@ print*,'AXEL2: should not be here (eta) ... '
 !
       use EquationOfState, only: cs20
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: iuu,iaa,ilnrho
       real :: ampl, kx, mu0, ampl0
 
@@ -9261,7 +9357,7 @@ print*,'AXEL2: should not be here (eta) ... '
 !  29-apr-03/axel: added sqrt(rho*mu0)/k factor
 !   7-aug-17/axel: added sqrt(.75) for lrelativistic_eos=T
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: iuu,iaa,ilnrho
       real :: ampl,kx,mu0
 
@@ -9335,7 +9431,7 @@ print*,'AXEL2: should not be here (eta) ... '
 !
 !  06-dec-06/wolf: adapted from alfven_z
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl, amplu, ky, mu0
       integer :: iuu,iaa
 !
@@ -9369,7 +9465,7 @@ print*,'AXEL2: should not be here (eta) ... '
 !
 !  18-aug-02/axel: coded
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl, amplu, kz, mu0
       integer :: iuu,iaa
 !
@@ -9400,7 +9496,7 @@ print*,'AXEL2: should not be here (eta) ... '
 !
 !  16-jun-07/axel: adapted from alfven_y
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,kx,ky,mu0
       integer :: iuu,iaa
 
@@ -9426,7 +9522,7 @@ print*,'AXEL2: should not be here (eta) ... '
 !
 !  16-jun-07/axel: adapted from alfven_xy
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,kx,kz,mu0
       integer :: iuu,iaa
 
@@ -9457,7 +9553,7 @@ print*,'AXEL2: should not be here (eta) ... '
 !
 !  18-aug-02/axel: coded
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,kz,O,fac
       integer :: iuu,iaa
 !
@@ -9482,7 +9578,7 @@ print*,'AXEL2: should not be here (eta) ... '
 !
 !  13-jan-12/axel: coded
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,kz,B0,J0,lam,oA
       integer :: iuu,iaa
 !
@@ -9514,7 +9610,7 @@ print*,'AXEL2: should not be here (eta) ... '
 !
 !  28-june-04/anders: coded
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,kz,OO
       complex :: fac
       integer :: iuu,iaa
@@ -9550,7 +9646,7 @@ print*,'AXEL2: should not be here (eta) ... '
 !   05-may-2008/wolf: coded
 !
       real :: ampl,kx_aa,ky_aa
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
 !
       real, dimension (nx) :: xxi2,ee
       real, dimension (nx) :: costh,sinth,cosphi,sinphi,ss,rr,aar,aap
@@ -9629,12 +9725,15 @@ print*,'AXEL2: should not be here (eta) ... '
       real :: B1r_,B1z_,B1
       real, parameter :: tol=10*epsilon(1.0)
       integer :: l
-      real, dimension(mx,my,mz) :: Ax_ext,Ay_ext
+      real, save, allocatable, dimension(:,:,:) :: Ax_ext,Ay_ext
       !real, dimension(nx,3) :: bb_ext_pot
       !real, dimension(nx) :: bb_x,bb_y,bb_z
 !
 !  calculate un-normalized |B| at r=r_ref and z=0 for later normalization
 !
+      if (.not. allocated(Ax_ext)) allocate(Ax_ext(mx,my,mz))
+      if (.not. allocated(Ay_ext)) allocate(Ay_ext(mx,my,mz))
+
       if (lroot.and.ip<=5) print*,'FORCE_FREE_JET: calculating normalization'
 !
       B1r_=sin(pi*mu/2)*gamma_function(   abs(mu) /2) / gamma_function((1+abs(mu))/2)
@@ -9709,7 +9808,7 @@ print*,'AXEL2: should not be here (eta) ... '
 !
 !  23-jul-05/wolf:coded
 !
-      real, intent(inout), dimension (mx,my,mz,mfarray) :: f
+      real, intent(inout), contiguous, dimension(:,:,:,:) :: f
       real, intent(in) :: ampl,inclaa
       real, dimension (nx) :: r_1_mn,r_2_mn,sigma0,sigma1, r_mn
       real :: fact
@@ -9759,7 +9858,7 @@ print*,'AXEL2: should not be here (eta) ... '
 !
 !  30-june-04/grs: coded
 !
-      real, dimension (mx,my,mz,mfarray), intent(inout) :: f
+      real, contiguous, dimension(:,:,:,:), intent(inout) :: f
       real, dimension(nx) :: theta_mn,ar,atheta,aphi,r_mn,phi_mn
       real :: C_int,C_ext,A_int,A_ext
       integer :: j
@@ -10383,7 +10482,7 @@ print*,'AXEL2: should not be here (eta) ... '
 !
       use Sub, only: dot2
 !
-      real, dimension (mx,my,mz,mfarray), intent (in) :: f
+      real, contiguous, dimension(:,:,:,:), intent (in) :: f
       real, dimension (mx,3), intent (out) :: bb_hat
 !
       !Tobi: Not sure about this value
@@ -10614,6 +10713,7 @@ print*,'AXEL2: should not be here (eta) ... '
         idiag_jxm=0; idiag_jym=0; idiag_jzm=0
         idiag_betam = 0; idiag_betamax = 0; idiag_betamin = 0
         idiag_Azmid_min=0; idiag_Azmid_max=0
+        idiag_Azmid_ymin=0; idiag_Azmid_ymax=0
         idiag_betamz = 0; idiag_beta2mz = 0
         idiag_betamx = 0; idiag_beta2mx = 0
         idiag_aym=0; idiag_azm=0
@@ -10621,7 +10721,7 @@ print*,'AXEL2: should not be here (eta) ... '
         idiag_bx3m=0; idiag_by3m=0; idiag_bz3m=0
         idiag_bx4m=0; idiag_by4m=0; idiag_bz4m=0
         idiag_jx2m=0; idiag_jy2m=0; idiag_jz2m=0
-        idiag_jx4m=0; idiag_jy4m=0; idiag_jz4m=0
+        idiag_jx4m=0; idiag_jy4m=0; idiag_jz4m=0; idiag_jz3m=0
         idiag_jx2m1=0; idiag_jx2m2=0; idiag_jx2m3=0; idiag_jh2m1=0
         idiag_jy2m1=0; idiag_jy2m2=0; idiag_jy2m3=0
         idiag_bxbymx = 0; idiag_bxbzmx = 0; idiag_bybzmx = 0
@@ -10877,6 +10977,8 @@ print*,'AXEL2: should not be here (eta) ... '
         call parse_name(iname,cname(iname),cform(iname),'betamin',idiag_betamin)
         call parse_name(iname,cname(iname),cform(iname),'Azmid_min',idiag_Azmid_min)
         call parse_name(iname,cname(iname),cform(iname),'Azmid_max',idiag_Azmid_max)
+        call parse_name(iname,cname(iname),cform(iname),'Azmid_ymin',idiag_Azmid_ymin)
+        call parse_name(iname,cname(iname),cform(iname),'Azmid_ymax',idiag_Azmid_ymax)
         call parse_name(iname,cname(iname),cform(iname),'dtb',idiag_dtb)
         call parse_name(iname,cname(iname),cform(iname),'dtHr',idiag_dtHr)
         call parse_name(iname,cname(iname),cform(iname),'dtFr',idiag_dtFr)
@@ -10902,6 +11004,7 @@ print*,'AXEL2: should not be here (eta) ... '
         call parse_name(iname,cname(iname),cform(iname),'jx4m',idiag_jx4m)
         call parse_name(iname,cname(iname),cform(iname),'jy4m',idiag_jy4m)
         call parse_name(iname,cname(iname),cform(iname),'jz4m',idiag_jz4m)
+        call parse_name(iname,cname(iname),cform(iname),'jz3m',idiag_jz3m)
         call parse_name(iname,cname(iname),cform(iname),'jh2m1',idiag_jh2m1)
         call parse_name(iname,cname(iname),cform(iname),'jx2m1',idiag_jx2m1)
         call parse_name(iname,cname(iname),cform(iname),'jy2m1',idiag_jy2m1)
@@ -11499,7 +11602,7 @@ print*,'AXEL2: should not be here (eta) ... '
 !
       use ImplicitDiffusion, only: integrate_diffusion
 !
-      real, dimension(mx,my,mz,mfarray), intent(inout) :: f
+      real, contiguous, dimension(:,:,:,:), intent(inout) :: f
 !
 !  Implicitly solve the resistive term.
 !
@@ -11512,8 +11615,8 @@ print*,'AXEL2: should not be here (eta) ... '
       use Mpicomm, only: mpibcast_real
       use Sub, only: vecout_finalize, remove_mean
 !
-      real, dimension(mx,my,mz,mfarray) :: f
-      real, dimension(mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: f
+      real, contiguous, dimension(:,:,:,:) :: df
       real :: dtsub
 !
       if (lfargo_advection) then
@@ -11540,7 +11643,7 @@ print*,'AXEL2: should not be here (eta) ... '
 !****************************************************************************
     subroutine magnetic_after_mn(df)
 !
-      real, dimension(mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: df
 
       call keep_compiler_quiet(df)
 !
@@ -11580,7 +11683,7 @@ print*,'AXEL2: should not be here (eta) ... '
 !  13-sep-07/wlad: adapted from remove_mean_momenta
 !  28-mar-17/MR: reinstated update_ghosts.
 !
-      real, dimension (mx,my,mz,mfarray), intent (inout) :: f
+      real, contiguous, dimension(:,:,:,:), intent (inout) :: f
       real, dimension (mx,mz) :: fsum_tmp,glambda_rz,lambda
       real, dimension (mz) :: glambda_z
       integer :: i,l
@@ -11655,7 +11758,7 @@ print*,'AXEL2: should not be here (eta) ... '
 !!MR: these comments seem not to apply, routine is now obsolete
 !!  13-sep-07/wlad: adapted from remove_mean_momenta
 !!
-!      real, dimension (mx,my,mz,mfarray), intent (inout) :: f
+!      real, contiguous, dimension(:,:,:,:), intent (inout) :: f
 !      real :: fsum_tmp,mean_ax
 !      integer :: i
 !!
@@ -11766,8 +11869,8 @@ print*,'AXEL2: should not be here (eta) ... '
 !  Allow external field to precess about z-axis with frequency omega_Bz_ext.
 !
           if (lcartesian_coords .or. lbext_curvilinear) then
-            c = cos(omega_Bz_ext * t)
-            s = sin(omega_Bz_ext * t)
+            c = real(cos(omega_Bz_ext * t))
+            s = real(sin(omega_Bz_ext * t))
             B_ext_out(1) = B_ext(1) * c - B_ext(2) * s
             B_ext_out(2) = B_ext(1) * s + B_ext(2) * c
             B_ext_out(3) = B_ext(3)
@@ -11779,8 +11882,8 @@ print*,'AXEL2: should not be here (eta) ... '
 !
 !  Add moving layer of uniform field
 !
-           zposbot=zbot_moving_layer + t*speed_moving_layer
-           zpostop=ztop_moving_layer + t*speed_moving_layer
+           zposbot=real(zbot_moving_layer + t*speed_moving_layer)
+           zpostop=real(ztop_moving_layer + t*speed_moving_layer)
 
            zprof = step(z(n), zposbot, edge_moving_layer)-step(z(n), zpostop, edge_moving_layer)
            B_ext_out(1:2) = B_ext(1:2)*zprof; B_ext_out(3)=B_ext(3)     ! z component not z dependent
@@ -11815,7 +11918,7 @@ print*,'AXEL2: should not be here (eta) ... '
           if (t <= t0_bext) then
             B_ext_out = B0_ext
           else
-            B_ext_out = B0_ext + 0.5*(1.-cos(pi*(t-t0_bext)/(t_bext-t0_bext)))*(B_ext_out-B0_ext)
+            B_ext_out = real(B0_ext + 0.5*(1.-cos(pi*(t-t0_bext)/(t_bext-t0_bext)))*(B_ext_out-B0_ext))
           endif
           if (present(J_ext_out)) J_ext_out=0.
         endif
@@ -11857,7 +11960,7 @@ print*,'AXEL2: should not be here (eta) ... '
     integer, parameter :: n_pars=500
     integer(KIND=ikind8), dimension(n_pars) :: p_par
 
-    call copy_addr(eta,p_par(1))
+    call copy_addr(eta,p_par(1)) ! real dconst
     call copy_addr(eta_hyper2,p_par(2))
     call copy_addr(eta_hyper3,p_par(3))
     call copy_addr(lresi_eta_const,p_par(4)) ! bool
@@ -11904,7 +12007,7 @@ print*,'AXEL2: should not be here (eta) ... '
     call copy_addr(hall_tdep_exponent,p_par(45))
     call copy_addr(hhall,p_par(46))
     call copy_addr(hall_zdep_exponent,p_par(47))
-    call copy_addr(ampl_beltrami,p_par(48))
+    call copy_addr(ampl_beltrami,p_par(48)) ! real dconst
     call copy_addr(eta_jump,p_par(49))
     call copy_addr(eta_jump0,p_par(50))
     call copy_addr(eta_jump1,p_par(51))
@@ -12128,8 +12231,8 @@ print*,'AXEL2: should not be here (eta) ... '
     call copy_addr(lrelaxprof_glob_scaled,p_par(263)) ! bool
     call copy_addr(scl_uxb_in_ohm,p_par(264))
     call copy_addr(w_sldchar_mag,p_par(265))
-    call copy_addr(h_sld_magn,p_par(266))
-    call copy_addr(nlf_sld_magn,p_par(267))
+    call copy_addr(h_sld_magn,p_par(266)) ! real dconst
+    call copy_addr(nlf_sld_magn,p_par(267)) ! real dconst
     call copy_addr(eta_tdep_ascale_power,p_par(268))
     call copy_addr(lremove_meanaxy,p_par(269)) ! bool
     call copy_addr(tau_remove_meanaxy,p_par(270))
@@ -12141,10 +12244,28 @@ print*,'AXEL2: should not be here (eta) ... '
     call copy_addr(lcurlb_as_aux,p_par(276)) ! bool
     call copy_addr(lbij_as_aux,p_par(277)) ! bool
     call copy_addr(bij_0d_test,p_par(278)) ! (3) (3)
-    call copy_addr(lbij_test,p_par(279)) ! bool
     call copy_addr(luse_bgb_as_jxb,p_par(280)) ! bool
     call copy_addr(lreset_vart_only_at_start,p_par(281)) ! bool
     call copy_addr(enum_div_sld_magn,p_par(282)) ! int
+
+    call copy_addr(lbij_test,p_par(283)) ! bool
+    call copy_addr(alpf_mhd,p_par(284))
+    call copy_addr(limiter_fact,p_par(285))
+    call copy_addr(llimiter,p_par(286)) ! bool
+    call copy_addr(lnonzero_eta,p_par(287)) ! bool
+
+    call keep_compiler_quiet(znoise_int)
+    call keep_compiler_quiet(znoise_ext)
+    call keep_compiler_quiet(rescaling_fraction)
+    call keep_compiler_quiet(nexp_aa)
+    call keep_compiler_quiet(mu_r)
+    call keep_compiler_quiet(lelectron_inertia)
+    call keep_compiler_quiet(lbeta_as_aux)
+    call keep_compiler_quiet(izav_start)
+    call keep_compiler_quiet(lbraginsky)
+    call keep_compiler_quiet(damp)
+    call keep_compiler_quiet(brms_target)
+    call keep_compiler_quiet(k1y_ff)
 
     endsubroutine pushpars2c
 !***********************************************************************

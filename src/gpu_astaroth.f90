@@ -33,17 +33,25 @@ module GPU
   external radtransfer_gpu_c
   external load_farray_c
   external reload_gpu_config_c
-  external test_rhs_c
   external copy_farray_c
   external update_on_gpu_arr_by_ind_c
   external update_on_gpu_scal_by_ind_c
   external pos_real_ptr_c
-  external gpu_set_dt_c
-  external torchtrain_c 
-  external torchinfer_c
+  external gpu_prepare_for_first_substep_c
   external get_gpu_reduced_vars_c
   external test_bcs_c
   external split_update_gpu_c
+
+  ! Torchfort
+  external torchtrain_c 
+  external torchinfer_c
+  external tf_create_model_c
+  external print_snapshot_c
+  external tf_load_model_c
+  external tf_load_model_checkpoint_c
+  external tf_save_model_c
+  external tf_save_checkpoint_c
+
 
   integer, external :: update_on_gpu_arr_by_name_c
   integer, external :: update_on_gpu_scal_by_name_c
@@ -67,6 +75,7 @@ module GPU
   ! usual by picking only the most likely ones (empirically gives for large grids the same as the 
   ! larger search, but is considerably faster).
   logical :: lac_sparse_autotuning=.true.
+  logical :: lac_sparse_autotuning_always=.false.
   ! Whether df is 0 or the accumulated value at the start of the kernel.
   ! For simplicity df is zero and then accumulated to the buffer, but sometimes you need to be careful like with
   ! short stopping time approximation in dustvelocity (the only case we are aware at the moment where the difference matter
@@ -88,10 +97,18 @@ module GPU
   ! It is useful to be able to vary this in case some samples need some
   ! integration time for some of the fields to have meaningful values
   integer :: it_test_rhs = 1
+  ! How should reduction kernels decompose the subdomain into smaller chunks.
+  ! The decomposition allows to do partial reductions before the global reduction.
+  ! This saves memory and work.
+  integer, dimension(3) :: thread_block_loop_factors = (/1,1,1/)
+  ! This saves memory at the cost of potential performance by not creating streams
+  ! which take surprisingly large amount of memory. Mainly needed for the autotest in norlx51
+  logical :: lonly_default_stream_for_taskgraphs = .false.
 
   namelist /gpu_run_pars/ &
-     ltest_bcs,lac_sparse_autotuning,lcpu_timestep_on_gpu,lsingle_precision_timestep,lcumulative_df_on_gpu,&
-     lread_all_vars_from_device,lcuda_aware_mpi,ltest_rhs,it_test_rhs
+     ltest_bcs,lac_sparse_autotuning,lac_sparse_autotuning_always,&
+     lcpu_timestep_on_gpu,lsingle_precision_timestep,lcumulative_df_on_gpu,&
+     lread_all_vars_from_device,lcuda_aware_mpi,ltest_rhs,it_test_rhs,thread_block_loop_factors,lonly_default_stream_for_taskgraphs
 
 contains
 !***********************************************************************
@@ -112,6 +129,37 @@ contains
 
   endsubroutine infer_gpu
 !***********************************************************************
+  subroutine TF_create_model(model_name, config_file_path, lmpicomm)
+    use Mpicomm, only: MPI_COMM_PENCIL
+    logical :: lmpicomm
+    character(len=*), intent(in) :: model_name, config_file_path
+    call tf_create_model_c(trim(model_name) // c_null_char, trim(config_file_path) // c_null_char, MPI_COMM_PENCIL, lmpicomm)
+  endsubroutine TF_create_model
+!***********************************************************************
+  subroutine tau_snapshots()
+    call print_snapshot_c()
+  endsubroutine tau_snapshots
+!***********************************************************************
+  subroutine TF_load_model(model_name, fname)
+    character(len=*), intent(in) :: model_name, fname
+    call tf_load_model_c(trim(model_name) // c_null_char, trim(fname) // c_null_char)
+  endsubroutine TF_load_model
+!***********************************************************************
+  subroutine TF_load_model_checkpoint(model_name, checkpoint_dir)
+    character(len=*), intent(in) :: model_name, checkpoint_dir
+    call tf_load_model_checkpoint_c(trim(model_name) // c_null_char, trim(checkpoint_dir) // c_null_char)
+  endsubroutine TF_load_model_checkpoint
+!***********************************************************************
+  subroutine TF_save_model(model_name, fname)
+    character(len=*), intent(in) :: model_name, fname
+    call tf_save_model_c(trim(model_name) // c_null_char, trim(fname) // c_null_char)
+  endsubroutine TF_save_model
+!***********************************************************************
+  subroutine TF_save_checkpoint(model_name, checkpoint_dir)
+    character(len=*), intent(in) :: model_name, checkpoint_dir
+    call tf_save_checkpoint_c(trim(model_name) // c_null_char, trim(checkpoint_dir) // c_null_char)
+  endsubroutine TF_save_checkpoint
+!***********************************************************************
     subroutine initialize_GPU(f)
 !
       use Mpicomm, only: MPI_COMM_PENCIL
@@ -119,12 +167,21 @@ contains
       real, dimension(:,:,:,:), intent(IN) :: f
       integer :: lread_all_vars_from_device_int
       integer :: lcpu_timestep_on_gpu_int
+      integer :: lac_sparse_autotuning_int
+
+
 
       character(LEN=512) :: str
 !
       if(ltest_rhs) lread_all_vars_from_device = .true.
+      !If there are enough GPUs we can distribute the autotuning between them
+      !and it won't take too long
+      if(ncpus >= 8) lac_sparse_autotuning = .false.
+
+      if(lac_sparse_autotuning_always) lac_sparse_autotuning = .true.
 
       str=''
+      !List of unsupported modules
       if (lanelastic) str=trim(str)//', '//'anelastic'
       if (lboussinesq) str=trim(str)//', '//'boussinesq'
       if (lhyperresistivity_strict) str=trim(str)//', '//'hyperresi_strict'
@@ -147,15 +204,15 @@ contains
 
       lread_all_vars_from_device_int = merge(1,0,lread_all_vars_from_device)
       lcpu_timestep_on_gpu_int       = merge(1,0,lcpu_timestep_on_gpu)
+      lac_sparse_autotuning_int      = merge(1,0,lac_sparse_autotuning)
       call initialize_gpu_c(f,MPI_COMM_PENCIL,t,nt,lread_all_vars_from_device_int,&
-                            lcpu_timestep_on_gpu_int)
+                            lcpu_timestep_on_gpu_int,lac_sparse_autotuning_int)
 !
 ! Load farray to gpu
 !
       if (nt>0) call load_farray_to_GPU(f)
 
   !print'(a,1x,Z0,1x,Z0)', 'pFarr_GPU_in,pFarr_GPU_out=', pFarr_GPU_in,pFarr_GPU_out
-      lverbose_performance_log = .true.
     endsubroutine initialize_GPU
 !**************************************************************************
     subroutine read_gpu_run_pars(iostat)
@@ -201,6 +258,7 @@ contains
       real, dimension (mx,my,mz,mfarray), intent(INOUT) :: f
       integer,                            intent(IN)    :: isubstep
 !
+      call keep_compiler_quiet(f)
       call rhs_gpu_c(isubstep,t)
 !
     endsubroutine rhs_GPU
@@ -213,15 +271,13 @@ contains
       integer,                            intent(IN)    :: isubstep
       real(KIND=rkind8), intent(IN) :: t
       logical :: lrmv
-      integer :: lrmv_int
+      integer :: lrmv_int,lsubstepping_in_time_int
 !
-      !TP: pass int since integers are more compatible with C than logical to booleans
-      if (lrmv) then
-        lrmv_int = 1
-      else
-        lrmv_int = 0
-      endif
-      call before_boundary_gpu_c(lrmv_int,isubstep,t)
+      call keep_compiler_quiet(f)
+      !transform to integers since they are more compatible with C than logical to booleans
+      lrmv_int = merge(1,0,lrmv)
+      lsubstepping_in_time_int = merge(1,0,lsubstepping_in_time)
+      call before_boundary_gpu_c(lrmv_int,isubstep,t,lsubstepping_in_time_int)
 !
     endsubroutine before_boundary_gpu
 !**************************************************************************
@@ -229,11 +285,11 @@ contains
       call update_after_substep_gpu_c
     endsubroutine update_after_substep_gpu
 !**************************************************************************
-    subroutine gpu_set_dt
+    subroutine gpu_prepare_for_first_substep
 !
-      call gpu_set_dt_c(t)
+      call gpu_prepare_for_first_substep_c(t)
 !
-    endsubroutine gpu_set_dt
+    endsubroutine gpu_prepare_for_first_substep 
 !**************************************************************************
     function get_ptr_GPU(ind1,ind2,lout) result(pFarr)
 !
@@ -325,6 +381,7 @@ contains
 
       real, dimension (mx,my,mz,mfarray), intent(IN) :: f
 
+      call keep_compiler_quiet(f)
       call load_farray_c
 
     endsubroutine load_farray_to_GPU
@@ -386,12 +443,13 @@ contains
     integer, parameter :: n_pars=50
     integer(KIND=ikind8), dimension(n_pars) :: p_par
 
-    call copy_addr(lac_sparse_autotuning,p_par(2)) ! bool
     call copy_addr(lskip_rtime_compilation,p_par(3)) ! bool
     call copy_addr(lcumulative_df_on_gpu,p_par(4)) ! bool
     call copy_addr(lcuda_aware_mpi,p_par(6)) ! bool
     call copy_addr(ltest_bcs,p_par(7)) ! bool
     call copy_addr(lsingle_precision_timestep,p_par(8)) ! bool
+    call copy_addr(thread_block_loop_factors,p_par(9)) ! int3 dconst
+    call copy_addr(lonly_default_stream_for_taskgraphs,p_par(10)) ! bool dconst
     endsubroutine pushpars2c
 !**************************************************************************
 endmodule GPU

@@ -68,12 +68,12 @@ module Power_spectrum
   integer, dimension(:), allocatable :: k2s
   integer :: nk_truebin=0
   logical :: lpowerdat_existed=.false.
-  logical :: lcorrect_integer_kcalc=.false.
+  logical :: lcorrect_integer_kcalc=.false.  !PAR_DOC: use k=i-N/2 instead of i-(N+1)/2.
   logical :: lpdf_2d_variable_range=.false.
   real :: L_min, L_min_xy
   integer :: nk_xyz, nk_xy, n_loc, m_loc
 !
-!TP: work buffers for power funcs
+!Work buffers for power funcs
 !TP: TODO allocate these at initialize func based on are they actually used
 !
   real, allocatable, dimension(:,:,:) :: a_re,a_im,b_re,b_im,c_re,c_im,d_re,d_im,h_re,h_im
@@ -95,6 +95,7 @@ module Power_spectrum
 ! real, allocatable, dimension(:,:) :: spectrum_2d, spectrumhel_2d
 ! real, allocatable, dimension(:,:) :: spectrum_2d_sum, spectrumhel_2d_sum
 !
+  character(len=*), parameter :: timestamp_format = '(ES24.16E3,1X,ES24.16E3)'
   contains
 !***********************************************************************
   subroutine allocate_workbuffers
@@ -125,7 +126,7 @@ module Power_spectrum
   subroutine initialize_power_spectrum
 !
     use Messages
-    use General, only: binomial, pos_in_array, quick_sort, get_range_no
+    use General, only: binomial, pos_in_array, quick_sort, get_range_no, keep_compiler_quiet
     use Mpicomm, only: mpiallreduce_merge,mpimerge_1d
 
     integer :: ikr, ikmu, ind, ikx, iky, ikz, len, k
@@ -283,7 +284,7 @@ outer:do ikz=1,nz
     if (n_spectra>0) then
       if (lintegrate_z .and. nprocx>1) then
         call warning('initialize_power_spectrum', &
-          'lintegrate_shell uses mpigather_xy which assumes nprocx==1. ' //&
+          'lintegrate_z uses mpigather_xy which assumes nprocx==1. ' //&
           'Your results are most likely garbage.')
       endif
     endif
@@ -291,6 +292,13 @@ outer:do ikz=1,nz
 !  allocate_workbuffers, but only when not already loaded (e.g., when reloading)
 !
     call allocate_workbuffers
+!
+!   Unused variables
+!
+!   2026-May-09/Kishore: Axel added pdfy_*_logscale in commit ceffba0a3b9a, but they don't
+!   2026-May-09/Kishore: seem to be used anywhere as of now (or even in that commit)
+    call keep_compiler_quiet(pdfy_max_logscale)
+    call keep_compiler_quiet(pdfy_min_logscale)
 !
   endsubroutine initialize_power_spectrum
 !***********************************************************************
@@ -454,16 +462,17 @@ outer:do ikz=1,nz
     use Mpicomm, only: mpireduce_sum
     use General, only: itoa
     use Sub, only: curli
+    use Deriv, only: der
     use File_io, only: file_exists
 !
-    real, dimension (mx,my,mz,mfarray) :: f
+    real, contiguous,dimension(:,:,:,:) :: f
     character (len=*) :: sp
     integer, intent(in), optional :: iapn_index
     real, dimension(:) :: spectrum
     real, dimension(nx,ny,nz) :: a1,b1
     integer :: nk
 
-    integer :: ivec,ikx,iky,ikz,k,k2
+    integer :: ivec,ikx,iky,ikz,k
 
     do ivec=1,3
 
@@ -505,6 +514,14 @@ outer:do ikz=1,nz
           endif
         enddo
         enddo
+      elseif (trim(sp)=='gph') then
+        !$omp do collapse(2)
+        do n_loc=n1,n2
+        do m_loc=m1,m2
+          m=m_loc;n=n_loc
+          call der(f,ispecialvar,a1(:,m-nghost,n-nghost),ivec)
+        enddo
+        enddo
       elseif (trim(sp)=='b') then
         !$omp do collapse(2)
         do n_loc=n1,n2
@@ -539,8 +556,8 @@ outer:do ikz=1,nz
         do ikz=1,nz
         do iky=1,ny
         do ikx=1,nx
-          k2=get_k2(ikx+ipx*nx, iky+ipy*ny, ikz+ipz*nz)
-          where(int(k2)==k2s) spectrum=spectrum+a1(ikx,iky,ikz)**2+b1(ikx,iky,ikz)**2
+          where(int(get_k2(ikx+ipx*nx, iky+ipy*ny, ikz+ipz*nz)) == k2s) &
+               spectrum=spectrum+a1(ikx,iky,ikz)**2+b1(ikx,iky,ikz)**2
         enddo
         enddo
         enddo
@@ -574,7 +591,7 @@ outer:do ikz=1,nz
     use Sub, only: curli
     use File_io, only: file_exists
 !
-    real, dimension (mx,my,mz,mfarray) :: f
+    real, contiguous,dimension(:,:,:,:) :: f
     character (len=*) :: sp
     integer, intent(in), optional :: iapn_index
   
@@ -642,7 +659,7 @@ outer:do ikz=1,nz
         write(1,*) nk_truebin
         write(1,*) real(k2s(:nk_truebin))
       endif
-      write(1,*) tspec, real(t)
+      write(1,timestamp_format) tspec, real(t)
       write(1,power_format) spectrum_sum
       close(1)
     endif
@@ -655,7 +672,7 @@ outer:do ikz=1,nz
 !
     use Sub, only: curli
 !
-    real, dimension (mx,my,mz,mfarray), intent(in) :: f
+    real, contiguous,dimension(:,:,:,:), intent(in) :: f
     character (len=*), intent(in) :: sp
     real, dimension(nx,ny,nz), intent(out) :: a_re, a_im
     integer, intent(in) :: ivec
@@ -706,14 +723,14 @@ outer:do ikz=1,nz
 !
     use Fourier, only: fft_xyz_parallel
 !
-    real, dimension (mx,my,mz,mfarray), intent(in) :: f
+    real, contiguous,dimension(:,:,:,:), intent(in) :: f
     character (len=*), intent(in) :: sp1,sp2
     real, dimension(:), intent(out) :: spectrum
     real, dimension(nx,ny,nz), intent(out) :: a_re,a_im,b_re,b_im
     integer, intent(in) :: nk
     logical, intent(in) :: lvec
 !
-    integer :: ivec,ikx,iky,ikz,k,k2,ivec_max
+    integer :: ivec,ikx,iky,ikz,k,ivec_max
 !
     if (lvec) then
       ivec_max = 3
@@ -735,12 +752,11 @@ outer:do ikz=1,nz
 !
 !  Sum spectral contributions into bins of k^2 - avoids rounding of k.
 !
-        !$omp do collapse(3) private(k2)
+        !$omp do collapse(3)
         do ikz=1,nz
           do iky=1,ny
             do ikx=1,nx
-              k2=get_k2(ikx+ipx*nx, iky+ipy*ny, ikz+ipz*nz)
-              where(int(k2)==k2s) spectrum = spectrum &
+              where(int(get_k2(ikx+ipx*nx, iky+ipy*ny, ikz+ipz*nz))==k2s) spectrum = spectrum &
                 + a_re(ikx,iky,ikz)*b_re(ikx,iky,ikz) &
                 + a_im(ikx,iky,ikz)*b_im(ikx,iky,ikz)
             enddo
@@ -777,12 +793,11 @@ outer:do ikz=1,nz
     use Mpicomm, only: mpireduce_sum
     use File_io, only: file_exists
 !
-    real, dimension (mx,my,mz,mfarray), intent(in) :: f
+    real, contiguous,dimension(:,:,:,:), intent(in) :: f
     character (len=*), intent(in) :: sp1, sp2
     logical, intent(in) :: lvec
 !
     integer :: nk
-    real, dimension(nx,ny,nz) :: a_re,b_re,a_im,b_im
 !  save is needed to avoid repeated allocations every time this subroutine is called.
     real, dimension(:), save, allocatable :: spectrum,spectrum_sum
     character(LEN=fnlen) :: filename
@@ -828,7 +843,7 @@ outer:do ikz=1,nz
         write(1,*) nk_truebin
         write(1,*) real(k2s(:nk_truebin))
       endif
-      write(1,*) tspec, real(t)
+      write(1,timestamp_format) tspec, real(t)
       write(1,power_format) spectrum_sum
       close(1)
     endif
@@ -844,7 +859,7 @@ outer:do ikz=1,nz
 
     integer, parameter :: nk=nx/2
 
-    real, dimension (mx,my,mz,mfarray) :: f
+    real, contiguous,dimension(:,:,:,:) :: f
     character (len=1) :: sp
     real, dimension(nk) :: spectrum
     integer :: k,ikx,iky,ikz,ivec
@@ -910,7 +925,7 @@ outer:do ikz=1,nz
 !
     use Mpicomm, only: mpireduce_sum
 !
-    real, dimension (mx,my,mz,mfarray) :: f
+    real, contiguous,dimension(:,:,:,:) :: f
     character (len=1) :: sp
 
     integer, parameter :: nk=nx/2
@@ -947,7 +962,7 @@ outer:do ikz=1,nz
            ,'to ',trim(datadir)//'/power'//trim(sp)//'_2d.dat'
       spectrum_sum=.5*spectrum_sum
       open(1,file=trim(datadir)//'/power'//trim(sp)//'_2d.dat',position='append')
-      write(1,*) tspec, real(t)
+      write(1,timestamp_format) tspec, real(t)
       write(1,power_format) spectrum_sum
       close(1)
     endif
@@ -967,7 +982,7 @@ outer:do ikz=1,nz
 !
     implicit none
 !
-    real, dimension(mx,my,mz,mfarray), intent(in) :: f
+    real, contiguous,dimension(:,:,:,:), intent(in) :: f
     character (LEN=*), intent(in)                 :: sp
     integer, optional, intent(in)                 :: ivecp
     real, dimension(nx,ny,nz), intent(out) :: ar, ai
@@ -1058,7 +1073,7 @@ outer:do ikz=1,nz
           if ( zrange(1,i) > 0 ) then
             do global_z_position=zrange(1,i), zrange(2,i), zrange(3,i)
               local_z_position = global_z_position - ipz*nz
-              !TP: if local_z_position is negative the correct position is below this process if greater than nz then above this process
+              !If local_z_position is negative the correct position is below this process if greater than nz then above this process
               if (local_z_position > 0 .and. local_z_position <= nz) &
                 call fft_xy_parallel(ar(:,:,local_z_position),ai(:,:,local_z_position))
             enddo
@@ -1109,7 +1124,7 @@ outer:do ikz=1,nz
 !
     implicit none
 !
-    real, dimension(mx,my,mz,mfarray), intent(in) :: f
+    real, contiguous,dimension(:,:,:,:), intent(in) :: f
     character (len=*),                 intent(in) :: sp
     character (len=*), optional,       intent(in) :: sp2
 !
@@ -1375,7 +1390,7 @@ outer:do ikz=1,nz
 !
       endif
 !
-      if (.not.lpowerxy_hdf5) write(1,*) tspec, real(t)
+      if (.not.lpowerxy_hdf5) write(1,timestamp_format) tspec, real(t)
 !
     endif
 !
@@ -1480,7 +1495,8 @@ outer:do ikz=1,nz
 !  one could in principle reuse the df array for memory purposes.
 !
 !   3-oct-10/axel: added compution of krms (for realisability condition)
-!  22-jan-13/axel: corrected for x parallelization
+!   22-jan-13/axel: corrected for x parallelization
+!   1-may-2026/Kishore: fixed for non-cubical domains (but not when lcylindrical_spectra=T)
 !
     use Chiral, only: iXX_chiral, iYY_chiral, iXX2_chiral, iYY2_chiral
     use Fourier, only: fft_xyz_parallel
@@ -1489,26 +1505,41 @@ outer:do ikz=1,nz
     use Mpicomm, only: mpireduce_sum
     use Sub, only: del2vi_etc, del2v_etc, cross, grad, curli, curl, dot2
 !
-    integer, parameter :: nk=nxgrid/2
+    integer :: nk
     integer :: k, ikx, iky, ikz, jkz, im, in, ivec, ivec_jj
     real :: k2
-    real, dimension (mx,my,mz,mfarray) :: f
+    real, contiguous,dimension(:,:,:,:) :: f
     real, dimension(nx) :: jji, b2, j2
     real, dimension(nx,3) :: bb, bbEP, hhEP, jj, gtmp1, gtmp2
-    real, dimension(nk) :: nks=0.,nks_sum=0.
-    real, dimension(nk) :: k2m=0.,k2m_sum=0., krms, km1
     real, save, allocatable, dimension(:,:,:,:) :: bEP, hEP
     real, dimension(2), optional :: sumspec
     complex, save, allocatable, dimension(:,:,:) :: phi
-    real, dimension(nk) :: spectrum,spectrum_sum
-    real, dimension(nk) :: spectrumhel,spectrumhel_sum
+    real, dimension(:), save, allocatable :: spectrum,spectrum_sum
+    real, dimension(:), save, allocatable :: spectrumhel,spectrumhel_sum
+    real, dimension(:), save, allocatable :: nks, nks_sum, k2m, k2m_sum, krms, km1
     real, allocatable, dimension(:,:), save :: cyl_spectrum, cyl_spectrum_sum
     real, allocatable, dimension(:,:), save :: cyl_spectrumhel, cyl_spectrumhel_sum
     character (len=3) :: sp
     logical, optional :: lnowrite
     logical, save :: lwrite_krms=.true.
     logical :: lfirstcall
-  
+!
+    nk = nk_xyz
+!
+    if (.not.allocated(spectrum)) then
+      allocate(spectrum(nk),spectrum_sum(nk))
+      allocate(spectrumhel(nk),spectrumhel_sum(nk))
+!
+      allocate(nks(nk), nks_sum(nk))
+      allocate(k2m(nk), k2m_sum(nk))
+      allocate(krms(nk), km1(nk))
+!
+      nks = 0.
+      nks_sum = 0.
+      k2m = 0.
+      k2m_sum = 0.
+    endif
+!
     if (lcylindrical_spectra) then
       if (.not. allocated(cyl_spectrum)) &
         allocate(cyl_spectrum(nk,nzgrid), cyl_spectrum_sum(nk,nzgrid), cyl_spectrumhel(nk,nzgrid), cyl_spectrumhel_sum(nk,nzgrid))
@@ -1521,8 +1552,8 @@ outer:do ikz=1,nz
 !
     if (lroot .AND. ip<10) call svn_id("$Id$")
 !
-    if (headt .and. (minval(Lxyz) /= maxval(Lxyz))) &
-      call warning("powerhel", "computation of wavevector wrong for non-cubical domains")
+    if (headt .and. (minval(Lxyz) /= maxval(Lxyz)) .and. lcylindrical_spectra) &
+      call warning("powerhel", "computation of cylindrical wavevector wrong for non-cubical domains")
 !
 ! Select cases where spectra are precomputed
 !
@@ -1971,7 +2002,7 @@ outer:do ikz=1,nz
       do ikz=1,nz
         do iky=1,ny
           do ikx=1,nx
-            k2=get_k2_old(ikx+ipx*nx,iky+ipy*ny,ikz+ipz*nz)
+            k2=get_k2(ikx+ipx*nx,iky+ipy*ny,ikz+ipz*nz)
             k=nint(sqrt(k2))
             if (k>=0 .and. k<=(nk-1)) then
 !
@@ -2076,7 +2107,7 @@ outer:do ikz=1,nz
             write(1,'(i4,3p,8e10.2)') k, spectrum_sum(k)
           enddo
         else
-          write(1,*) tspec, real(t)
+          write(1,timestamp_format) tspec, real(t)
           write(1,power_format) spectrum_sum
         endif
         close(1)
@@ -2089,7 +2120,7 @@ outer:do ikz=1,nz
             write(1,'(i4,3p,8e10.2)') k, spectrumhel_sum(k)
           enddo
         else
-          write(1,*) tspec, real(t)
+          write(1,timestamp_format) tspec, real(t)
           write(1,power_format) spectrumhel_sum
         endif
         close(1)
@@ -2118,7 +2149,7 @@ outer:do ikz=1,nz
           enddo
           enddo
         else
-          write(1,*) tspec, real(t)
+          write(1,timestamp_format) tspec, real(t)
           write(1,power_format) cyl_spectrum_sum
         endif
         close(1)
@@ -2131,7 +2162,7 @@ outer:do ikz=1,nz
           enddo
           enddo
         else
-          write(1,*) tspec, real(t)
+          write(1,timestamp_format) tspec, real(t)
           write(1,power_format) cyl_spectrumhel_sum
         endif
         close(1)
@@ -2177,8 +2208,7 @@ outer:do ikz=1,nz
     integer, parameter :: nk=nxgrid/2
     integer :: k, ikx, iky, ikz, ivec, stat
     real :: k2
-    real, dimension(mx,my,mz,mfarray) :: f
-    real, dimension(mx,my,mz,3) :: Lor
+    real, contiguous,dimension(:,:,:,:) :: f
     real, dimension(:,:,:,:), allocatable :: tmpv, scrv
     real, dimension(:,:,:), allocatable :: c_re, c_im
     real, dimension(nx,3) :: aa,bb,jj,jxb
@@ -2224,14 +2254,14 @@ outer:do ikz=1,nz
     !$omp end workshare
 !
 !  Compute Lorentz force, unless ijxb>0.
-!  Why do we need m=m_loc;n=n_loc?
+!  Need m=m_loc;n=n_loc to make gij etc work correctly.
 !
     !$omp do collapse(2)
     do m_loc=m1,m2
     do n_loc=n1,n2
       m=m_loc;n=n_loc
       if (ijxb>0) then
-        Lor(l1:l2,m,n,:)=f(l1:l2,m,n,ijxbx:ijxbz)
+        a_vec_re(:,m-nghost,n-nghost,:)=f(l1:l2,m,n,ijxbx:ijxbz)
       else
         aa=f(l1:l2,m,n,iax:iaz)
         call gij(f,iaa,aij,1)
@@ -2239,7 +2269,7 @@ outer:do ikz=1,nz
         call curl_mn(aij,bb,aa)
         call curl_mn(bij,jj,bb)
         call cross_mn(jj,bb,jxb)
-        Lor(l1:l2,m,n,:)=jxb
+        a_vec_re(:,m-nghost,n-nghost,:)=jxb
       endif
 !
 !  If kinematic velocity field is defined as auxiliary array, we use that for a.
@@ -2265,11 +2295,11 @@ outer:do ikz=1,nz
     !$omp MPI_COMM_XYPLANE,MPI_COMM_XZPLANE,MPI_COMM_YZPLANE)
     !$ thread_id = omp_get_thread_num()+1
 !
-!  Lorentz force spectra (spectra of L*L^*)
+!  Lorentz force spectra (spectra of L*L^*=a^2) and work against Lorentz (a*b).
 !
       if (sp=='Lor') then
         !$omp workshare
-        b_re=Lor(l1:l2,m1:m2,n1:n2,ivec)
+        b_re=a_vec_re(:,:,:,ivec)
         !$omp end workshare
         if (lhydro) then
           !$omp workshare
@@ -2382,7 +2412,7 @@ outer:do ikz=1,nz
           write(1,'(i4,3p,8e10.2)') k, spectrum_sum(k)
         enddo
       else
-        write(1,*) tspec, real(t)
+        write(1,timestamp_format) tspec, real(t)
         write(1,power_format) spectrum_sum
       endif
       close(1)
@@ -2393,7 +2423,7 @@ outer:do ikz=1,nz
           write(1,'(i4,3p,8e10.2)') k, spectrumhel_sum(k)
         enddo
       else
-        write(1,*) tspec, real(t)
+        write(1,timestamp_format) tspec, real(t)
         write(1,power_format) spectrumhel_sum
       endif
       close(1)
@@ -2407,7 +2437,7 @@ outer:do ikz=1,nz
           write(1,'(i4,3p,8e10.2)') k, spectrum2_sum(k)
         enddo
       else
-        write(1,*) tspec, real(t)
+        write(1,timestamp_format) tspec, real(t)
         write(1,power_format) spectrum2_sum
       endif
       close(1)
@@ -2418,7 +2448,7 @@ outer:do ikz=1,nz
           write(1,'(i4,3p,8e10.2)') k, spectrum2hel_sum(k)
         enddo
       else
-        write(1,*) tspec, real(t)
+        write(1,timestamp_format) tspec, real(t)
         write(1,power_format) spectrum2hel_sum
       endif
       close(1)
@@ -2436,7 +2466,7 @@ outer:do ikz=1,nz
 !
   endsubroutine powerLor
 !***********************************************************************
-  subroutine powerLor_OLD(f,sp)
+  subroutine powerOmU(f,sp)
 !
 !  Calculate power and helicity spectra (on spherical shells) of the
 !  variable specified by `sp', i.e. either the spectra of uu and kinetic
@@ -2444,26 +2474,22 @@ outer:do ikz=1,nz
 !  Since this routine is only used at the end of a time step,
 !  one could in principle reuse the df array for memory purposes.
 !
-!   3-oct-10/axel: added compution of krms (for realisability condition)
-!  22-jan-13/axel: corrected for x parallelization
+!  14-apr-26/axel: adapted from powerLor
 !
     use Fourier, only: fft_xyz_parallel
     use Mpicomm, only: mpireduce_sum
     use Sub, only: gij, gij_etc, curl_mn, cross_mn
 !
     integer, parameter :: nk=nxgrid/2
-    integer :: k,ikx,iky,ikz,ivec, stat
+    integer :: k, ikx, iky, ikz, ivec 
     real :: k2
-    real, dimension(mx,my,mz,mfarray) :: f
-    real, dimension(mx,my,mz,3) :: Lor
-    real, dimension(:,:,:,:), allocatable :: tmpv, scrv
-    real, dimension(:,:,:), allocatable :: c_re, c_im
-    real, dimension(nx,3) :: aa,bb,jj,jxb
-    real, dimension(nx,3,3) :: aij,bij
+    real, contiguous,dimension(:,:,:,:) :: f
+    real, dimension(nx,3) :: uu,oo,oxu
+    real, dimension(nx,3,3) :: uij
     real, dimension(nk) :: nks,nks_sum
     real, dimension(nk) :: k2m,k2m_sum,krms
-    real, dimension(nk) :: spectrum,spectrum_sum
-    real, dimension(nk) :: spectrumhel,spectrumhel_sum
+    real, dimension(nk) :: spectrum, spectrum_sum, spectrum2, spectrum2_sum
+    real, dimension(nk) :: spectrumhel, spectrumhel_sum, spectrum2hel, spectrum2hel_sum
     character (len=3) :: sp
     logical, save :: lwrite_krms=.true.
 !
@@ -2471,118 +2497,109 @@ outer:do ikz=1,nz
 !
     if (lroot .AND. ip<10) call svn_id( &
          "$Id$")
-!
-!  Note, if lhydro=F, then f(:,:,:,1:3) does no longer contain
-!  velocity. In that case, we want the magnetic field instead.
-!
-    if (.not.lhydro) then
-      allocate(tmpv(mx,my,mz,3),stat=stat)
-      if (stat>0) call fatal_error('powerLor_OLD','Cannot allocate memory for tmpv')
-      allocate(scrv(mx,my,mz,3),stat=stat)
-      if (stat>0) call fatal_error('powerLor_OLD','Cannot allocate memory for scrv')
-      allocate(c_re(nx,ny,nz),stat=stat)
-      if (stat>0) call fatal_error('powerLor_OLD','Cannot allocate memory for c_re')
-      allocate(c_im(nx,ny,nz),stat=stat)
-      if (stat>0) call fatal_error('powerLor_OLD','Cannot allocate memory for c_im')
-    endif
+    !$omp parallel num_threads(num_helper_threads)
 !
 !  initialize power spectrum to zero
 !
+    !$omp workshare
     k2m=0.
     nks=0.
     spectrum=0.
     spectrumhel=0.
+    spectrum2=0.
+    spectrum2hel=0.
+    !$omp end workshare
 !
-!  compute Lorentz force
+!  Compute oxu force.
 !
+    !$omp do collapse(2)
     do m_loc=m1,m2
     do n_loc=n1,n2
       m=m_loc;n=n_loc
-      aa=f(l1:l2,m,n,iax:iaz)
-      call gij(f,iaa,aij,1)
-      call gij_etc(f,iaa,aa,aij,bij)
-      call curl_mn(aij,bb,aa)
-      call curl_mn(bij,jj,bb)
-      call cross_mn(jj,bb,jxb)
-      Lor(l1:l2,m,n,:)=jxb
-      if (.not.lhydro) tmpv(l1:l2,m,n,:)=bb
-      if (.not.lhydro) scrv(l1:l2,m,n,:)=jj
+      uu=f(l1:l2,m,n,iux:iuz)
+      call gij(f,iuu,uij,1)
+      call curl_mn(uij,oo,uu)
+      call cross_mn(oo,uu,oxu)
+      a_vec_re(:,m-nghost,n-nghost,:)=oxu
     enddo
     enddo
+    !$omp end parallel
 !
 !  loop over all the components
 !
     do ivec=1,3
+    !$omp parallel private(k,k2) num_threads(num_helper_threads) &
+    !$omp copyin(MPI_COMM_GRID,MPI_COMM_PENCIL,MPI_COMM_XBEAM,MPI_COMM_YBEAM,MPI_COMM_ZBEAM, &
+    !$omp MPI_COMM_XYPLANE,MPI_COMM_XZPLANE,MPI_COMM_YZPLANE)
+    !$ thread_id = omp_get_thread_num()+1
 !
-!  Lorentz force spectra (spectra of L*L^*)
+!  oxu force spectra (spectra of L*L^*=a^2) and work against oxu (a*b).
 !
-      if (sp=='Lor') then
-        b_re=Lor(l1:l2,m1:m2,n1:n2,ivec)
-        if (lhydro) then
-          a_re=f(l1:l2,m1:m2,n1:n2,ivec)
-        else
-          a_re=tmpv(l1:l2,m1:m2,n1:n2,ivec)
-          c_re=scrv(l1:l2,m1:m2,n1:n2,ivec)
-          c_im=0.
-        endif
+      if (sp=='OmU') then
+        !$omp workshare
+        b_re=a_vec_re(:,:,:,ivec)
+        !$omp end workshare
+        !$omp workshare
+        a_re=f(l1:l2,m1:m2,n1:n2,ivec)
+        !$omp end workshare
+        !$omp workshare
         a_im=0.
         b_im=0.
-!
+        !$omp end workshare
       endif
 !
 !  Doing the Fourier transform
 !
       call fft_xyz_parallel(a_re,a_im)
       call fft_xyz_parallel(b_re,b_im)
-      if (.not.lhydro) call fft_xyz_parallel(c_re,c_im)
 !
 !  integration over shells
 !
-      if (lroot .AND. ip<10) print*,'fft done; now integrate over shells...'
+      if (ip<10) call information('powerLor','fft done; now integrate over shells')
+      !$omp do collapse(3) reduction(+:spectrum,spectrumhel,spectrum2hel,spectrum2,k2m,nks)
       do ikz=1,nz
-        do iky=1,ny
-          do ikx=1,nx
-            k2=get_k2_old(ikx+ipx*nx,iky+ipy*ny,ikz+ipz*nz)
-            k=nint(sqrt(k2))
-            if (k>=0 .and. k<=(nk-1)) then
+      do iky=1,ny
+      do ikx=1,nx
+        k2=get_k2_old(ikx+ipx*nx,iky+ipy*ny,ikz+ipz*nz)
+        k=nint(sqrt(k2))
+        if (k>=0 .and. k<=(nk-1)) then
 !
 !  sum energy and helicity spectra
 !  Remember: a=B, b=Lor, c=J, so for nonhydro, we want a.b and c.b
+!  But for lhydro_kinematic.and.iux/=0, c is ignored.
+!  Furthermore, spectrumhel is u_k^*.(JxB)_k.
+!  If u is unknown, we also compute spectrum2=Sp(J) and spectrum2hel=Sp(J,B).
 !
-              if (lhydro) then
-                spectrum(k+1)=spectrum(k+1) &
-                   +b_re(ikx,iky,ikz)**2 &
-                   +b_im(ikx,iky,ikz)**2
-              else
-                spectrum(k+1)=spectrum(k+1) &
-                   +c_re(ikx,iky,ikz)*b_re(ikx,iky,ikz) &
-                   +c_im(ikx,iky,ikz)*b_im(ikx,iky,ikz)
-              endif
-              spectrumhel(k+1)=spectrumhel(k+1) &
-                 +a_re(ikx,iky,ikz)*b_re(ikx,iky,ikz) &
-                 +a_im(ikx,iky,ikz)*b_im(ikx,iky,ikz)
+          spectrum(k+1)=spectrum(k+1) &
+             +b_re(ikx,iky,ikz)**2 &
+             +b_im(ikx,iky,ikz)**2
+          spectrumhel(k+1)=spectrumhel(k+1) &
+             +a_re(ikx,iky,ikz)*b_re(ikx,iky,ikz) &
+             +a_im(ikx,iky,ikz)*b_im(ikx,iky,ikz)
 !
 !  compute krms only once
 !
-              if (lwrite_krms) then
-                k2m(k+1)=k2m(k+1)+k2
-                nks(k+1)=nks(k+1)+1.
-              endif
+          if (lwrite_krms) then
+            k2m(k+1)=k2m(k+1)+k2
+            nks(k+1)=nks(k+1)+1.
+          endif
 !
 !  end of loop through all points
 !
-            endif
-          enddo
-        enddo
+        endif
       enddo
-!
-    enddo !(from loop over ivec)
+      enddo
+      enddo
+    !$omp end parallel
+    enddo !  do ivec=1,3
 !
 !  Summing up the results from the different processors
 !  The result is available only on root
 !
     call mpireduce_sum(spectrum,spectrum_sum,nk)
     call mpireduce_sum(spectrumhel,spectrumhel_sum,nk)
+    call mpireduce_sum(spectrum2,spectrum2_sum,nk)
+    call mpireduce_sum(spectrum2hel,spectrum2hel_sum,nk)
 !
 !  compute krms only once
 !
@@ -2602,6 +2619,8 @@ outer:do ikz=1,nz
       if (ip<10) print*,'Writing power spectrum ',sp &
            ,' to ',trim(datadir)//'/power_'//trim(sp)//'.dat'
 !
+!  normal 2 spectra, so \int E_Lor(k) dk = <(JxB)^2>/2.
+!
       spectrum_sum=.5*spectrum_sum
       open(1,file=trim(datadir)//'/power_'//trim(sp)//'.dat',position='append')
       if (lformat) then
@@ -2609,7 +2628,7 @@ outer:do ikz=1,nz
           write(1,'(i4,3p,8e10.2)') k, spectrum_sum(k)
         enddo
       else
-        write(1,*) tspec, real(t)
+        write(1,timestamp_format) tspec, real(t)
         write(1,power_format) spectrum_sum
       endif
       close(1)
@@ -2620,8 +2639,33 @@ outer:do ikz=1,nz
           write(1,'(i4,3p,8e10.2)') k, spectrumhel_sum(k)
         enddo
       else
-        write(1,*) tspec, real(t)
+        write(1,timestamp_format) tspec, real(t)
         write(1,power_format) spectrumhel_sum
+      endif
+      close(1)
+!
+!  additional 2 spectra
+!
+      spectrum2_sum=.5*spectrum2_sum
+      open(1,file=trim(datadir)//'/power_2'//trim(sp)//'.dat',position='append')
+      if (lformat) then
+        do k = 1, nk
+          write(1,'(i4,3p,8e10.2)') k, spectrum2_sum(k)
+        enddo
+      else
+        write(1,timestamp_format) tspec, real(t)
+        write(1,power_format) spectrum2_sum
+      endif
+      close(1)
+!
+      open(1,file=trim(datadir)//'/powerhel_2'//trim(sp)//'.dat',position='append')
+      if (lformat) then
+        do k = 1, nk
+          write(1,'(i4,3p,8e10.2)') k, spectrum2hel_sum(k)
+        enddo
+      else
+        write(1,timestamp_format) tspec, real(t)
+        write(1,power_format) spectrum2hel_sum
       endif
       close(1)
 !
@@ -2634,9 +2678,7 @@ outer:do ikz=1,nz
       endif
     endif
 !
-    if (allocated(tmpv)) deallocate(tmpv)
-!
-  endsubroutine powerLor_OLD
+  endsubroutine powerOmU
 !***********************************************************************
   subroutine powerEMF(f,sp)
 !
@@ -2656,7 +2698,7 @@ outer:do ikz=1,nz
     integer, parameter :: nk=nxgrid/2
     integer :: k,ikx,iky,ikz,ivec
     real :: k2
-    real, dimension (mx,my,mz,mfarray) :: f
+    real, contiguous,dimension(:,:,:,:) :: f
     real, save, allocatable, dimension (:,:,:,:) :: EMF,JJJ,EMB,BBB
     real, dimension(nx,3) :: uu,aa,bb,jj,uxb,uxj
     real, dimension(nx,3,3) :: aij,bij
@@ -2810,7 +2852,7 @@ outer:do ikz=1,nz
           write(1,'(i4,3p,8e10.2)') k, spectrum_sum(k)
         enddo
       else
-        write(1,*) tspec, real(t)
+        write(1,timestamp_format) tspec, real(t)
         write(1,power_format) spectrum_sum
       endif
       close(1)
@@ -2821,7 +2863,7 @@ outer:do ikz=1,nz
           write(1,'(i4,3p,8e10.2)') k, spectrumhel_sum(k)
         enddo
       else
-        write(1,*) tspec, real(t)
+        write(1,timestamp_format) tspec, real(t)
         write(1,power_format) spectrumhel_sum
       endif
       close(1)
@@ -2855,8 +2897,8 @@ outer:do ikz=1,nz
     integer, parameter :: nk=nxgrid/2
     integer :: k,ikx,iky,ikz,ivec
     real :: k2
-    real, dimension (mx,my,mz,mfarray) :: f
-    real, dimension (mx,my,mz,3) :: Adv, Str, BBB
+    real, contiguous,dimension(:,:,:,:) :: f
+    real, allocatable, dimension(:,:,:,:) :: Adv, Str, BBB
     real, dimension(nx,3) :: uu, aa, bb, divu, bbdivu, bgradu, ugradb
     real, dimension(nx,3,3) :: uij, aij, bij
     real, dimension(nk) :: nks,nks_sum
@@ -2865,6 +2907,10 @@ outer:do ikz=1,nz
     real, dimension(nk) :: spectrumhel,spectrumhel_sum
     character (len=3) :: sp
     logical, save :: lwrite_krms=.true.
+
+    if (.not. allocated(Adv)) allocate(Adv(mx,my,mz,3))
+    if (.not. allocated(Str)) allocate(Str(mx,my,mz,3))
+    if (.not. allocated(BBB)) allocate(BBB(mx,my,mz,3))
 !
 !  identify version
 !
@@ -3003,7 +3049,7 @@ outer:do ikz=1,nz
           write(1,'(i4,3p,8e10.2)') k, spectrum_sum(k)
         enddo
       else
-        write(1,*) tspec, real(t)
+        write(1,timestamp_format) tspec, real(t)
         write(1,power_format) spectrum_sum
       endif
       close(1)
@@ -3014,7 +3060,7 @@ outer:do ikz=1,nz
           write(1,'(i4,3p,8e10.2)') k, spectrumhel_sum(k)
         enddo
       else
-        write(1,*) tspec, real(t)
+        write(1,timestamp_format) tspec, real(t)
         write(1,power_format) spectrumhel_sum
       endif
       close(1)
@@ -3046,7 +3092,7 @@ outer:do ikz=1,nz
     use Sub, only: gij, gij_etc, curl_mn, cross_mn
     use Special, only: special_calc_spectra
 !
-    real, dimension (mx,my,mz,mfarray) :: f
+    real, contiguous,dimension(:,:,:,:) :: f
     character (len=3) :: sp
     logical :: lfirstcall
   
@@ -3278,7 +3324,7 @@ outer:do ikz=1,nz
           write(1,'(i4,3p,8e10.2)') k, spectrum_sum(k)
         enddo
       else
-        write(1,*) tspec, real(t)
+        write(1,timestamp_format) tspec, real(t)
         if ( all(sp.ne.(/'Gab','Gan','GBb'/)) ) then
           write(1,power_format) spectrum_sum
         else
@@ -3294,7 +3340,7 @@ outer:do ikz=1,nz
             write(1,'(i4,3p,8e10.2)') k, spectrumhel_sum(k)
           enddo
         else
-          write(1,*) tspec, real(t)
+          write(1,timestamp_format) tspec, real(t)
           if ( all(sp.ne.(/'Gab','Gan','GBb'/)) ) then
             write(1,power_format) spectrumhel_sum
           else
@@ -3328,6 +3374,8 @@ outer:do ikz=1,nz
 !  Make sure corresponding changes are made in cdata, param_io, and
 !  powersnap, which is in snapshot.f90.
 !
+!   1-May-2026/Kishore: basic support for non-cubical boxes
+!
     use Fourier, only: fft_xyz_parallel
     use General, only: itoa
     use Mpicomm, only: mpireduce_sum
@@ -3339,13 +3387,13 @@ outer:do ikz=1,nz
     logical, intent(in), optional :: lsqrt
     integer, intent(in), optional :: iapn_index
     integer, pointer :: inp,irhop,iapn(:)
-    integer, parameter :: nk=nxgrid/2
+    integer :: nk
     integer :: k,ikx,iky,ikz, ivec, ia0
     real :: k2,fact
-    real, dimension (mx,my,mz,mfarray) :: f
-    real, dimension(nk) :: spectrum,spectrum_sum
-    real, dimension(nk) :: hor_spectrum, hor_spectrum_sum
-    real, dimension(nk) :: ver_spectrum, ver_spectrum_sum
+    real, contiguous,dimension(:,:,:,:) :: f
+    real, dimension(:), allocatable, save :: spectrum,spectrum_sum
+    real, dimension(:), allocatable, save :: hor_spectrum, hor_spectrum_sum
+    real, dimension(:), allocatable, save :: ver_spectrum, ver_spectrum_sum
     real, dimension(nx) :: bbi
     real, dimension(nx,3) :: gLam
     character (len=*) :: sp
@@ -3355,9 +3403,11 @@ outer:do ikz=1,nz
     if (lroot .AND. ip<10) call svn_id( &
          "$Id$")
 !
-    if (lroot .and. (minval(Lxyz) /= maxval(Lxyz))) &
-      call warning("powerscl", "computation of wavevector wrong for non-cubic domains")
-  
+    if (lroot .and. (minval(Lxyz) /= maxval(Lxyz)) .and. &
+      (lvertical_spectra .or. lhorizontal_spectra)) call warning("powerscl", &
+      "computation of wavevector wrong for non-cubic domains with &
+      &lvertical_spectra or lhorizontal_spectra")
+!
     if (sp=='np') then
       call get_shared_variable('inp', inp, caller='powerscl')
     elseif (sp=='na') then
@@ -3365,7 +3415,15 @@ outer:do ikz=1,nz
     elseif (sp=='rp') then
       call get_shared_variable('irhop', irhop, caller='powerscl')
     endif
-  
+!
+    nk = nk_xyz
+!
+    if (.not. allocated(spectrum)) then
+      allocate(spectrum(nk), spectrum_sum(nk))
+      allocate(hor_spectrum(nk), hor_spectrum_sum(nk))
+      allocate(ver_spectrum(nk), ver_spectrum_sum(nk))
+    endif
+!
     !$omp parallel private(ia0,k,k2,bbi,fact,gLam) num_threads(num_helper_threads) &
     !$omp copyin(MPI_COMM_GRID,MPI_COMM_PENCIL,MPI_COMM_XBEAM,MPI_COMM_YBEAM,MPI_COMM_ZBEAM, &
     !$omp MPI_COMM_XYPLANE,MPI_COMM_XZPLANE,MPI_COMM_YZPLANE)
@@ -3576,7 +3634,7 @@ outer:do ikz=1,nz
       !
       !  integration over shells
       !
-      k2=get_k2_old(ikx+ipx*nx,iky+ipy*ny,ikz+ipz*nz)
+      k2=get_k2(ikx+ipx*nx,iky+ipy*ny,ikz+ipz*nz)
       k=nint(sqrt(k2))
       if (sp=='ucp') then
         fact=k2  !  take gradient
@@ -3628,20 +3686,20 @@ outer:do ikz=1,nz
       else
          open(1,file=trim(datadir)//'/power_'//trim(sp)//'.dat',position='append')
       endif
-      write(1,*) tspec, real(t)
+      write(1,timestamp_format) tspec, real(t)
       write(1,power_format) spectrum_sum
       close(1)
 !
       if (lhorizontal_spectra) then
         open(1,file=trim(datadir)//'/power_hor_'//trim(sp)//'.dat',position='append')
-        write(1,*) tspec, real(t)
+        write(1,timestamp_format) tspec, real(t)
         write(1,power_format) hor_spectrum_sum
         close(1)
       endif
 !
       if (lvertical_spectra) then
         open(1,file=trim(datadir)//'/power_ver_'//trim(sp)//'.dat',position='append')
-        write(1,*) tspec, real(t)
+        write(1,timestamp_format) tspec, real(t)
         write(1,power_format) ver_spectrum_sum
         close(1)
       endif
@@ -3662,7 +3720,7 @@ outer:do ikz=1,nz
     use Sub, only: curli
     use General, only: itoa
 !
-    real, dimension (mx,my,mz,mfarray) :: f
+    real, contiguous,dimension(:,:,:,:) :: f
     character (len=1) :: sp
     integer :: ivec
     integer, optional :: ivar
@@ -3853,7 +3911,7 @@ outer:do ikz=1,nz
       if (lroot.and.ip<10) print*, 'Writing power spectra of variable', sp, &
           'to ', trim(datadir)//'/power'//trim(sp)//trim(suffix)
       open(1,file=trim(datadir)//'/power'//trim(sp)//trim(suffix),position='append')
-      write(1,*) tspec, real(t)
+      write(1,timestamp_format) tspec, real(t)
 !
       if (lcomplex) then
         write(1,'(1p,8("(",e10.2,",",e10.2,")"))') spectrumx_sum/(nygrid*nzgrid)
@@ -3884,7 +3942,7 @@ outer:do ikz=1,nz
         if (lroot.and.ip<10) print*, 'Writing power spectra of variable', sp, &
             'to ', trim(datadir)//'/power'//trim(sp)//trim(suffix)
         open(1,file=trim(datadir)//'/power'//trim(sp)//trim(suffix),position='append')
-        write(1,*) tspec, real(t)
+        write(1,timestamp_format) tspec, real(t)
         write(1,power_format) spectrumy_sum/(nxgrid*nzgrid)
         close(1)
       endif
@@ -3905,7 +3963,7 @@ outer:do ikz=1,nz
         if (lroot.and.ip<10) print*,'Writing power spectra of variable', sp,  &
             'to ', trim(datadir)//'/power'//trim(sp)//trim(suffix)
         open(1,file=trim(datadir)//'/power'//trim(sp)//trim(suffix),position='append')
-        write(1,*) tspec, real(t)
+        write(1,timestamp_format) tspec, real(t)
         write(1,power_format) spectrumz_sum/(nxgrid*nygrid)
         close(1)
       endif
@@ -3928,7 +3986,7 @@ outer:do ikz=1,nz
     use SharedVariables, only: get_shared_variable
     use FArrayManager, only: farray_index_by_name
 !
-    real, dimension (mx,my,mz,mfarray), intent(in) :: f
+    real, contiguous,dimension(:,:,:,:), intent(in) :: f
     character (len=*), intent(in) :: variabl_in
     real, optional, intent(in) :: pdf_mean_in, pdf_rms_in
 !
@@ -4172,9 +4230,8 @@ outer:do ikz=1,nz
     integer :: l, i_pdf, i_pdfy
     integer :: n_pdf=100, n_pdfy=100
     integer, allocatable, dimension(:,:) :: pdf_yy, pdf_yy_sum
-    real, dimension (mx,my,mz,mfarray) :: f
-    real, dimension (nx,3) :: gcc
-    real, dimension (nx) :: pdf_var,gcc2, pdfy_var
+    real, contiguous,dimension(:,:,:,:) :: f
+    real, dimension (nx) :: pdf_var,pdfy_var
     integer, dimension (2) :: nreduce
     real :: pdf_mean, pdf_rms, pdf_dx, pdf_dx1, pdf_scl, pdfy_scl
     real :: pdf_min_loc, pdf_max_loc, pdfy_min_loc, pdfy_max_loc
@@ -4216,7 +4273,7 @@ outer:do ikz=1,nz
     pdf_scl=1.
     pdfy_scl=1.
     !
-    !$omp parallel private(pdf_var,logscale,gcc,gcc2,l,pdf_dx,pdf_dx1,i_pdf) num_threads(num_helper_threads) &
+    !$omp parallel private(pdf_var,logscale,l,pdf_dx,pdf_dx1,i_pdf) num_threads(num_helper_threads) &
     !$omp copyin(MPI_COMM_GRID,MPI_COMM_PENCIL,MPI_COMM_XBEAM,MPI_COMM_YBEAM,MPI_COMM_ZBEAM, &
     !$omp MPI_COMM_XYPLANE,MPI_COMM_XZPLANE,MPI_COMM_YZPLANE)
     !$ thread_id = omp_get_thread_num()+1
@@ -4295,7 +4352,7 @@ outer:do ikz=1,nz
     use Mpicomm, only: mpireduce_sum_int
     use Sub, only: del2v_etc, curl
 !
-    real, dimension (mx,my,mz,mfarray) :: f
+    real, contiguous,dimension(:,:,:,:) :: f
     character (len=*) :: sp
 !
     integer, parameter :: nk=nxgrid/2, npdf=130
@@ -4416,7 +4473,7 @@ outer:do ikz=1,nz
 !
   if (lroot) then
     open(1,file=trim(datadir)//'/pdf1d_ang_'//trim(sp)//'.dat',position='append')
-    write(1,*) tspec, real(t)
+    write(1,timestamp_format) tspec, real(t)
     write(1,*) pdf_ang_sum
     close(1)
   endif
@@ -4442,7 +4499,7 @@ outer:do ikz=1,nz
     use Fourier, only: fourier_transform_real_1
 !
     integer :: j,l,ivec,ispec,ifirst_fft
-    real, dimension (mx,my,mz,mfarray) :: f
+    real, contiguous,dimension(:,:,:,:) :: f
     real, allocatable, dimension(:,:,:), save :: a1
     real, dimension(nygrid/2) :: spectrumy,spectrumy_sum
     real, dimension(nzgrid/2) :: spectrum,spectrum_sum
@@ -4581,7 +4638,7 @@ outer:do ikz=1,nz
       if (ip<10) print*,'Writing power spectra of variable',trim(sp) &
            ,'to ',trim(datadir)//'/power_phi'//trim(sp)//'.dat'
       open(1,file=trim(datadir)//'/power_phi'//trim(sp)//'.dat',position='append')
-      write(1,*) tspec, real(t)
+      write(1,timestamp_format) tspec, real(t)
 !
       if (lspherical_coords) then
         spectrum_sum=.5*spectrum_sum
@@ -4614,7 +4671,7 @@ outer:do ikz=1,nz
     use Sub, only: curli
 !
     integer :: j,l,ivec,ispec,ifirst_fft
-    real, dimension (mx,my,mz,mfarray) :: f
+    real, contiguous,dimension(:,:,:,:) :: f
     real, allocatable, dimension(:,:,:), save :: a1,b1
     real, dimension(nzgrid/2) :: spectrum,spectrum_sum
     real, dimension(nzgrid/2) :: spectrumhel,spectrumhel_sum
@@ -4733,12 +4790,12 @@ outer:do ikz=1,nz
       spectrum_sum=.5*spectrum_sum
       spectrumhel_sum=0.5*spectrumhel_sum
       open(1,file=trim(datadir)//'/power_phi_'//trim(sp)//'.dat',position='append')
-      write(1,*) tspec, real(t)
+      write(1,timestamp_format) tspec, real(t)
       write(1,power_format) spectrum_sum
       close(1)
 !
       open(1,file=trim(datadir)//'/powerhel_phi_'//trim(sp)//'.dat',position='append')
-      write(1,*) tspec, real(t)
+      write(1,timestamp_format) tspec, real(t)
       write(1,power_format) spectrumhel_sum
       close(1)
     endif
@@ -4758,7 +4815,7 @@ outer:do ikz=1,nz
 !
     integer, parameter :: nk=nx/2
     integer :: k,ikx,iky,ikz,ivec
-    real, dimension (mx,my,mz,mfarray) :: f
+    real, contiguous,dimension(:,:,:,:) :: f
     real, save, allocatable, dimension(:,:,:,:) :: a1,b1
     real, dimension(nx,3) :: tmp_a1
     real, dimension(nk) :: spectrum,spectrum_sum
@@ -4836,7 +4893,7 @@ outer:do ikz=1,nz
            ,'to ',trim(datadir)//'/power'//trim(sp)//'.dat'
       spectrum_sum=.5*spectrum_sum
       open(1,file=trim(datadir)//'/power'//trim(sp)//'.dat',position='append')
-      write(1,*) tspec, real(t)
+      write(1,timestamp_format) tspec, real(t)
       write(1,power_format) spectrum_sum
       close(1)
     endif
@@ -4873,7 +4930,7 @@ outer:do ikz=1,nz
     integer, dimension(nk) :: nmu
     real, allocatable, dimension(:,:) :: kmu, dmu
     real :: k2, mu, mu_offset, kmu2
-    real, dimension (mx,my,mz,mfarray) :: f
+    real, contiguous,dimension(:,:,:,:) :: f
 !
     real, allocatable, dimension(:,:,:), save :: ux_re, ux_im
     real, allocatable, dimension(:,:,:), save :: uy_re, uy_im
@@ -5070,19 +5127,19 @@ outer:do ikz=1,nz
       if (lroot) then
         if (ip<10) print*,'Writing two point correlations to',trim(datadir)//'/polarspec_.dat'
         open(1,file=trim(datadir)//'/polarspec_lcoeff_a_'//trim(sp)//'.dat',position='append')
-        write(1,*) tspec, real(t)
+        write(1,timestamp_format) tspec, real(t)
         do i=1,legendre_lmax+1; do ikr=1,nk
           write(1,'(2i4,3p,8e10.2)') i-1,ikr-1,legendre_al_a_sum(i,ikr)
         enddo; enddo
         close(1)
         open(1,file=trim(datadir)//'/polarspec_lcoeff_b_'//trim(sp)//'.dat',position='append')
-        write(1,*) tspec, real(t)
+        write(1,timestamp_format) tspec, real(t)
         do i=1,legendre_lmax+1; do ikr=1,nk
           write(1,'(2i4,3p,8e10.2)') i-1,ikr-1,legendre_al_b_sum(i,ikr)
         enddo; enddo
         close(1)
         open(1,file=trim(datadir)//'/polarspec_lcoeff_c_'//trim(sp)//'.dat',position='append')
-        write(1,*) tspec, real(t)
+        write(1,timestamp_format) tspec, real(t)
         do i=1,legendre_lmax+1; do ikr=1,nk
           write(1,'(2i4,3p,8e10.2)') i-1,ikr-1,legendre_al_c_sum(i,ikr)
         enddo; enddo
@@ -5308,26 +5365,26 @@ outer:do ikz=1,nz
         !  energy and helicity spectra in polar coordinates
         !  in the form (kr,mu,dmu,spec), kr=0,1,2,...
         open(1,file=trim(datadir)//'/polarspec_'//trim(sp)//'.dat',position='append')
-        write(1,*) tspec, real(t)
+        write(1,timestamp_format) tspec, real(t)
         do ikr=1,nk; do ikmu=1,nmu(ikr)
           write(1,'(i4,2p,8e10.2,3p,8e10.2,3p,8e10.2)') ikr-1,kmu(ikr,ikmu),dmu(ikr,ikmu),polar_spec_sum(ikr,ikmu)
         enddo; enddo
         close(1)
         open(1,file=trim(datadir)//'/polarspechel_'//trim(sp)//'.dat',position='append')
-        write(1,*) tspec, real(t)
+        write(1,timestamp_format) tspec, real(t)
         do ikr=1,nk; do ikmu=1,nmu(ikr)
           write(1,'(i4,2p,8e10.2,3p,8e10.2,3p,8e10.2)') ikr-1,kmu(ikr,ikmu),dmu(ikr,ikmu),polar_spechel_sum(ikr,ikmu)
         enddo; enddo
         close(1)
         !  legendre coefficients a_l, in the form (l,kr,a_l), l,kr=0,1,2,...,
         open(1,file=trim(datadir)//'/polarspec_lcoeff_'//trim(sp)//'.dat',position='append')
-        write(1,*) tspec, real(t)
+        write(1,timestamp_format) tspec, real(t)
         do i=1,legendre_lmax+1; do ikr=1,nk
           write(1,'(2i4,3p,8e10.2)') i-1,ikr-1,legendre_al_sum(i,ikr)
         enddo; enddo
         close(1)
         open(1,file=trim(datadir)//'/polarspechel_lcoeff_'//trim(sp)//'.dat',position='append')
-        write(1,*) tspec, real(t)
+        write(1,timestamp_format) tspec, real(t)
         do i=1,legendre_lmax+1; do ikr=1,nk
           write(1,'(2i4,3p,8e10.2)') i-1,ikr-1,legendre_alhel_sum(i,ikr)
         enddo; enddo
@@ -5355,7 +5412,7 @@ outer:do ikz=1,nz
     integer, parameter :: nk=nxgrid/2
     integer :: ikx, iky, ikz, ivec
     integer :: k3,k
-    real, dimension (mx,my,mz,mfarray) :: f
+    real, contiguous,dimension(:,:,:,:) :: f
     real, dimension(nk) :: spectrum,spectrum_sum
     real, dimension(nk) :: spectrumhel,spectrumhel_sum
     character (len=3) :: sp
@@ -5474,7 +5531,7 @@ outer:do ikz=1,nz
           write(1,'(i4,3p,8e10.2)') k, spectrum_sum(k)
         enddo
       else
-        write(1,*) tspec, real(t)
+        write(1,timestamp_format) tspec, real(t)
         write(1,power_format) spectrum_sum
       endif
       close(1)
@@ -5485,7 +5542,7 @@ outer:do ikz=1,nz
           write(1,'(i4,3p,8e10.2)') k, spectrumhel_sum(k)
         enddo
       else
-        write(1,*) tspec, real(t)
+        write(1,timestamp_format) tspec, real(t)
         write(1,power_format) spectrumhel_sum
       endif
       close(1)
@@ -5514,7 +5571,7 @@ outer:do ikz=1,nz
     integer :: jkx
     real :: k2
     real, pointer :: t_cor
-    real, dimension (mx,my,mz,mfarray) :: f
+    real, contiguous,dimension(:,:,:,:) :: f
     real, dimension(nk) :: nks,nks_sum
     real, dimension(nk) :: k2m,k2m_sum,krms
     real, dimension(nk) :: spectrum,spectrum_sum
@@ -5741,7 +5798,7 @@ outer:do ikz=1,nz
           write(1,'(i4,3p,8e10.2)') k, spectrum_sum(k)
         enddo
       else
-        write(1,*) tspec, real(t)
+        write(1,timestamp_format) tspec, real(t)
         write(1,power_format) spectrum_sum
       endif
       close(1)
@@ -5752,7 +5809,7 @@ outer:do ikz=1,nz
           write(1,'(i4,3p,8e10.2)') k, spectrumhel_sum(k)
         enddo
       else
-        write(1,*) tspec, real(t)
+        write(1,timestamp_format) tspec, real(t)
         write(1,power_format) spectrumhel_sum
       endif
       close(1)
@@ -5768,7 +5825,7 @@ outer:do ikz=1,nz
           write(1,'(i4,3p,8e10.2)') ikx, correlation_sum(ikx)
         enddo
       else
-        write(1,*) tspec, real(t)
+        write(1,timestamp_format) tspec, real(t)
         write(1,power_format) correlation_sum
       endif
       close(1)
@@ -5779,7 +5836,7 @@ outer:do ikz=1,nz
           write(1,'(i4,3p,8e10.2)') ikx, correlationhel_sum(ikx)
         enddo
       else
-        write(1,*) tspec, real(t)
+        write(1,timestamp_format) tspec, real(t)
         write(1,power_format) correlationhel_sum
       endif
       close(1)
@@ -5796,7 +5853,7 @@ outer:do ikz=1,nz
           enddo
           enddo
         else
-          write(1,*) tspec, real(t)
+          write(1,timestamp_format) tspec, real(t)
           write(1,power_format) cyl_spectrum_sum
         endif
         close(1)
@@ -5809,7 +5866,7 @@ outer:do ikz=1,nz
           enddo
           enddo
         else
-          write(1,*) tspec, real(t)
+          write(1,timestamp_format) tspec, real(t)
           write(1,power_format) cyl_spectrumhel_sum
         endif
         close(1)
@@ -5840,7 +5897,7 @@ outer:do ikz=1,nz
     use Shear, only: shear_frame_transform
     use SharedVariables, only: get_shared_variable
 !
-    real, dimension (mx,my,mz,mfarray) :: f
+    real, contiguous,dimension(:,:,:,:) :: f
     character (len=*) :: sp
 !
     integer, parameter :: nk=nxgrid/2
@@ -6068,36 +6125,36 @@ outer:do ikz=1,nz
     if (lroot) then
 !
       open(1,file=trim(datadir)//'/powercor_scl_auto_'//trim(sp)//'.dat',position='append')
-      write(1,*) tspec, real(t)
+      write(1,timestamp_format) tspec, real(t)
       write(1,power_format) spectrum_sum
       close(1)
 !
       open(1,file=trim(datadir)//'/powercor_scl_'//trim(sp)//'.dat',position='append')
-      write(1,*) tspec, real(t)
+      write(1,timestamp_format) tspec, real(t)
       write(1,power_format) spectrumhel_sum
       close(1)
 !
 !  real-space correlation
 !
       open(1,file=trim(datadir)//'/correlation_scl_auto_'//trim(sp)//'.dat',position='append')
-      write(1,*) tspec, real(t)
+      write(1,timestamp_format) tspec, real(t)
       write(1,power_format) correlation_sum
       close(1)
 !
       open(1,file=trim(datadir)//'/correlation_scl_'//trim(sp)//'.dat',position='append')
-      write(1,*) tspec, real(t)
+      write(1,timestamp_format) tspec, real(t)
       write(1,power_format) correlationhel_sum
       close(1)
 !
       if (lcylindrical_spectra) then
 !
         open(1,file=trim(datadir)//'/cyl_powercor_scl_auto_'//trim(sp)//'.dat',position='append')
-        write(1,*) tspec, real(t)
+        write(1,timestamp_format) tspec, real(t)
         write(1,power_format) cyl_spectrum_sum
         close(1)
 !
         open(1,file=trim(datadir)//'/cyl_powercor_scl_'//trim(sp)//'.dat',position='append')
-        write(1,*) tspec, real(t)
+        write(1,timestamp_format) tspec, real(t)
         write(1,power_format) cyl_spectrumhel_sum
         close(1)
       endif
@@ -6122,7 +6179,7 @@ outer:do ikz=1,nz
     integer :: kxx,kyy,kzz,kint
     real :: k2, rr, k, j0, j0x, j0y, j0z, j1, dx_2pi_box
     real, dimension(4) :: w
-    real, dimension (mx,my,mz,mfarray) :: f
+    real, contiguous,dimension(:,:,:,:) :: f
     real, save, allocatable, dimension(:,:,:) :: gLam
     real, dimension(nx,3) :: gLam_tmp
     real, dimension(4,nk) :: correl,correl_sum
@@ -6353,9 +6410,9 @@ outer:do ikz=1,nz
       !$omp parallel private(kxx,kyy,kzz,k2,k,kint,j0x,j0y,j0z,j1,j0,w,icor) num_threads(num_helper_threads)
       !$omp do collapse(3) reduction(+:spectrum,correl)
       do ikx=1,nx; do iky=1,ny; do ikz=1,nz
-        kxx = kx(ikx+ipx*nx)       !  the true kx
-        kyy = ky(iky+ipy*ny)       !  the true ky
-        kzz = kz(ikz+ipz*nz)       !  the true kz
+        kxx = int(kx(ikx+ipx*nx))       !  the true kx
+        kyy = int(ky(iky+ipy*ny))       !  the true ky
+        kzz = int(kz(ikz+ipz*nz))       !  the true kz
         k2 = kxx**2+kyy**2+kzz**2  !  knorm^2
         k = sqrt(k2)               !  knorm
         kint = nint(k)             !  nint(knorm)
@@ -6385,27 +6442,27 @@ outer:do ikz=1,nz
 !
     if (lroot) then
       open(1,file=trim(datadir)//'/Iv_bcc_'//trim(sp)//'.dat',position='append')
-      write(1,*) tspec, real(t)
+      write(1,timestamp_format) tspec, real(t)
       write(1,*) correl_sum(1,:)
       close(1)
       open(1,file=trim(datadir)//'/Iv_bcs_'//trim(sp)//'.dat',position='append')
-      write(1,*) tspec, real(t)
+      write(1,timestamp_format) tspec, real(t)
       write(1,*) correl_sum(2,:)
       close(1)
       open(1,file=trim(datadir)//'/Iv_spc_'//trim(sp)//'.dat',position='append')
-      write(1,*) tspec, real(t)
+      write(1,timestamp_format) tspec, real(t)
       write(1,*) correl_sum(3,:)
       close(1)
       open(1,file=trim(datadir)//'/Iv_sps_'//trim(sp)//'.dat',position='append')
-      write(1,*) tspec, real(t)
+      write(1,timestamp_format) tspec, real(t)
       write(1,*) correl_sum(4,:)
       close(1)
       open(1,file=trim(datadir)//'/power_'//trim(sp)//'.dat',position='append')
-      write(1,*) tspec, real(t)
-      write(1,*) spectrum_sum
+      write(1,timestamp_format) tspec, real(t)
+      write(1,power_format) spectrum_sum
       close(1)
       open(1,file=trim(datadir)//'/Iv_bc_'//trim(sp)//'.dat',position='append')
-      write(1,*) tspec, real(t)
+      write(1,timestamp_format) tspec, real(t)
       write(1,*) Iv
       close(1)
     endif
@@ -6436,7 +6493,7 @@ outer:do ikz=1,nz
     use Sub, only: del2vi_etc, del2v_etc, cross, grad, curli, curl, dot2
     use Shear, only: shear_frame_transform
 !
-    real, dimension (mx,my,mz,mfarray) :: f
+    real, contiguous,dimension(:,:,:,:) :: f
     character (len=*) :: sp
     character (len=4) :: sp2
 !
@@ -6598,11 +6655,11 @@ outer:do ikz=1,nz
 !
       if (lroot .and. t>=tout_min .and. t<=tout_max) then
         open(1,file=trim(datadir)//'/fft3dvec_'//trim(sp2)//'_'//trim(sp)//'_'//trim(spxyz)//'_re.dat',position='append')
-        write(1,*) tspec, real(t)
+        write(1,timestamp_format) tspec, real(t)
         write(1,'(1p,8e10.2)') fft_sum(1,:,:,:)
         close(1)
         open(1,file=trim(datadir)//'/fft3dvec_'//trim(sp2)//'_'//trim(sp)//'_'//trim(spxyz)//'_im.dat',position='append')
-        write(1,*) tspec, real(t)
+        write(1,timestamp_format) tspec, real(t)
         write(1,'(1p,8e10.2)') fft_sum(2,:,:,:)
         close(1)
       endif
@@ -6674,7 +6731,7 @@ outer:do ikz=1,nz
     integer, parameter :: nk=max(nxgrid/2,nygrid/2,nzgrid/2)
     integer :: p,q,lp,lq,ivec,iky,ikz
     integer :: nlk_p, nlk_q
-    real, dimension (mx,my,mz,mfarray) :: f
+    real, contiguous,dimension(:,:,:,:) :: f
     real, dimension(nx,3) :: uu,aa,bb,uxb,jj,curljj
     real, dimension(nx,3,3) :: aij,bij
     real, save, allocatable, dimension(:,:,:,:) :: uuu,bbb,jjj,curljjj
@@ -6858,7 +6915,7 @@ outer:do ikz=1,nz
       if (ip<10) print*,'Writing magnetic energy or helicity transfer rate to ', &
           trim(datadir)//'/power_transfer_mag_'//trim(sp)//'.dat'
       open(1,file=trim(datadir)//'/power_transfer_mag_'//trim(sp)//'.dat',position='append')
-      write(1,*) tspec, real(t)
+      write(1,timestamp_format) tspec, real(t)
       write(1,power_format) Tpq_sum
       close(1)
     endif
@@ -6942,12 +6999,14 @@ outer:do ikz=1,nz
 !   x-component of the wave vector, defined here for the *full* mesh.
 !   Each processor will see only part of it.
 !   Ignore *2*pi/Lx factor, because later we want k to be integers.
-!   The implementation here is correct only for cubical domains (in new code,
+!   The implementation here is correct only for cubic domains (in new code,
 !   try to use get_k2 or get_k2_xy instead).
 !
 !   18-nov-2025/TP: coded
 !   18-Feb-2026/Kishore: moved definition of kx array into this function
 !
+    use General, only: idiv
+   
     integer, intent(IN) :: ikx
     real :: kx
     logical, save :: lfirst = .true.
@@ -6958,9 +7017,9 @@ outer:do ikz=1,nz
       call warn_non_cubical
 !
       if (lcorrect_integer_kcalc) then
-        kx_arr=cshift((/(i-nxgrid/2,i=0,nxgrid-1)/),nxgrid/2) !*2*pi/Lx
+        kx_arr=cshift((/(i-idiv(nxgrid,2),i=0,nxgrid-1)/),idiv(nxgrid,2)) !*2*pi/Lx
       else
-        kx_arr=cshift((/(i-(nxgrid+1)/2,i=0,nxgrid-1)/),+(nxgrid+1)/2) !*2*pi/Lx
+        kx_arr=cshift((/(i-idiv((nxgrid+1),2),i=0,nxgrid-1)/),+idiv((nxgrid+1),2)) !*2*pi/Lx
       endif
 !
       if (nxgrid==1) kx_arr=0
@@ -6982,6 +7041,8 @@ outer:do ikz=1,nz
 !   18-nov-2025/TP: coded
 !   18-Feb-2026/Kishore: moved definition of ky array into this function
 !
+    use General, only: idiv
+
     integer, intent(IN) :: iky
     real :: ky
     logical, save :: lfirst = .true.
@@ -6992,9 +7053,9 @@ outer:do ikz=1,nz
       call warn_non_cubical
 !
       if (lcorrect_integer_kcalc) then
-        ky_arr=cshift((/(i-nygrid/2,i=0,nygrid-1)/),nygrid/2) !*2*pi/Ly
+        ky_arr=cshift((/(i-idiv(nygrid,2),i=0,nygrid-1)/),idiv(nygrid,2)) !*2*pi/Ly
       else
-        ky_arr=cshift((/(i-(nygrid+1)/2,i=0,nygrid-1)/),+(nygrid+1)/2) !*2*pi/Ly
+        ky_arr=cshift((/(i-idiv((nygrid+1),2),i=0,nygrid-1)/),+idiv((nygrid+1),2)) !*2*pi/Ly
       endif
 !
       if (nygrid==1) ky_arr=0
@@ -7016,6 +7077,8 @@ outer:do ikz=1,nz
 !   18-nov-2025/TP: coded
 !   18-Feb-2026/Kishore: moved definition of kz array into this function
 !
+    use General, only: idiv
+
     integer, intent(IN) :: ikz
     real :: kz
     logical, save :: lfirst = .true.
@@ -7026,9 +7089,9 @@ outer:do ikz=1,nz
       call warn_non_cubical
 !
       if (lcorrect_integer_kcalc) then
-        kz_arr=cshift((/(i-nzgrid/2,i=0,nzgrid-1)/),nzgrid/2) !*2*pi/Lz
+        kz_arr=cshift((/(i-idiv(nzgrid,2),i=0,nzgrid-1)/),idiv(nzgrid,2)) !*2*pi/Lz
       else
-        kz_arr=cshift((/(i-(nzgrid+1)/2,i=0,nzgrid-1)/),+(nzgrid+1)/2) !*2*pi/Lz
+        kz_arr=cshift((/(i-idiv((nzgrid+1),2),i=0,nzgrid-1)/),+idiv(nzgrid+1,2)) !*2*pi/Lz
       endif
 !
       if (nzgrid==1) kz_arr=0
@@ -7090,7 +7153,7 @@ outer:do ikz=1,nz
     integer, dimension(:,:), intent(in) :: kxrange, kyrange, zrange
 !
     integer :: iter,pos,latest
-    character(len=fnlen) :: filename_h5, label
+    character(len=fnlen+10) :: filename_h5, label
     logical :: lexists
 !
     if (lroot) then
@@ -7186,95 +7249,96 @@ outer:do ikz=1,nz
 !
   endsubroutine output_elements_by_range
 !***********************************************************************
-  subroutine gather_and_output_by_range(data, kxrange, kyrange, zrange, label)
-!
-!   Gather data on root, slice it according to {kx,ky,z}range, and output it to a previously opened HDF5 file.
-!
-!   2025-Sep-23/Kishore: coded by modifying output_elements_by_range
-!
-    use General, only: get_range_no, write_by_ranges
-    use Hdf5_io, only: output_hdf5
-    use Mpicomm, only: mpigather
-!
-    integer, dimension(:,:), intent(in) :: kxrange, kyrange, zrange
-    real, dimension(:,:,:,:), intent(in) :: data
-    character (len=*), intent(in) :: label
-!
-!   We use the name nkx to avoid shadowing nz
-!
-    integer :: nkx, nky, nkz, ncomp, ierr
-    logical :: lexit
-    integer :: icomp, irang, i1, i2, i3, jrang, j1, j2, j3, krang, k1, k2, k3
-    integer :: ix, iy, iz, lx, ly, lz
-    real, dimension(:,:,:,:), allocatable :: data_sliced
-    real, dimension(:,:,:), allocatable :: data_full
-!
-    if (size(data,1) /= nx) call fatal_error('gather_and_output_by_range', &
-      'wrong size along x')
-    if (size(data,2) /= ny) call fatal_error('gather_and_output_by_range', &
-      'wrong size along y')
-    if (size(data,3) /= nz) call fatal_error('gather_and_output_by_range', &
-      'wrong size along z')
-!
-!   Since this is a large array, we keep it allocatable.
-!
-!
-    nkx = get_range_no(kxrange, nxgrid)
-    nky = get_range_no(kyrange, nygrid)
-    nkz = get_range_no(zrange, nzgrid)
-    ncomp = size(data,4)
-!
-    if (lroot) then
-      allocate(data_full(nxgrid,nygrid,nzgrid), stat=ierr)
-      if (ierr /= 0) call fatal_error ('gather_and_output_by_range', &
-        'Failed to allocate memory for data_full')
-!
-      allocate(data_sliced(nkx,nky,nkz,ncomp), stat=ierr)
-      if (ierr /= 0) call fatal_error ('gather_and_output_by_range', &
-        'Failed to allocate memory for data_sliced')
-    else
-      !dummy
-      allocate(data_full(1,ny,nz)) !cannot be (1,1,1)
-      allocate(data_sliced(1,1,1,1))
-    endif
-!
-    comp: do icomp=1,ncomp
-      call mpigather(data(:,:,:,icomp), data_full)
-!
-      if (lroot) then
-        ix = 1
-        do irang=1,size(kxrange,2)
-          call unpack_range(kxrange(:,irang),i1,i2,i3,lexit,lx)
-          if (lexit) exit
-!
-          iy = 1
-          do jrang=1,size(kyrange,2)
-            call unpack_range(kyrange(:,jrang),j1,j2,j3,lexit,ly)
-            if (lexit) exit
-!
-            iz = 1
-            do krang=1,size(zrange,2)
-              call unpack_range(zrange(:,krang),k1,k2,k3,lexit,lz)
-              if (lexit) exit
-!
-              data_sliced(ix:ix+lx-1, iy:iy+ly-1, iz:iz+lz-1, icomp) = data_full(i1:i2:i3, j1:j2:j3, k1:k2:k3)
-!
-              iz = iz+lz
-            enddo
-            iy = iy+ly
-          enddo
-          ix = ix+lx
-        enddo
-      endif
-    enddo comp
-!
-    if (lroot) call output_hdf5(trim(label), data_sliced, nkx, nky, nkz, ncomp)
-!
-    deallocate(data_sliced)
-    deallocate(data_full)
-!
-  endsubroutine gather_and_output_by_range
-!***********************************************************************
+!  On comment since not used (to suppress compiler warnings)
+!  subroutine gather_and_output_by_range(data, kxrange, kyrange, zrange, label)
+!!
+!!   Gather data on root, slice it according to {kx,ky,z}range, and output it to a previously opened HDF5 file.
+!!
+!!   2025-Sep-23/Kishore: coded by modifying output_elements_by_range
+!!
+!    use General, only: get_range_no, write_by_ranges
+!    use Hdf5_io, only: output_hdf5
+!    use Mpicomm, only: mpigather
+!!
+!    integer, dimension(:,:), intent(in) :: kxrange, kyrange, zrange
+!    real, dimension(:,:,:,:), intent(in) :: data
+!    character (len=*), intent(in) :: label
+!!
+!!   We use the name nkx to avoid shadowing nz
+!!
+!    integer :: nkx, nky, nkz, ncomp, ierr
+!    logical :: lexit
+!    integer :: icomp, irang, i1, i2, i3, jrang, j1, j2, j3, krang, k1, k2, k3
+!    integer :: ix, iy, iz, lx, ly, lz
+!    real, dimension(:,:,:,:), allocatable :: data_sliced
+!    real, dimension(:,:,:), allocatable :: data_full
+!!
+!    if (size(data,1) /= nx) call fatal_error('gather_and_output_by_range', &
+!      'wrong size along x')
+!    if (size(data,2) /= ny) call fatal_error('gather_and_output_by_range', &
+!      'wrong size along y')
+!    if (size(data,3) /= nz) call fatal_error('gather_and_output_by_range', &
+!      'wrong size along z')
+!!
+!!   Since this is a large array, we keep it allocatable.
+!!
+!!
+!    nkx = get_range_no(kxrange, nxgrid)
+!    nky = get_range_no(kyrange, nygrid)
+!    nkz = get_range_no(zrange, nzgrid)
+!    ncomp = size(data,4)
+!!
+!    if (lroot) then
+!      allocate(data_full(nxgrid,nygrid,nzgrid), stat=ierr)
+!      if (ierr /= 0) call fatal_error ('gather_and_output_by_range', &
+!        'Failed to allocate memory for data_full')
+!!
+!      allocate(data_sliced(nkx,nky,nkz,ncomp), stat=ierr)
+!      if (ierr /= 0) call fatal_error ('gather_and_output_by_range', &
+!        'Failed to allocate memory for data_sliced')
+!    else
+!      !dummy
+!      allocate(data_full(1,ny,nz)) !cannot be (1,1,1)
+!      allocate(data_sliced(1,1,1,1))
+!    endif
+!!
+!    comp: do icomp=1,ncomp
+!      call mpigather(data(:,:,:,icomp), data_full)
+!!
+!      if (lroot) then
+!        ix = 1
+!        do irang=1,size(kxrange,2)
+!          call unpack_range(kxrange(:,irang),i1,i2,i3,lexit,lx)
+!          if (lexit) exit
+!!
+!          iy = 1
+!          do jrang=1,size(kyrange,2)
+!            call unpack_range(kyrange(:,jrang),j1,j2,j3,lexit,ly)
+!            if (lexit) exit
+!!
+!            iz = 1
+!            do krang=1,size(zrange,2)
+!              call unpack_range(zrange(:,krang),k1,k2,k3,lexit,lz)
+!              if (lexit) exit
+!!
+!              data_sliced(ix:ix+lx-1, iy:iy+ly-1, iz:iz+lz-1, icomp) = data_full(i1:i2:i3, j1:j2:j3, k1:k2:k3)
+!!
+!              iz = iz+lz
+!            enddo
+!            iy = iy+ly
+!          enddo
+!          ix = ix+lx
+!        enddo
+!      endif
+!    enddo comp
+!!
+!    if (lroot) call output_hdf5(trim(label), data_sliced, nkx, nky, nkz, ncomp)
+!!
+!    deallocate(data_sliced)
+!    deallocate(data_full)
+!!
+!  endsubroutine gather_and_output_by_range
+!!***********************************************************************
   subroutine dist_output_by_range(data, kxrange, kyrange, zrange, label)
 !
 !   Alternative to gather_and_output_by_range that uses mpireduce_sum instead

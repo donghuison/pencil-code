@@ -65,7 +65,6 @@
     integer, parameter :: n_subroutines=40
     integer, parameter :: n_special_modules_max=2
 !
-    integer :: n_special_modules
     character(LEN=256) :: special_modules_list = ''
     character(LEN=30), dimension(n_subroutines) :: special_subroutines=(/ &
                            'register_special              ', &
@@ -104,13 +103,14 @@
                            'input_persist_special_id      ', &
                            'output_persistent_special     ', &
                            'special_particles_after_dtsub ', &
-                           'calc_diagnostics_special      ',  &
-                           'calc_ode_diagnostics_special  ',  &
-                           'prep_rhs_special              ',  &
+                           'calc_diagnostics_special      ', &
+                           'calc_ode_diagnostics_special  ', &
+                           'prep_rhs_special              ', &
                            'load_variables_to_gpu_special '  &
                    /)
 
     integer(KIND=ikind8) :: libhandle
+    integer :: n_special_modules
     integer(KIND=ikind8), dimension(n_special_modules_max,n_subroutines) :: special_sub_handles
     character(LEN=80) :: specific_subroutine
 
@@ -118,7 +118,7 @@
 !****************************************************************************
   subroutine initialize_mult_special
 
-    use Cdata, only: lroot, lreloading, iproc
+    use Cdata, only: lroot, lreloading
     use General, only: parser, safe_string_replace
     use Messages, only: fatal_error
     use Mpicomm, only: mpibcast
@@ -127,14 +127,15 @@
     integer, parameter :: RTLD_LAZY=0, RTLD_NOW=1
 
     character(LEN=128) :: line,parstr
-    integer :: i,j,ipos
+    integer :: i,j,ipos,ind
     character(LEN=40), dimension(n_special_modules_max) :: special_modules
-    character(LEN=8) :: mod_prefix, mod_infix, mod_suffix
     integer(KIND=ikind8) :: sub_handle
 
     if (lreloading) return
 
     call get_env_var("PC_MODULES_LIST", special_modules_list)
+    ind = index(special_modules_list,'#')
+    if (ind>0) special_modules_list(ind:)=''  ! remove trailing comment
     n_special_modules=parser(trim(special_modules_list),special_modules,' ')
     !Remove trailing newlines
     do i=1,n_special_modules
@@ -195,11 +196,13 @@
 !
 !  06-oct-03/tony: coded
 !
+      use Cdata, only: special_module_index
       real, dimension (mx,my,mz,mfarray) :: f
 !
       integer :: i
 !
       do i=1,n_special_modules
+         special_module_index=i
         call caller1(special_sub_handles(i,I_INITIALIZE_SPECIAL),f)
       enddo
 !
@@ -314,6 +317,8 @@
 !
 !  06-oct-03/tony: coded
 !
+      use Cdata, only: lspecial_substepped, lsubstepping_in_time
+
       real, dimension (mx,my,mz,mfarray) :: f
       real, dimension (mx,my,mz,mvar) :: df
       type (pencil_case) :: p
@@ -323,8 +328,13 @@
 !
       integer :: i
 !
-      call special_calc_3par(f,df,p,I_DSPECIAL_DT)
-
+!
+      do i=1,n_special_modules
+        if(lsubstepping_in_time .eqv. lspecial_substepped(i)) then
+          call caller3(special_sub_handles(i,I_DSPECIAL_DT),f,df,p)
+        endif
+      enddo
+!
     endsubroutine dspecial_dt
 !****************************************************************************
     subroutine register_particles_special(npvar)
@@ -697,7 +707,6 @@
 !
 !  27-nov-08/wlad: coded
 !
-      real, dimension(mx,my,mz,mfarray) :: f
       real, dimension(ndustspec) :: dsize,init_distr,init_distr2
       real :: Ntot
 !
@@ -735,11 +744,20 @@
 !***********************************************************************
     subroutine special_calc_spectra_byte(f,spec,spec_hel,lfirstcall,kind,len)
 
+      use General, only: keep_compiler_quiet
+
       real, dimension (mx,my,mz,mfarray) :: f
       real, dimension (:) :: spec,spec_hel
       logical :: lfirstcall
       integer :: len
       character, dimension(len) :: kind
+
+      call keep_compiler_quiet(f)
+      call keep_compiler_quiet(spec)
+      call keep_compiler_quiet(spec_hel)
+      call keep_compiler_quiet(lfirstcall)
+      call keep_compiler_quiet(kind)
+      call keep_compiler_quiet(len)
 
     endsubroutine special_calc_spectra_byte
 !*********************************************************************** 
@@ -832,12 +850,14 @@
 !***********************************************************************
     subroutine pushpars2c(p_par)
 
-      use Messages, only: not_implemented
+      use Messages, only: fatal_error 
+      use General, only: keep_compiler_quiet
 
       integer, parameter :: n_pars=0
       integer(KIND=ikind8), dimension(n_pars) :: p_par
 
-      call not_implemented('special_pushpars2c','')
+      call fatal_error('pushpars2c_special','This function should not be called!')
+      call keep_compiler_quiet(p_par)
 
     endsubroutine pushpars2c
 !*********************************************************************** 

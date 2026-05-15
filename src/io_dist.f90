@@ -2,7 +2,7 @@
 !
 !  Distributed IO (i.e. each process writes its own file data/procX)
 !
-!  The file format written by output_snap() (and used, e.g. in var.dat)
+!  The file format written by output_snap (and used, e.g. in var.dat)
 !  consists of the followinig Fortran records:
 !    1. data(mx,my,mz,nvar)
 !    2. t(1), x(mx), y(my), z(mz), dx(1), dy(1), dz(1), deltay(1)
@@ -123,7 +123,8 @@ module Io
       character (len=*), optional,intent(IN) :: file
 !
       real :: t_sp   ! t in single precision for backwards compatibility
-      integer :: na, ne, bytes, out_size, j, nc, ncomps
+      integer :: na, ne, bytes, j, nc, ncomps
+      integer(KIND=ikind8) :: out_size
       character (len=fnlen) :: file1, file2
       character (len=30) :: vname, vnm
       logical, save :: lcalled_ast=.false.
@@ -267,7 +268,7 @@ module Io
 !
     endsubroutine output_average_2D
 !***********************************************************************
-    subroutine output_slice_position()
+    subroutine output_slice_position
 !
 !  Record slice positions.
 !
@@ -275,7 +276,7 @@ module Io
 !
       use HDF5_IO, only: hdf5_output_slice_position
 !
-      call hdf5_output_slice_position()
+      call hdf5_output_slice_position
 !
     endsubroutine output_slice_position
 !***********************************************************************
@@ -338,7 +339,7 @@ module Io
 !
 !  Writes the log of removed particles to a file.
 !
-!  21-jan-24/ccyang: adapted from remove_particle() of particles_sub.f90.
+!  21-jan-24/ccyang: adapted from remove_particle of particles_sub.f90.
 !
       use Messages, only: not_implemented
 !
@@ -353,7 +354,7 @@ module Io
 !
 !  Write particle IDs.
 !
-      t_sp = t
+      t_sp = real(t)
       open(20, file=trim(directory_snap)//'/rmv_ipar.dat', position='append')
       ipar: do k = 1, nrmv
         if (ipar_sink(k) >= 0) then
@@ -395,7 +396,7 @@ module Io
       open (lun_output, file=trim(directory_dist)//'/particles_stalker.dat', form='unformatted', position='append')
 !
       ! write the time, number, and ID of stalked particles at this processor
-      t_sp = t
+      t_sp = real(t)
       write (lun_output) t_sp, nv
       if (nv >= 1) write (lun_output) ID
 
@@ -417,10 +418,10 @@ module Io
       integer, intent(in), optional :: nvar
       logical, intent(in), optional :: lfinalize
 !
-      character (len=fnlen) :: dataset
       real, dimension(:,:), allocatable, save :: stalk_data
       integer, save :: pos = 0
 !
+      call keep_compiler_quiet(label)
       if (loptest (lfinalize)) then
         ! deallocate temporary stalker particle space
         if (pos > 0) then
@@ -467,6 +468,7 @@ module Io
       character (len=*), dimension (nc), intent(in) :: labels
       real, dimension (mv,nc), intent(in) :: fq
 !
+      call keep_compiler_quiet(labels)
       if (.not. lroot) return
 !
       open(lun_output,FILE=trim(directory_snap)//'/'//trim(file),FORM='unformatted')
@@ -520,6 +522,7 @@ module Io
       character (len=*), intent(in) :: label
       integer, intent(in) :: id
 !
+      call keep_compiler_quiet(label)
 !write(20+iproc,*) 'write_persist_id, label, persist_initialized=',label,persist_initialized 
       write_persist_id = .true.
       if (.not. persist_initialized) write_persist_id = init_write_persist()
@@ -655,6 +658,7 @@ module Io
       integer, intent(in) :: id
       type(torus_rect), intent(in) :: value
 !
+      call keep_compiler_quiet(value%th)
       write_persist_torus_rect = .true.
       if (write_persist_id (label, id)) return
 !
@@ -663,13 +667,13 @@ module Io
 !
     endfunction write_persist_torus_rect
 !***********************************************************************
-    subroutine input_snap(file,a,nv,mode)
+    subroutine input_snap(file_,a,nv,mode)
 !
 !  manages reading of snapshot from different precision
 !
 !  24-oct-13/MR: coded
 !
-      character (len=*), intent(in) :: file
+      character (len=*), intent(in) :: file_
       integer, intent(in) :: nv, mode
       real, dimension (mx,my,mz,nv), intent(out) :: a
 
@@ -681,12 +685,15 @@ module Io
 
       real(KIND=rkind8) :: dxdb,dydb,dzdb,deltaydb
       real(KIND=rkind4) :: dxsg,dysg,dzsg,deltaysg
+      character (len=fnlen) :: file
+
+      file = gen_in_snapname(file_,'dat')
 
       if (lread_from_other_prec) then
         if (kind(a)==rkind4) then
           allocate(adb(mx,my,mz,nv),xdb(mx),ydb(my),zdb(mz))
           call read_snap(file,adb,xdb,ydb,zdb,dxdb,dydb,dzdb,deltaydb,nv,mode)
-          a=adb; x=xdb; y=ydb; z=zdb; dx=dxdb; dy=dydb; dz=dzdb; deltay=deltaydb
+          a=real(adb); x=real(xdb); y=real(ydb); z=real(zdb); dx=real(dxdb); dy=real(dydb); dz=real(dzdb); deltay=real(deltaydb)
         elseif (kind(a)==rkind8) then
           allocate(asg(mx,my,mz,nv),xsg(mx),ysg(my),zsg(mz))
           call read_snap(file,asg,xsg,ysg,zsg,dxsg,dysg,dzsg,deltaysg,nv,mode)
@@ -851,6 +858,7 @@ module Io
       character (len=*), intent(in) :: file
       character (len=*), optional, intent(in) :: label
 !
+      call keep_compiler_quiet(label)
       open (lun_input, FILE=trim(directory_dist)//'/'//file, FORM='unformatted',action='read')
       ! Read number of particles for this processor.
       read (lun_input) nv
@@ -889,6 +897,7 @@ module Io
 !
       integer :: mv_in
 !
+      call keep_compiler_quiet(labels)
       if (lroot) then
         if (ip<=8) print*, 'read pointmass snapshot', trim (file)
         open(lun_input,FILE=trim(directory_snap)//'/'//trim(file),FORM='unformatted')
@@ -940,6 +949,7 @@ module Io
 !
       character (len=*), intent(in) :: label
 !
+      call keep_compiler_quiet(label)
       persist_exists = .false.
 !
     endfunction persist_exists
@@ -988,6 +998,7 @@ module Io
       character (len=*), intent(in) :: label
       logical, intent(out) :: value
 !
+      call keep_compiler_quiet(label)
       read (lun_input) value
       read_persist_logical_0D = .false.
 !
@@ -1002,6 +1013,7 @@ module Io
       character (len=*), intent(in) :: label
       logical, dimension(:), intent(out) :: value
 !
+      call keep_compiler_quiet(label)
       read (lun_input) value
       read_persist_logical_1D = .false.
 !
@@ -1016,6 +1028,7 @@ module Io
       character (len=*), intent(in) :: label
       integer, intent(out) :: value
 !
+      call keep_compiler_quiet(label)
       read (lun_input) value
       read_persist_int_0D = .false.
 !
@@ -1030,6 +1043,7 @@ module Io
       character (len=*), intent(in) :: label
       integer, dimension(:), intent(out) :: value
 !
+      call keep_compiler_quiet(label)
       read (lun_input) value
       read_persist_int_1D = .false.
 !
@@ -1048,10 +1062,11 @@ module Io
       real(KIND=rkind8) :: vdb
       real(KIND=rkind4) :: vsg
 !
+      call keep_compiler_quiet(label)
       if (lread_from_other_prec) then
         if (kind(value)==rkind4) then
           read (lun_input) vdb
-          value=vdb
+          value=real(vdb)
         elseif (kind(value)==rkind8) then
           read (lun_input) vsg
           value=vsg
@@ -1077,11 +1092,12 @@ module Io
       real(KIND=rkind8), dimension(:), allocatable :: vdb
       real(KIND=rkind4), dimension(:), allocatable :: vsg
 !
+      call keep_compiler_quiet(label)
       if (lread_from_other_prec) then
         if (kind(value)==rkind4) then
           allocate(vdb(size(value)))
           read (lun_input) vdb
-          value=vdb
+          value=real(vdb)
         elseif (kind(value)==rkind8) then
           allocate(vsg(size(value)))
           read (lun_input) vsg
@@ -1107,6 +1123,7 @@ module Io
       type(torus_rect), intent(out) :: value
 !
       !read (lun_input) value
+      call keep_compiler_quiet(label)
       read_persist_torus_rect = .false.
 !
     endfunction read_persist_torus_rect
@@ -1124,6 +1141,7 @@ module Io
       character (len=*) :: file
       character (len=*), intent(in), optional :: label
 !
+      call keep_compiler_quiet(label)
       if (lserial_io) call start_serialize
       open(lun_output,FILE=trim(directory_snap)//'/'//file,FORM='unformatted',status='replace')
 !
@@ -1146,7 +1164,7 @@ module Io
 !
     endsubroutine output_globals
 !***********************************************************************
-    subroutine input_globals(file, a, nv)
+    subroutine input_globals(file_, a, nv)
 !
 !  Read globals snapshot file, ignoring mesh.
 !
@@ -1154,23 +1172,24 @@ module Io
 !
       use Mpicomm, only: start_serialize,end_serialize
 !
-      character (len=*) :: file
+      character (len=*) :: file_
       integer :: nv
       real, dimension (mx,my,mz,nv) :: a
 !
       real(KIND=rkind8), dimension(:,:,:,:), allocatable :: adb
       real(KIND=rkind4), dimension(:,:,:,:), allocatable :: asg
-
+      character (len=fnlen) :: file
 !
       if (lserial_io) call start_serialize
-!
-      open(lun_input,FILE=trim(directory_snap)//'/'//file,FORM='unformatted',status='old',action='read')
+
+      file = gen_in_snapname(file_,'dat')
+      open(lun_input,FILE=trim(directory_snap)//'/'//trim(file),FORM='unformatted',status='old',action='read')
 
       if (lread_from_other_prec) then
         if (kind(a)==rkind4) then
           allocate(adb(mx,my,mz,nv))
           call read_globals(adb)
-          a=adb
+          a=real(adb)
         elseif (kind(a)==rkind8) then
           allocate(asg(mx,my,mz,nv))
           call read_globals(asg)
@@ -1236,7 +1255,7 @@ module Io
 !***********************************************************************
     subroutine log_filename_to_file(file,flist)
 !
-!  In the directory containing `filename', append one line to file
+!  In the directory containing file `file', append one line to file
 !  `flist' containing the file part of filename
 !
       use General, only: parse_filename, safe_character_assign
@@ -1437,9 +1456,9 @@ module Io
             allocate(xdb(mx),ydb(my),zdb(mz),dx_1db(mx),dy_1db(my),dz_1db(mz),dx_tildedb(mx),dy_tildedb(my),dz_tildedb(mz))
             call input_grid(xdb,ydb,zdb,dxdb,dydb,dzdb,Lxdb,Lydb,Lzdb, &
                             dx_1db,dy_1db,dz_1db,dx_tildedb,dy_tildedb,dz_tildedb)
-            x=xdb; y=ydb; z=zdb; dx=dxdb; dy=dydb; dz=dzdb
-            Lx=Lxdb; Ly=Lydb; Lz=Lzdb; dx_1=dx_1db; dy_1=dy_1db; dz_1=dz_1db
-            dx_tilde=dx_tildedb; dy_tilde=dy_tildedb; dz_tilde=dz_tildedb
+            x=real(xdb); y=real(ydb); z=real(zdb); dx=real(dxdb); dy=real(dydb); dz=real(dzdb)
+            Lx=real(Lxdb); Ly=real(Lydb); Lz=real(Lzdb); dx_1=real(dx_1db); dy_1=real(dy_1db); dz_1=real(dz_1db)
+            dx_tilde=real(dx_tildedb); dy_tilde=real(dy_tildedb); dz_tilde=real(dz_tildedb)
           endif
         elseif (kind(x)==rkind8) then
           lotherprec = filesize/=8*datasize
@@ -1475,6 +1494,7 @@ module Io
 !  into array a. Uses dummy buffer omit of size (:,:,:,1:ivar_omit(2)-ivar_omit(1)+1).
 !
 !   31-mar-21/MR: coded
+!   17-Dec-2025/Kishore: fixed apparent indexing bug
 !
       integer, intent(IN) :: lun
       real(KIND=rkind8), dimension(:,:,:,:), intent(OUT) :: a, omit
@@ -1483,7 +1503,7 @@ module Io
       if (ivar_omit(1)==1) then
         read (lun,iostat=ios) omit,a
       elseif (ivar_omit(1)>1) then
-        read (lun,iostat=ios) a(:,:,:,:ivar_omit(1)-1),omit,a(:,:,:,ivar_omit(1):)
+        read (lun,iostat=ios) a(:,:,:,:ivar_omit(1)-1),omit,a(:,:,:,ivar_omit(2)+1:)
       else
         read (lun,iostat=ios) a
       endif
@@ -1496,6 +1516,7 @@ module Io
 !  into array a. Uses dummy buffer omit of size (:,:,:,1:ivar_omit(2)-ivar_omit(1)+1).
 !
 !   31-mar-21/MR: coded
+!   17-Dec-2025/Kishore: fixed apparent indexing bug
 !
       integer, intent(IN) :: lun
       real(KIND=rkind4), dimension(:,:,:,:), intent(OUT) :: a, omit
@@ -1504,7 +1525,7 @@ module Io
       if (ivar_omit(1)==1) then
         read (lun,iostat=ios) omit,a
       elseif (ivar_omit(1)>1) then
-        read (lun,iostat=ios) a(:,:,:,:ivar_omit(1)-1),omit,a(:,:,:,ivar_omit(1):)
+        read (lun,iostat=ios) a(:,:,:,:ivar_omit(1)-1),omit,a(:,:,:,ivar_omit(2)+1:)
       else
         read (lun,iostat=ios) a
       endif

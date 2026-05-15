@@ -48,7 +48,7 @@ module Pscalar
 !
 !  24-nov-02/tony: dummy
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
 !
       call keep_compiler_quiet(f)
 !
@@ -60,7 +60,7 @@ module Pscalar
 !
 !   6-jul-02/axel: dummy
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
 !
       call keep_compiler_quiet(f)
 !
@@ -94,7 +94,7 @@ module Pscalar
 !
 !  20-11-04/anders: coded
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       type (pencil_case) :: p
 !
       intent(in) :: f
@@ -124,8 +124,8 @@ module Pscalar
 !
 !   6-jul-02/axel: dummy
 !
-      real, dimension (mx,my,mz,mfarray) :: f
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous,dimension(:,:,:,:) :: f
+      real, contiguous,dimension(:,:,:,:) :: df
       type (pencil_case) :: p
 !
       intent(in)  :: f,df,p
@@ -183,7 +183,7 @@ module Pscalar
 !***********************************************************************
     subroutine get_slices_pscalar(f,slices)
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       type (slice_data) :: slices
 !
       call keep_compiler_quiet(f)
@@ -193,7 +193,7 @@ module Pscalar
 !***********************************************************************
     subroutine pscalar_before_boundary(f)
 
-      real, dimension (mx,my,mz,mfarray), intent(INOUT) :: f
+      real, contiguous,dimension(:,:,:,:), intent(INOUT) :: f
 
       call keep_compiler_quiet(f)
 
@@ -209,6 +209,8 @@ module Pscalar
 
     integer, parameter :: n_pars=0
     integer(KIND=ikind8), dimension(n_pars) :: p_par
+
+    call keep_compiler_quiet(p_par)
 
     endsubroutine pushpars2c
 !***********************************************************************

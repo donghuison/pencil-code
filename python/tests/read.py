@@ -104,6 +104,28 @@ def test_read_param() -> None:
     assert_equal(params.lentropy, True)
     assert_equal(params.ltemperature, False)
 
+    assert params['kx_uu'] == 1.0
+
+    with pytest.raises(AttributeError):
+        params.eos
+
+    with pytest.raises(AttributeError):
+        params.init
+    with pytest.raises(AttributeError):
+        params.run
+
+# @pytest.mark.xfail(reason="not implemented yet")
+def test_read_param_keepnested() -> None:
+    params = param(DATA_DIR, keep_nested=True)
+    assert params.eos.gamma == 1.666_666_6
+    assert params.hydro.kx_uu == 1.0
+
+    assert params['eos']['gamma'] == 1.666_666_6
+
+    with pytest.raises(AttributeError):
+        params.init
+    with pytest.raises(AttributeError):
+        params.run
 
 def test_read_var() -> None:
     """Read var.dat (data cube) file."""

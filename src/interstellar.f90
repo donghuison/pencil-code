@@ -121,12 +121,12 @@ module Interstellar
   integer, dimension(mOB) :: OB_index
   integer, parameter :: npreSN = 5
   integer, dimension(4,npreSN) :: preSN
+  real, dimension(nx) :: dr2_SN
 !
 !  Squared distance to the SNe site along the current pencil
 !  Outward normal vector from SNe site along the current pencil
 !
-  real, dimension(nx) :: dr2_SN, dr2_OB
-  !$omp threadprivate(dr2_SN, dr2_OB)
+  !$omp threadprivate(dr2_SN)
 !
 !  Allocate time of next SNI/II and intervals until next
 !
@@ -137,7 +137,6 @@ module Interstellar
   real :: zdisk, maxrho !varying location of centre of mass of the disk
   logical :: lfirst_zdisk
 !
-  logical :: lfirst_warning=.true.
 !
 !  normalisation factors for 1-d, 2-d, and 3-d profiles like exp(-r^6)
 !  ( 1d: 2    int_0^infty exp(-(r/a)^6)     dr) / a
@@ -156,23 +155,23 @@ module Interstellar
       cnorm_gaussian2_SN   = (/ 0.9064024770554771, 2.784163998415854, 3.849760110050832  /)
   real, parameter, dimension(3) :: &
       cnorm_SN             = (/ 0.9277193336300392, 2.805377873352155, 3.712218664554472  /)
-  real, parameter, dimension(3) :: &
-      cnorm_para_SN        = (/ fourthird,          1.570796326794897, 1.6755161          /)
-  real, parameter, dimension(3) :: &
-      cnorm_quar_SN        = (/  0.,                2.0943951,         0.                 /)
+  !real, parameter, dimension(3) :: &
+  !    cnorm_para_SN        = (/ fourthird,          1.570796326794897, 1.6755161          /)
+  !real, parameter, dimension(3) :: &
+  !    cnorm_quar_SN        = (/  0.,                2.0943951,         0.                 /)
 !  kinetic energy with lmass_SN=F
-  real, parameter, dimension(3) :: &
-      vnormEj_gaussian_SN  = (/ 0.5116633539732443, 1.047197551196598, 1.0716252226356386 /)
-!  kinetic energy addition lmass_SN=T
+  !real, parameter, dimension(3) :: &
+  !    vnormEj_gaussian_SN  = (/ 0.5116633539732443, 1.047197551196598, 1.0716252226356386 /)
+! ! kinetic energy addition lmass_SN=T
   real, parameter, dimension(3) :: &
       vnorm_gaussian_SN    = (/ 0.6266570686577501, 1.570796326794897, 1.9687012432153024 /)
-  real, parameter, dimension(3) :: &
-      vnormEj_gaussian2_SN = (/ 0.6887169476297503, 1.607437833953458, 1.6888564123130090 /)
+  !real, parameter, dimension(3) :: &
+  !    vnormEj_gaussian2_SN = (/ 0.6887169476297503, 1.607437833953458, 1.6888564123130090 /)
 !  kinetic energy addition lmass_SN=T
   real, parameter, dimension(3) :: &
       vnorm_gaussian2_SN   = (/ 0.7621905937330379, 1.968701243215302, 2.2890810569630537 /)
-  real, parameter, dimension(3) :: &
-      vnormEj_SN           = (/ 0.7724962826996008, 1.945140377302524, 2.1432504452712773 /)
+  !real, parameter, dimension(3) :: &
+  !    vnormEj_SN           = (/ 0.7724962826996008, 1.945140377302524, 2.1432504452712773 /)
 !  kinetic energy addition lmass_SN=T
   real, parameter, dimension(3) :: &
       vnorm_SN             = (/ 0.8265039651250117, 2.226629893663761, 2.624934990953737  /)
@@ -531,7 +530,7 @@ module Interstellar
       use EquationOfState, only: getmu, get_gamma_etc
       use General, only: random_seed_wrapper
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       integer :: i, int1_list, stat
       integer, dimension(4) :: int4_list
       real, dimension(13) :: real13_list
@@ -595,7 +594,7 @@ module Interstellar
 !
         if (ampl_SN==impossible) ampl_SN=ampl_SN_cgs / unit_energy
 !  dimensional norm for Sedov-Taylor relations
-        sedov_norm=unit_density/1e-24*ampl_SN_cgs/unit_energy
+        sedov_norm=unit_density/1e-24 * (ampl_SN_cgs/unit_energy)
 !  parameters for energy losses prior to SN initialisation
 !  ref Kim & Ostriker 2015 Eq 7 dimensional norm shell formation time
 !  ref Simpson et al. 2015 Eq 17
@@ -1406,6 +1405,8 @@ module Interstellar
       integer :: iname,inamez
       logical :: lreset
       logical, intent(in), optional :: lwrite
+
+      call keep_compiler_quiet(lwrite)
 !
 !  Reset everything in case of reset
 !  (This needs to be consistent with what is defined above!)
@@ -1451,7 +1452,7 @@ module Interstellar
 !
       use Slices_methods, only: assign_slices_scal
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       type (slice_data) :: slices
 !
 !  Loop over slices
@@ -1510,7 +1511,7 @@ module Interstellar
 !
       use General, only: itoa, random_seed_wrapper
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
 !
       logical :: lnothing=.true.
       character (len=intlen) :: iinit_str
@@ -1715,10 +1716,12 @@ module Interstellar
 !
       use Messages, only: fatal_error
 !
-      real, dimension(mx,my,mz,mfarray), intent(IN)   :: f
+      real, contiguous,dimension(:,:,:,:), intent(IN)   :: f
       type(pencil_case),                 intent(INOUT):: p
 !
       integer :: i
+
+      call keep_compiler_quiet(f)
 !
 !  Not all eos define cv1, and this routine is called after
 !  calc_all_pencils, so p%cv1 cannot be modified here
@@ -1764,7 +1767,7 @@ module Interstellar
 !
 !  01-aug-06/tony: coded
 !
-      real, dimension (mx,my,mz,mfarray), intent(inout) :: f
+      real, contiguous,dimension(:,:,:,:), intent(inout) :: f
 !
       call keep_compiler_quiet(f)
 !
@@ -1779,8 +1782,8 @@ module Interstellar
 !
       use Gpu, only: update_on_gpu
 
-      real, dimension (mx,my,mz,mfarray), intent(inout) :: f
-      integer, save :: ind_scale=-1
+      real, contiguous,dimension(:,:,:,:), intent(inout) :: f
+      !integer, save :: ind_scale=-1
 !
       if (lfirst) then
         if (.not.lpencil_check_at_work) call check_SN(f)
@@ -1872,7 +1875,7 @@ module Interstellar
 !  13-jul-15/fred: requires initial_condition/hs_equilibrium_ism.f90
 !  17-jun-25/fred: recommend instead initial_condition/ths_equilibrium_ism.f90
 !
-      real, dimension (mx,my,mz,mfarray), intent(inout) :: f
+      real, contiguous,dimension(:,:,:,:), intent(inout) :: f
       real, dimension(mz), intent(out) :: zheat
 !
       real, dimension(mz) :: lambda=0.0, lnTT, zrho
@@ -1946,8 +1949,8 @@ module Interstellar
 !
 !      use Messages, only: fatal_error
 !
-      real, dimension (mx,my,mz,mfarray), intent(inout) :: f
-      real, dimension (mx,my,mz,mvar), intent(inout) :: df
+      real, contiguous,dimension(:,:,:,:), intent(inout) :: f
+      real, contiguous,dimension(:,:,:,:), intent(inout) :: df
       type (pencil_case), intent(in) :: p
       real, dimension (nx), intent(inout) :: Hmax
 !
@@ -2134,7 +2137,7 @@ module Interstellar
       use General, only: touch_file
       use Gpu, only: load_farray_to_GPU
 !
-      real, dimension(mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
 !
 !  Only allow SNII if no SNI this step (may not be worth keeping).
 !  This is depricated, both types can occur in same step
@@ -2213,7 +2216,7 @@ module Interstellar
 !
 !  If time for next SNI, then implement, and calculate time of subsequent SNI.
 !
-      real, dimension(mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       logical :: l_SNI
       integer :: try_count, iSNR, ierr
 !
@@ -2321,7 +2324,7 @@ module Interstellar
 !
 !  If time for next SNI, then implement, and calculate time of subsequent SNI.
 !
-      real, dimension(mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       integer :: try_count, iSNR, ierr
       logical :: l_SNI
 !
@@ -2462,7 +2465,7 @@ module Interstellar
       use Mpicomm, only: mpiallreduce_sum
       use Grid, only: get_dVol
 !
-      real, dimension(mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       real :: franSN, rhom, scaled_interval, tmp_interval
 !
       intent(in) :: f
@@ -2553,7 +2556,7 @@ module Interstellar
       use Grid, only: get_dVol
       use Mpicomm, only: mpiallreduce_sum
 !
-      real, dimension(mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       real :: t_interval
       integer :: SNind
 !
@@ -2640,7 +2643,7 @@ module Interstellar
       use Grid, only: get_dVol
       use Mpicomm, only: mpiallreduce_sum, mpibcast_real
 !
-      real, dimension(mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       real, dimension(nx) :: rho, lnTT, dV
       real :: cloud_mass, cloud_mass_dim, freq_SNII, prob_SNII
       real :: franSN, fmpi1
@@ -2804,7 +2807,7 @@ module Interstellar
 !
       use General, only: find_proc
 
-      real, intent(inout), dimension(mx,my,mz,mfarray) :: f
+      real, intent(inout), contiguous,dimension(:,:,:,:) :: f
       type (SNRemnant), intent(inout) :: SNR
 !
       real :: z00, x00, y00
@@ -2866,7 +2869,7 @@ module Interstellar
 !
       real, dimension(nx) :: dV
 !
-      real, intent(inout), dimension(mx,my,mz,mfarray) :: f
+      real, intent(inout), contiguous,dimension(:,:,:,:) :: f
       real, intent(in) :: h_SN
       type (SNRemnant), intent(inout) :: SNR
 !
@@ -3088,7 +3091,7 @@ Get_z:if (lroot) then
 !
       use General, only: random_seed_wrapper, random_number_wrapper, find_proc
 !
-      real, intent(inout), dimension(mx,my,mz,mfarray) :: f
+      real, intent(inout), contiguous,dimension(:,:,:,:) :: f
       type (SNRemnant), intent(inout) :: SNR
 !
       real, dimension(3) :: fran3
@@ -3145,7 +3148,7 @@ Get_z:if (lroot) then
       use Grid, only: get_dVol
       !$ use omp_lib
 !
-      real, intent(inout), dimension(mx,my,mz,mfarray) :: f
+      real, intent(inout), contiguous,dimension(:,:,:,:) :: f
       real, intent(in) , dimension(ncpus) :: cloud_mass_byproc
       type (SNRemnant), intent(inout) :: SNR
       integer, intent(in), dimension(4,npreSN)::preSN
@@ -3156,7 +3159,7 @@ Get_z:if (lroot) then
       real :: franSN, cloud_mass,cum_mass,cloud_mass_proc
       real, dimension(nx) :: dV,rho,lnTT
       integer :: icpu,l,m,n, ipsn
-      logical :: lfound
+!$    logical :: lfound
 !
 !  identifier
 !
@@ -3215,7 +3218,7 @@ Get_z:if (lroot) then
         !!$omp target if(loffload) !map(from: ierr,cum_mass) map(tofrom: SNR) & !needs: cloud_rho,lncloud_TT,preSN) &
         !!$omp        has_device_addr(f)  !globals: ip, irho,ilnrho,ilnTT,iss,ldensity_nolog
         !TP: this is not safe to multithread naively
-        !TP: if one want so multithread this then multithread the scan operation to calculate the CDF and after that pick the random
+        !    if one want so multithread this then multithread the scan operation to calculate the CDF and after that pick the random
         !number
         !!$omp  parallel do collapse(2) num_threads(num_helper_threads) private(dV,rho,lnTT,l,ipsn) &
         !!$omp reduction(+:cum_mass) firstprivate(lfound) !!!reduction unclear
@@ -3308,10 +3311,9 @@ mn_loop:do n=n1,n2
       use Gpu, only: copy_farray_from_GPU
       use Mpicomm, only: mpibcast_int, mpibcast_real
 !
-      real, intent(inout), dimension(mx,my,mz,mfarray) :: f
+      real, intent(inout), contiguous,dimension(:,:,:,:) :: f
       type (SNRemnant), intent(inout) :: SNR
 !
-      real, dimension(nx) :: lnTT
       real, dimension(7) :: fmpi7
       integer, dimension(4) :: impi4
       real :: sndx, sndy, sndz
@@ -3432,7 +3434,7 @@ mn_loop:do n=n1,n2
       use Gpu, only: copy_farray_from_GPU
       use Grid, only: get_dVol
 !
-      real, intent(inout), dimension(mx,my,mz,mfarray) :: f
+      real, intent(inout), contiguous,dimension(:,:,:,:) :: f
       type (SNRemnant), intent(inout) :: SNR
       integer, intent(inout), optional, dimension(4,npreSN) :: preSN
       integer, intent(inout), optional :: ierr
@@ -3452,7 +3454,7 @@ mn_loop:do n=n1,n2
       real :: maxlnTT, site_mass, maxTT, mmpi, etmp, ktmp, max_cmass, cum_mm, cum_ee, cum_cr
       real :: t_interval_SN, SNrate, frackin, RPDS, SN_TT_ratio_max
       integer :: i, mpiierr, ind_maxTT, m, n
-      logical :: lfound
+!$    logical :: lfound
 !
       SNR%indx%state=SNstate_exploding
       c_SN=0.;cmass_SN=0.;cvelocity_SN=0.;ecr_SN=0.;cmass_tmp=0.
@@ -3678,7 +3680,7 @@ mn_loop:do n=n1,n2
       SN_TT_ratio_max = SN_TT_ratio*TT_SN_max
       !$ lfound = .false.
       !TP: this is not safe to multithread naively
-      !TP: if one want so multithread this then multithread the scan operation to calculate the CDF and after that pick the random
+      !    if one want so multithread this then multithread the scan operation to calculate the CDF and after that pick the random
       !!$omp target if(loffload) !map(tofrom: SNR) has_device_addr(f)  ! needs:
       !irho,ilnrho,iss,ilnTT,frac_eth,dr2_SN,rfactor_SN,TT_SN_max, switches FG radius2mass, c_SN, width_energy, width_mass,&
       !irho_lnTT, irho_ss, irho_ee, SN_TT_ratio_max
@@ -4107,7 +4109,7 @@ mn_loop:do n=n1,n2
       use Mpicomm, only: mpiallreduce_sum,mpiallreduce_min,mpiallreduce_max
       use Grid, only: get_dVol
 !
-      real, intent(in), dimension(mx,my,mz,mfarray) :: f
+      real, intent(in), contiguous,dimension(:,:,:,:) :: f
       type (SNRemnant), intent(in) :: remnant
       real, intent(out) :: rhom, ekintot, rhomin
       integer, optional :: ierr
@@ -4215,7 +4217,7 @@ mn_loop:do n=n1,n2
       use Mpicomm, only: mpiallreduce_sum
       use Grid, only: get_dVol
 !
-      real, intent(in), dimension(mx,my,mz,mfarray) :: f
+      real, intent(in), contiguous,dimension(:,:,:,:) :: f
       type (SNRemnant), intent(in) :: remnant
       real, intent(in) :: cvelocity_SN, cmass_SN
       real, intent(out) :: ekintot, rhom
@@ -4300,94 +4302,96 @@ mn_loop:do n=n1,n2
 !
     endsubroutine get_props_check
 !*****************************************************************************
-    subroutine get_lowest_rho(f,SNR,radius,rho_lowest)   !needs dr2_SN
-!
-!  Calculate integral of mass cavity profile.
-!
-!  22-may-03/tony: coded
-!
-      use Mpicomm, only: mpiallreduce_max
-!
-      real, intent(in), dimension(mx,my,mz,mfarray) :: f
-      type (SNRemnant), intent(inout) :: SNR
-      real, intent(in) :: radius
-      real, intent(out) :: rho_lowest
-      real :: tmp
-      real :: radius2
-      real, dimension(nx) :: rho
-!
-!  Find lowest rho value in the surronding cavity.
-!
-      rho_lowest=1E10
-      radius2 = energy_Nsigma2*radius**2
-      do n=n1,n2
-      do m=m1,m2
-        call proximity_SN(m,n,SNR)
-        if (ldensity_nolog) then
-          rho=f(l1:l2,m,n,irho)
-        else
-          rho=exp(f(l1:l2,m,n,ilnrho))
-        endif
-        rho_lowest=min(rho_lowest,minval(rho,mask=(dr2_SN <= radius2)))
-      enddo
-      enddo
-!
-      tmp=rho_lowest
-      call mpiallreduce_max(tmp,rho_lowest)
-!
-    endsubroutine get_lowest_rho
+!    on comment since not used (to suppress compiler warnings)
+!    subroutine get_lowest_rho(f,SNR,radius,rho_lowest)   !needs dr2_SN
+!!
+!!  Calculate integral of mass cavity profile.
+!!
+!!  22-may-03/tony: coded
+!!
+!      use Mpicomm, only: mpiallreduce_max
+!!
+!      real, intent(in), contiguous,dimension(:,:,:,:) :: f
+!      type (SNRemnant), intent(inout) :: SNR
+!      real, intent(in) :: radius
+!      real, intent(out) :: rho_lowest
+!      real :: tmp
+!      real :: radius2
+!      real, dimension(nx) :: rho
+!!
+!!  Find lowest rho value in the surronding cavity.
+!!
+!      rho_lowest=1E10
+!      radius2 = energy_Nsigma2*radius**2
+!      do n=n1,n2
+!      do m=m1,m2
+!        call proximity_SN(m,n,SNR)
+!        if (ldensity_nolog) then
+!          rho=f(l1:l2,m,n,irho)
+!        else
+!          rho=exp(f(l1:l2,m,n,ilnrho))
+!        endif
+!        rho_lowest=min(rho_lowest,minval(rho,mask=(dr2_SN <= radius2)))
+!      enddo
+!      enddo
+!!
+!      tmp=rho_lowest
+!      call mpiallreduce_max(tmp,rho_lowest)
+!!
+!    endsubroutine get_lowest_rho
 !*****************************************************************************
-    subroutine proximity_OB(OB,outward_normal)    ! make pars: m,n, dr2_SN
-!!$omp declare target device_type(host)   ! needs: x,y,z, L[xyz], lperi; gives: dr2_OB
-!
-!  Calculate pencil of distance to OB cluster origin.
-!
-!  06-aug-19/fred: cloned from proximity_SN
-!
-      type (SNCluster),      intent(inout) :: OB
-      real, dimension(nx,3), intent(out), optional :: outward_normal
-!
-      real,dimension(nx) :: dx_OB, dr_OB
-      real :: dy_OB
-      real :: dz_OB
-!
-!  Obtain distance to OB cluster origin
-!
-      dx_OB=x(l1:l2)-OB%feat%x
-      if (lperi(1)) then
-        where (dx_OB >  Lx/2) dx_OB=dx_OB-Lx
-        where (dx_OB < -Lx/2) dx_OB=dx_OB+Lx
-      endif
-!
-      dy_OB=y(m)-OB%feat%y
-      if (lperi(2)) then
-        if (dy_OB >  Ly/2) dy_OB=dy_OB-Ly
-        if (dy_OB < -Ly/2) dy_OB=dy_OB+Ly
-      endif
-!
-      dz_OB=z(n)-OB%feat%z
-      if (lperi(3)) then
-        if (dz_OB >  Lz/2) dz_OB=dz_OB-Lz
-        if (dz_OB < -Lz/2) dz_OB=dz_OB+Lz
-      endif
-!
-      dr2_OB=dx_OB**2 + dy_OB**2 + dz_OB**2
-!
-      if (present(outward_normal)) then
-        dr_OB=sqrt(dr2_OB)
-        dr_OB=max(dr_OB,tiny(0.0))
-!
-!  Avoid dr_SN = 0 above to avoid div by zero below.
-!
-        outward_normal(:,1)=dx_OB/dr_OB
-        where (dr2_OB < tini) outward_normal(:,1)=0.0
-        outward_normal(:,2)=dy_OB/dr_OB
-        where (dr2_OB < tini) outward_normal(:,2)=0.0
-        outward_normal(:,3)=dz_OB/dr_OB
-        where (dr2_OB < tini) outward_normal(:,3)=0.0
-      endif
-!
-    endsubroutine proximity_OB
+!    On comment since not used (to suppress compiler warnings)
+!    subroutine proximity_OB(OB,outward_normal)    ! make pars: m,n, dr2_SN
+!!!$omp declare target device_type(host)   ! needs: x,y,z, L[xyz], lperi; gives: dr2_OB
+!!
+!!  Calculate pencil of distance to OB cluster origin.
+!!
+!!  06-aug-19/fred: cloned from proximity_SN
+!!
+!      type (SNCluster),      intent(inout) :: OB
+!      real, dimension(nx,3), intent(out), optional :: outward_normal
+!!
+!      real,dimension(nx) :: dx_OB, dr_OB
+!      real :: dy_OB
+!      real :: dz_OB
+!!
+!!  Obtain distance to OB cluster origin
+!!
+!      dx_OB=x(l1:l2)-OB%feat%x
+!      if (lperi(1)) then
+!        where (dx_OB >  Lx/2) dx_OB=dx_OB-Lx
+!        where (dx_OB < -Lx/2) dx_OB=dx_OB+Lx
+!      endif
+!!
+!      dy_OB=y(m)-OB%feat%y
+!      if (lperi(2)) then
+!        if (dy_OB >  Ly/2) dy_OB=dy_OB-Ly
+!        if (dy_OB < -Ly/2) dy_OB=dy_OB+Ly
+!      endif
+!!
+!      dz_OB=z(n)-OB%feat%z
+!      if (lperi(3)) then
+!        if (dz_OB >  Lz/2) dz_OB=dz_OB-Lz
+!        if (dz_OB < -Lz/2) dz_OB=dz_OB+Lz
+!      endif
+!!
+!      dr2_OB=dx_OB**2 + dy_OB**2 + dz_OB**2
+!!
+!      if (present(outward_normal)) then
+!        dr_OB=sqrt(dr2_OB)
+!        dr_OB=max(dr_OB,tiny(0.0))
+!!
+!!  Avoid dr_SN = 0 above to avoid div by zero below.
+!!
+!        outward_normal(:,1)=dx_OB/dr_OB
+!        where (dr2_OB < tini) outward_normal(:,1)=0.0
+!        outward_normal(:,2)=dy_OB/dr_OB
+!        where (dr2_OB < tini) outward_normal(:,2)=0.0
+!        outward_normal(:,3)=dz_OB/dr_OB
+!        where (dr2_OB < tini) outward_normal(:,3)=0.0
+!      endif
+!!
+!    endsubroutine proximity_OB
 !*****************************************************************************
     subroutine proximity_SN(m,n,SNR,outward_normal)    ! make pars: dr2_SN
 !!$omp declare target device_type(host)    ! needs: x,y,z, L[xyz], deltay
@@ -4751,33 +4755,35 @@ mn_loop:do n=n1,n2
 !
     endfunction get_free_OB
 !*****************************************************************************
-    subroutine free_OB(iOB)
-!
-      integer :: i,iOB
-!
-      if (OBs(iOB)%indx%state==OBstate_invalid) then
-        if (lroot) print*,"Tried to free an already invalid OB"
-        return
-      endif
-!
-      nOB=nOB-1
-      OBs(iOB)%indx%state=OBstate_invalid
-!
-      do i=iOB,nOB
-        OB_index(i)=OB_index(i+1)
-      enddo
-!
-    endsubroutine free_OB
+!    On comment since not used (to suppress compiler warnings)
+!    subroutine free_OB(iOB)
+!!
+!      integer :: i,iOB
+!!
+!      if (OBs(iOB)%indx%state==OBstate_invalid) then
+!        if (lroot) print*,"Tried to free an already invalid OB"
+!        return
+!      endif
+!!
+!      nOB=nOB-1
+!      OBs(iOB)%indx%state=OBstate_invalid
+!!
+!      do i=iOB,nOB
+!        OB_index(i)=OB_index(i+1)
+!      enddo
+!!
+!    endsubroutine free_OB
 !*****************************************************************************
-    subroutine tidy_OBs
-!
-      integer :: i
-!
-      do i=1,mOB
-        if (OBs(i)%indx%state==OBstate_finished) call free_OB(i)
-      enddo
-!
-    endsubroutine tidy_OBs
+!    On comment since not used (to suppress compiler warnings)
+!    subroutine tidy_OBs
+!!
+!      integer :: i
+!!
+!      do i=1,mOB
+!        if (OBs(i)%indx%state==OBstate_finished) call free_OB(i)
+!      enddo
+!!
+!    endsubroutine tidy_OBs
 !***********************************************************************
     subroutine set_next_OB(t_interval_OB)
 !
@@ -4848,6 +4854,10 @@ mn_loop:do n=n1,n2
       call copy_addr(lsni,p_par(27)) ! bool
       call copy_addr(lsnii,p_par(28)) ! bool
       call copy_addr(t_interval,p_par(29)) ! (2)
+
+      call keep_compiler_quiet(outer_shell_proportion)
+      call keep_compiler_quiet(inner_shell_proportion)
+      call keep_compiler_quiet(kpara)
 
     endsubroutine pushpars2c
 !*******************************************************************

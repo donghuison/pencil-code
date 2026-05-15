@@ -89,6 +89,7 @@ module Special
   implicit none
 !
   include '../special.h'
+  include '../record_types.h'
 !
 ! Declare index of new variables in f array (if any).
 !
@@ -101,7 +102,7 @@ module Special
   real :: amplGW=0., amplGW2=0., amplGWX=0., kpeak_GW=1., initpower_gw=0., initpower2_gw=-4., cutoff_GW=500.
   real :: trace_factor=0., stress_prefactor, fourthird_factor, EGWpref
   real :: nscale_factor_conformal=1., tshift=0., om2_min_factor=1e-4 !(=keep this for now, but in future, we want to put it to 0. exactly)
-  real :: t_equality=3.789E11, t_acceleration=1.9215E13, t_0=1.3725E13
+  real :: t_equality=3.789E11, t_acceleration=1.9215E13 !, t_0=1.3725E13
   real :: k1hel=0., k2hel=1., kgaussian_GW=0., ncutoff_GW=2., relhel_GW=0.
   real, pointer :: ddotam
   logical, pointer :: lconservative, lwaterfall, lflrw
@@ -112,7 +113,8 @@ module Special
   logical :: lmagstress=.true., lelectmag=.false., lscalar=.false., lscalar_phi=.false.
   logical :: luse_mag, lggTX_as_aux=.true., lhhTX_as_aux=.true.
   logical :: lremove_mean_hij=.false., lremove_mean_gij=.false.
-  logical :: GWs_spec_complex=.true. !(fixed for now)
+  !Not used at the moment
+  !logical :: GWs_spec_complex=.true. !(fixed for now)
   logical :: lreal_space_hTX_as_aux=.false., lreal_space_gTX_as_aux=.false., lreal_space_hij_as_aux=.false.
   logical :: linflation=.false., lreheating_GW=.false., lmatter_GW=.false., ldark_energy_GW=.false.
   logical :: lonly_mag=.false.!, lread_scl_factor_file=.false.
@@ -126,7 +128,7 @@ module Special
   logical :: lnot_amp_GW=.true., lrandom_ampl_GW=.false.
   logical :: llogbranch_GW=.false., ldouble_GW=.false., lLighthill=.false.
   logical :: lrandomize_e1_e2=.false.
-  real, dimension(3,3) :: ij_table
+  integer, dimension(3,3) :: ij_table
   real :: c_light2=1., delk=0., tdelk=0., tau_delk=1.
   real :: tstress_ramp=0., stress_upscale_rate=0., stress_upscale_exp=0., tturnoff=1.
   real :: rescale_GW=1., vx_boost=0., vy_boost=0., vz_boost=0.
@@ -134,7 +136,7 @@ module Special
   real :: horndeski_alpM_eff, horndeski_alpM_eff2, horndeski_alpM_eff3
   real :: horndeski_alpT_eff
   real :: scale_factor0=1., horndeski_alpT_exp=0., horndeski_alpM_exp=0.
-  real :: scale_factor, slope_linphase_in_stress, OmL0=0.6841, OmM0=0.3158, nfact_GW=0., nfact_GWs=4., nfact_GWh=4.
+  real :: scale_factor, slope_linphase_in_stress=0., OmL0=0.6841, OmM0=0.3158, nfact_GW=0., nfact_GWs=4., nfact_GWh=4.
   real :: initpower_med_GW=1., kpeak_log_GW=1., kbreak_GW=0.5, nfactd_GW=4.
 ! alberto: t_ini corresponds to the conformal time computed using a_0 = 1 at T_* = 100 GeV, g_S = 103 (EWPT)
   real :: t_ini=60549
@@ -156,7 +158,13 @@ module Special
   real :: nonlinear_source_fact=0., k_in_stress=1.
   integer :: itorder_GW=1, idt_file_safety=12
   integer :: boost_method=2
-  logical :: lsplit_GW_rhs_from_rest_on_gpu=.false.
+  logical :: lsplit_GW_rhs_from_rest_on_gpu=.true.
+  integer :: ntimesteps_per_GW_step=1
+  logical :: lsingle_precision_ffts_for_gw_update=.false.
+!
+! Accumulated dt for gravitational wave update.
+!
+      real :: dt_GW=0.0
 !
 ! input parameters
 !
@@ -197,7 +205,8 @@ module Special
     lnophase_in_stress, llinphase_in_stress, slope_linphase_in_stress, &
     lread_scl_factor_file, t_ini, OmL0, OmM0, idt_file_safety, &
     lconstmod_in_stress, k_in_stress, itorder_GW, lLighthill, &
-    lsplit_GW_rhs_from_rest_on_gpu, &
+    lsplit_GW_rhs_from_rest_on_gpu, ntimesteps_per_GW_step, &
+    lsingle_precision_ffts_for_gw_update, &
     lread_pulsar !, nbin_angular
 !
 ! Diagnostic variables (needs to be consistent with reset list below).
@@ -264,8 +273,8 @@ module Special
   integer :: iggT_realspace, iggX_realspace
   integer :: ih11_realspace, ih22_realspace, ih33_realspace
   integer :: ih12_realspace, ih23_realspace, ih31_realspace
-  integer :: ihhT_realspace_boost, ihhX_realspace_boost
-  integer :: iggT_realspace_boost, iggX_realspace_boost
+  !integer :: ihhT_realspace_boost, ihhX_realspace_boost
+  !integer :: iggT_realspace_boost, iggX_realspace_boost
   integer, parameter :: nk=nxgrid/2
   type, public :: GWspectra
     real, dimension(nk) :: GWs   ,GWh   ,GWm   ,Str   ,Stg
@@ -374,7 +383,7 @@ module Special
 !
 !  06-oct-03/tony: coded
 !
-      use EquationOfState, only: cs0
+      !use EquationOfState, only: cs0
       use SharedVariables, only: get_shared_variable
 !
       real, dimension (mx,my,mz,mfarray) :: f
@@ -383,7 +392,7 @@ module Special
       real :: lgt1, lgt2, lgf1, lgf2, lgf, lgt_current
 
       integer :: it_file
-      integer :: stat, i
+      integer :: stat
 !
 !  set index table, count off-diagonal components cyclicly
 !
@@ -634,12 +643,13 @@ module Special
 !  Read pulsar data.
 !
       if (lread_pulsar) call read_pulsar_data
-!
-!  Keep compiler quiet.
-!
-      call keep_compiler_quiet(f)
-!
-        appa_om_init = appa_om
+
+      appa_om_init = appa_om
+
+!It has to be persistent in this case to avoid restarts
+!from messing updates across multiple timesteps
+      if (ntimesteps_per_GW_step > 1) lpersistent_it = .true.
+
     endsubroutine initialize_special
 !***********************************************************************
     subroutine read_pulsar_data
@@ -962,8 +972,7 @@ module Special
       use Sub, only: dot2_mn
 !
       real, dimension (mx,my,mz,mfarray) :: f
-      real, dimension (nx) :: prefactor, EEE2
-      real, dimension (nx,3) :: EEEE
+      real, dimension(nx) :: prefactor
       type (pencil_case) :: p
 !
       intent(in) :: f
@@ -1063,7 +1072,7 @@ module Special
 !
     endsubroutine calc_pencils_special
 !***********************************************************************
-    subroutine    compute_scl_factor
+    subroutine compute_scl_factor
 !
 !   25-jun-2025/TP: carved from dspecial_dt
 ! 
@@ -1083,6 +1092,7 @@ module Special
           scale_factor=(t+tshift)**nscale_factor_conformal
         endif
       endif
+
     endsubroutine compute_scl_factor
 !***********************************************************************
     subroutine read_Hp_and_appa_target
@@ -1117,11 +1127,11 @@ module Special
       lgf=lgf1+(lgt_current-lgt1)*(lgf2-lgf1)/(lgt2-lgt1)
       appa_target=10**lgf/Hp_ini**2
 
-      if(lgpu .and. Hp_old /= Hp_target) then
+      if (lgpu .and. Hp_old /= Hp_target) then
         call update_on_gpu(Hp_index_on_gpu,'AC_hp_target__mod__cdata',Hp_target)
       endif
 
-      if(lgpu .and. appa_old /= appa_target) then
+      if (lgpu .and. appa_old /= appa_target) then
         call update_on_gpu(appa_index_on_gpu,'AC_appa_target__mod__cdata',appa_target)
       endif
 
@@ -1175,7 +1185,7 @@ module Special
 !
       real, dimension (mx,my,mz,mfarray) :: f
       real, dimension (mx,my,mz,mvar) :: df
-      real :: stress_prefactor2, sign_switch=0, fac_stress_comp
+      real :: stress_prefactor2, fac_stress_comp
       type (pencil_case) :: p
 !
       integer :: ij
@@ -1187,6 +1197,7 @@ module Special
 !
       if (lfirst) then
         if (headtt.or.ldebug) print*,'dspecial_dt: SOLVE dspecial_dt'
+      call keep_compiler_quiet(df)
 !
 !  Compute scale factor.
 !  Note: to prevent division by zero, it is best to put tstart=1. in start.in.
@@ -1251,6 +1262,7 @@ module Special
       real :: sign_switch=0
       real, dimension(nx) :: ggT,ggTim,ggX,ggXim
 
+      call keep_compiler_quiet(p)
       if (lggTX_as_aux) then
 
         ggT   = f(l1:l2,m,n,iggT)
@@ -1348,9 +1360,12 @@ module Special
 !
 !  13-may-18/axel: added remove_mean_value for hij and gij
 !
-      use Sub, only: remove_mean
+      !use Sub, only: remove_mean
 !
       real, dimension (mx,my,mz,mfarray), intent(inout) :: f
+      call keep_compiler_quiet(f)
+      call keep_compiler_quiet(lremove_mean_hij)
+      call keep_compiler_quiet(lremove_mean_gij)
 !
     endsubroutine special_before_boundary
 !***********************************************************************
@@ -1362,6 +1377,8 @@ module Special
 !  07-aug-17/axel: coded
 
       real, dimension (mx,my,mz,mfarray), intent(inout) :: f
+
+      call keep_compiler_quiet(f)
 !
     endsubroutine special_after_boundary
 !***********************************************************************
@@ -1379,12 +1396,53 @@ module Special
 !
 !  Compute the transverse part of the stress tensor by going into Fourier space.
 !
-      if (lfirst) call compute_gT_and_gX_from_gij(f,'St')
+
+      call keep_compiler_quiet(llast)
+      if (lfirst) then
+        dt_GW = dt_GW + dt
+        if (mod(it+1,ntimesteps_per_GW_step) == 0) then
+          call compute_gT_and_gX_from_gij(f,'St',dt_GW)
+          dt_GW = 0.0
+        endif
+      endif
 !
       call keep_compiler_quiet(df)
       call keep_compiler_quiet(dt_)
 !
     endsubroutine special_after_timestep
+!***********************************************************************
+    subroutine input_persist_special_id(id,done)
+!
+!  Read the accumulated dt for GW update
+!
+!  13-Apr-2026/TP: coded
+!
+
+!
+      use IO, only: read_persist
+!
+      integer :: id
+      logical :: done
+!
+      select case (id)
+        case (id_record_DT_GW)
+          done = read_persist ('DT_GW', dt_GW)
+      endselect
+!
+    endsubroutine input_persist_special_id
+!***********************************************************************
+    subroutine input_persist_special()
+!
+!  Read the accumulated dt for GW update
+!
+!  13-Apr-2026/TP: coded
+!
+      use IO, only: read_persist
+!
+      logical :: error
+!
+      error = read_persist ('DT_GW', dt_GW)
+    endsubroutine input_persist_special
 !***********************************************************************
     subroutine make_spectra(f)
 !
@@ -1405,14 +1463,15 @@ module Special
 ! for boost (dec 7)
       real :: k1_boost, k1sqr_boost, k2_boost,k2sqr_boost,k3_boost, k3sqr_boost
       real :: ksqr_boost, ksqrt_boost, one_over_k_boost
-      real, dimension (3) :: e1_boost, e2_boost, vboost, kvec_boost, khat_boost
-      real, dimension (3) :: ee1_boost, ee2_boost
+      real, dimension (3) :: e1_boost, e2_boost, vboost, kvec_boost
       real, dimension (6) :: e_T_boost, e_X_boost
-      real :: eTT, eTX, eXT, eXX, phi, tmp, s, c, c1, kk1, kk2, kk3
+      real :: eTT, eTX, eXT, eXX, phi, s, c, c1, kk1, kk2, kk3
+
+      !real :: SCL_re_boost, SCL_im_boost, VCT_im_boost,khat_boost
+      !real :: ggT_boost, ggTim_boost, ggX_boost, ggXim_boost
+
       real :: gamma_boost, v_boostsqr, kdotv
-      real :: SCL_re_boost, SCL_im_boost, VCT_re_boost, VCT_im_boost
       real :: hhT_boost, hhTim_boost, hhX_boost, hhXim_boost
-      real :: ggT_boost, ggTim_boost, ggX_boost, ggXim_boost
 !
       real :: fact, facthel, cos_angle, angle, sign_switch
       real :: fact_boost, facthel_boost, omboost
@@ -1503,8 +1562,8 @@ module Special
 !
 !  compute e1 and e2 vectors
 !
-              if(abs(k1)<abs(k2)) then
-                if(abs(k1)<abs(k3)) then !(k1 is pref dir)
+              if (abs(k1)<abs(k2)) then
+                if (abs(k1)<abs(k3)) then !(k1 is pref dir)
                   e1=(/0.,-k3,+k2/)
                   e2=(/k2sqr+k3sqr,-k2*k1,-k3*k1/)
                 else !(k3 is pref dir)
@@ -1512,7 +1571,7 @@ module Special
                   e2=(/k1*k3,k2*k3,-(k1sqr+k2sqr)/)
                 endif
               else !(k2 smaller than k1)
-                if(abs(k2)<abs(k3)) then !(k2 is pref dir)
+                if (abs(k2)<abs(k3)) then !(k2 is pref dir)
                   e1=(/-k3,0.,+k1/)
                   e2=(/+k1*k2,-(k1sqr+k3sqr),+k3*k2/)
                 else !(k3 is pref dir)
@@ -1610,8 +1669,8 @@ module Special
 !
 !  Construction of boosted polarization tensors
 !
-                if(abs(k1)<abs(k2)) then
-                  if(abs(k1)<abs(k3)) then !(k1_boost is pref dir)
+                if (abs(k1)<abs(k2)) then
+                  if (abs(k1)<abs(k3)) then !(k1_boost is pref dir)
                     e1_boost=(/0.,-k3_boost,+k2_boost/)
                     e2_boost=(/k2sqr_boost+k3sqr_boost,-k2_boost*k1_boost,-k3_boost*k1_boost/)
                   else !(k3 is pref dir)
@@ -1619,7 +1678,7 @@ module Special
                     e2_boost=(/k1_boost*k3_boost,k2_boost*k3_boost,-(k1sqr_boost+k2sqr_boost)/)
                   endif
                 else !(k2 smaller than k1_boost)
-                  if(abs(k2)<abs(k3)) then !(k2 is pref dir)
+                  if (abs(k2)<abs(k3)) then !(k2 is pref dir)
                     e1_boost=(/-k3_boost,0.,+k1_boost/)
                     e2_boost=(/+k1_boost*k2_boost,-(k1sqr_boost+k3sqr_boost),+k3_boost*k2_boost/)
                   else !(k3 is pref dir)
@@ -2170,6 +2229,7 @@ if (ip < 25 .and. abs(k1) <nx .and. abs(k2) <ny .and. abs(k3) <nz) print*,k1,k2,
 
       character(LEN=3) :: kindstr
 
+      call keep_compiler_quiet(len)
       if (lfirstcall) then
         call make_spectra(f)
         lfirstcall=.false.
@@ -2203,7 +2263,7 @@ if (ip < 25 .and. abs(k1) <nx .and. abs(k2) <ny .and. abs(k3) <nz) print*,k1,k2,
       real, dimension(nx,ny,nz,3,6) :: Hijkim,Hijkre
       integer :: ikx,iky,ikz
       real, dimension (3) :: e1, e2, kvec
-      integer :: i,j,p,q,ik,ij
+      integer :: i,j,ij
       real :: ksqr, k1, k2, k3, k1sqr, k2sqr, k3sqr
       real :: hhTre, hhTim, hhXre, hhXim
       real, dimension (6) :: e_T, e_X
@@ -2234,8 +2294,8 @@ if (ip < 25 .and. abs(k1) <nx .and. abs(k2) <ny .and. abs(k3) <nz) print*,k1,k2,
 !
 !  compute e1 and e2 vectors (for lnonlinear_source only)
 !
-                if(abs(k1)<abs(k2)) then
-                  if(abs(k1)<abs(k3)) then !(k1 is pref dir)
+                if (abs(k1)<abs(k2)) then
+                  if (abs(k1)<abs(k3)) then !(k1 is pref dir)
                     e1=(/0.,-k3,+k2/)
                     e2=(/k2sqr+k3sqr,-k2*k1,-k3*k1/)
                   else !(k3 is pref dir)
@@ -2243,7 +2303,7 @@ if (ip < 25 .and. abs(k1) <nx .and. abs(k2) <ny .and. abs(k3) <nz) print*,k1,k2,
                     e2=(/k1*k3,k2*k3,-(k1sqr+k2sqr)/)
                   endif
                 else !(k2 smaller than k1)
-                  if(abs(k2)<abs(k3)) then !(k2 is pref dir)
+                  if (abs(k2)<abs(k3)) then !(k2 is pref dir)
                     e1=(/-k3,0.,+k1/)
                     e2=(/+k1*k2,-(k1sqr+k3sqr),+k3*k2/)
                   else !(k3 is pref dir)
@@ -2314,8 +2374,8 @@ if (ip < 25 .and. abs(k1) <nx .and. abs(k2) <ny .and. abs(k3) <nz) print*,k1,k2,
       real, dimension(nx,ny,nz) :: hij_re,hij_im
       integer :: i,j
       integer :: ikx,iky,ikz
-      real, dimension (3) :: e1, e2, kvec
-      real :: ksqr, k1, k2, k3, k1sqr, k2sqr, k3sqr, ksqrt
+      real, dimension (3) :: e1, e2
+      real :: ksqr, k1, k2, k3, k1sqr, k2sqr, k3sqr
       real :: hhTre, hhTim, hhXre, hhXim
       real :: e_ij_T, e_ij_X
 
@@ -2336,8 +2396,8 @@ if (ip < 25 .and. abs(k1) <nx .and. abs(k2) <ny .and. abs(k3) <nz) print*,k1,k2,
 !
 !  compute e1 and e2 vectors
 !
-              if(abs(k1)<abs(k2)) then
-                if(abs(k1)<abs(k3)) then !(k1 is pref dir)
+              if (abs(k1)<abs(k2)) then
+                if (abs(k1)<abs(k3)) then !(k1 is pref dir)
                   e1=(/0.,-k3,+k2/)
                   e2=(/k2sqr+k3sqr,-k2*k1,-k3*k1/)
                 else !(k3 is pref dir)
@@ -2345,7 +2405,7 @@ if (ip < 25 .and. abs(k1) <nx .and. abs(k2) <ny .and. abs(k3) <nz) print*,k1,k2,
                   e2=(/k1*k3,k2*k3,-(k1sqr+k2sqr)/)
                 endif
               else !(k2 smaller than k1)
-                if(abs(k2)<abs(k3)) then !(k2 is pref dir)
+                if (abs(k2)<abs(k3)) then !(k2 is pref dir)
                   e1=(/-k3,0.,+k1/)
                   e2=(/+k1*k2,-(k1sqr+k3sqr),+k3*k2/)
                 else !(k3 is pref dir)
@@ -2406,55 +2466,56 @@ if (ip < 25 .and. abs(k1) <nx .and. abs(k2) <ny .and. abs(k3) <nz) print*,k1,k2,
        enddo
     endsubroutine compute_hij
 !***********************************************************************
-    function has_negative_frequency(ik,ngrid) result(res)
-      integer :: ik,ngrid,nyquist_frequency
-      logical :: res
-      nyquist_frequency = (ngrid/2)+1
-      if(ik > nyquist_frequency) then
-              res = .true.
-      else
-              res = .false.
-      endif
-    endfunction has_negative_frequency
+!TP: potential helper functions if we would bother to take advantage of conjugate symmetry
+!    function has_negative_frequency(ik,ngrid) result(res)
+!      integer :: ik,ngrid,nyquist_frequency
+!      logical :: res
+!      nyquist_frequency = (ngrid/2)+1
+!      if (ik > nyquist_frequency) then
+!              res = .true.
+!      else
+!              res = .false.
+!      endif
+!    endfunction has_negative_frequency
 !***********************************************************************
-    function below_nyquist_frequency(ik,ngrid) result(res)
-      integer :: ik,ngrid,nyquist_frequency
-      logical :: res
-      nyquist_frequency = (ngrid/2)+1
-      if(ik < nyquist_frequency) then
-              res = .true.
-      else
-              res = .false.
-      endif
-    endfunction below_nyquist_frequency
+!    function below_nyquist_frequency(ik,ngrid) result(res)
+!      integer :: ik,ngrid,nyquist_frequency
+!      logical :: res
+!      nyquist_frequency = (ngrid/2)+1
+!      if (ik < nyquist_frequency) then
+!              res = .true.
+!      else
+!              res = .false.
+!      endif
+!    endfunction below_nyquist_frequency
+!!***********************************************************************
+!    subroutine get_conjugate_pair_index(ik_src,ik_dst,ngrid)
+!      integer :: ik_src,ik_dst,ngrid
+!      integer :: offset_from_nyquist
+!      integer :: nyquist_frequency 
+!      nyquist_frequency = (ngrid/2)+1
+!      if (ik_src == 1 .or. ik_src == nyquist_frequency) then
+!        ik_dst = ik_src
+!      else if (has_negative_frequency(ik_src,ngrid)) then
+!        offset_from_nyquist = ik_src - nyquist_frequency
+!        ik_dst = nyquist_frequency-offset_from_nyquist
+!      else
+!        offset_from_nyquist = nyquist_frequency - ik_src
+!        ik_dst = nyquist_frequency+offset_from_nyquist
+!      endif
+!    endsubroutine get_conjugate_pair_index
+!!***********************************************************************
+!    subroutine get_conjugate_pair_indexes(ikx_src,iky_src,ikz_src,ikx_dst,iky_dst,ikz_dst)
+!      integer :: ikx_src,iky_src,ikz_src
+!      integer :: ikx_dst,iky_dst,ikz_dst
+!
+!      call get_conjugate_pair_index(ikx_src,ikx_dst,nxgrid)
+!      call get_conjugate_pair_index(iky_src,iky_dst,nygrid)
+!      call get_conjugate_pair_index(ikz_src,ikz_dst,nzgrid)
+!
+!    endsubroutine get_conjugate_pair_indexes
 !***********************************************************************
-    subroutine get_conjugate_pair_index(ik_src,ik_dst,ngrid)
-      integer :: ik_src,ik_dst,ngrid
-      integer :: offset_from_nyquist
-      integer :: nyquist_frequency 
-      nyquist_frequency = (ngrid/2)+1
-      if(ik_src == 1 .or. ik_src == nyquist_frequency) then
-        ik_dst = ik_src
-      else if(has_negative_frequency(ik_src,ngrid)) then
-        offset_from_nyquist = ik_src - nyquist_frequency
-        ik_dst = nyquist_frequency-offset_from_nyquist
-      else
-        offset_from_nyquist = nyquist_frequency - ik_src
-        ik_dst = nyquist_frequency+offset_from_nyquist
-      endif
-    endsubroutine get_conjugate_pair_index
-!***********************************************************************
-    subroutine get_conjugate_pair_indexes(ikx_src,iky_src,ikz_src,ikx_dst,iky_dst,ikz_dst)
-      integer :: ikx_src,iky_src,ikz_src
-      integer :: ikx_dst,iky_dst,ikz_dst
-
-      call get_conjugate_pair_index(ikx_src,ikx_dst,nxgrid)
-      call get_conjugate_pair_index(iky_src,iky_dst,nygrid)
-      call get_conjugate_pair_index(ikz_src,ikz_dst,nzgrid)
-
-    endsubroutine get_conjugate_pair_indexes
-!***********************************************************************
-    subroutine solve_and_stress(f,S_T_re,S_T_im,S_X_re,S_X_im)
+    subroutine solve_and_stress(f,S_T_re,S_T_im,S_X_re,S_X_im,dt)
 !   TODO: The name is simply a placeholder since could not come up with a better name
 !
 !  6-jul-25/TP: carved from compute_gT_and_gX_from_gij
@@ -2464,21 +2525,16 @@ if (ip < 25 .and. abs(k1) <nx .and. abs(k2) <ny .and. abs(k3) <nz) print*,k1,k2,
 !
       real, dimension (mx,my,mz,mfarray) :: f
       real, dimension (nx,ny,nz) :: S_T_re,S_T_im,S_X_re,S_X_im
-      real, dimension (6) :: Pij=0., kij=0., e_T, e_X, Sij_re, Sij_im, delij=0.
-      real, dimension (3) :: e1, e2, kvec
-      integer :: i,j,p,q,ik,ikx,iky,ikz,stat,ij,pq,ip,jq,jStress_ij
-      real :: fact, delkt, om2_min, kmin
+      real, intent(IN) :: dt
+      real, dimension (6) :: Pij=0., kij=0., e_T, e_X, Sij_re, Sij_im
+      real, dimension (3) :: e1, e2
+      integer :: i,j,p,q,ikx,iky,ikz,ij,pq,ip,jq
+      real :: delkt, om2_min, kmin
       real :: ksqr, one_over_k2, k1, k2, k3, k1sqr, k2sqr, k3sqr, ksqrt
       real :: hhTre, hhTim, hhXre, hhXim, coefAre, coefAim
       real :: ggTre, ggTim, ggXre, ggXim, coefBre, coefBim
-      real :: e_ij_T, e_ij_X
       real :: cosot, sinot, sinot_minus, om12, om, om1, om2, dt1
-      real :: eTT, eTX, eXT, eXX
       real :: discrim2
-      !real :: horndeski_alpM_eff, horndeski_alpM_eff2
-      !real :: horndeski_alpM_eff3
-      !real :: horndeski_alpT_eff
-      real :: Om_rat_Lam, Om_rat_Mat
       real :: Om_rat_matt, Om_rat_tot1
       real :: dS_T_re, dS_T_im, dS_X_re, dS_X_im
       complex :: coefA, coefB, om_cmplx
@@ -2669,8 +2725,8 @@ if (ip < 25 .and. abs(k1) <nx .and. abs(k2) <ny .and. abs(k3) <nz) print*,k1,k2,
 !
 !  compute e1 and e2 vectors
 !
-              if(abs(k1)<abs(k2)) then
-                if(abs(k1)<abs(k3)) then !(k1 is pref dir)
+              if (abs(k1)<abs(k2)) then
+                if (abs(k1)<abs(k3)) then !(k1 is pref dir)
                   e1=(/0.,-k3,+k2/)
                   e2=(/k2sqr+k3sqr,-k2*k1,-k3*k1/)
                 else !(k3 is pref dir)
@@ -2678,7 +2734,7 @@ if (ip < 25 .and. abs(k1) <nx .and. abs(k2) <ny .and. abs(k3) <nz) print*,k1,k2,
                   e2=(/k1*k3,k2*k3,-(k1sqr+k2sqr)/)
                 endif
               else !(k2 smaller than k1)
-                if(abs(k2)<abs(k3)) then !(k2 is pref dir)
+                if (abs(k2)<abs(k3)) then !(k2 is pref dir)
                   e1=(/-k3,0.,+k1/)
                   e2=(/+k1*k2,-(k1sqr+k3sqr),+k3*k2/)
                 else !(k3 is pref dir)
@@ -2808,6 +2864,8 @@ if (ip < 25 .and. abs(k1) <nx .and. abs(k2) <ny .and. abs(k3) <nz) print*,k1,k2,
               S_T_im(ikx,iky,ikz)=0.
               S_X_im(ikx,iky,ikz)=0.
               if (llinphase_in_stress) then
+                !TP: is multiplying the complex component by cos(omega*t)*sin(omega*t)
+                !    instead of sin(omega*t) meaningful? I would expect the latter.
                 S_T_re(ikx,iky,ikz)=S_T_re(ikx,iky,ikz)*cos(slope_linphase_in_stress*t)
                 S_T_im(ikx,iky,ikz)=S_T_re(ikx,iky,ikz)*sin(slope_linphase_in_stress*t)
                 S_X_re(ikx,iky,ikz)=S_X_re(ikx,iky,ikz)*cos(slope_linphase_in_stress*t)
@@ -3020,7 +3078,7 @@ if (ip < 25 .and. abs(k1) <nx .and. abs(k2) <ny .and. abs(k3) <nz) print*,k1,k2,
       enddo
     endsubroutine solve_and_stress
 !***********************************************************************
-    subroutine compute_gT_and_gX_from_gij(f,label)
+    subroutine compute_gT_and_gX_from_gij(f,label,dt)
 !
 !  Compute the transverse part of the stress tensor by going into Fourier space.
 !  It also allows for the inclusion of nonlinear corrections to the wave equation.
@@ -3028,17 +3086,18 @@ if (ip < 25 .and. abs(k1) <nx .and. abs(k2) <ny .and. abs(k3) <nz) print*,k1,k2,
 !
 !  07-aug-17/axel: coded (MAIN part doing the TT projection)
 !
-      use Fourier, only: fourier_transform, fft_xyz_parallel, kx_fft, ky_fft, kz_fft
+      use Fourier, only: fourier_transform, fft_xyz_parallel
       use Diagnostics
 !
-      real, dimension (:,:,:), allocatable :: S_T_re, S_T_im, S_X_re, S_X_im, g2T_re, g2T_im, g2X_re, g2X_im
+      real, dimension (:,:,:), allocatable :: S_T_re, S_T_im, S_X_re, S_X_im
       real, dimension (:,:,:), allocatable :: hij_re, hij_im
       real, dimension (mx,my,mz,mfarray) :: f
-      real, dimension (6) :: Pij=0., kij=0., e_T, e_X, Sij_re, Sij_im, delij=0.
+      real, dimension (6) :: delij=0.
       real, dimension (:,:,:,:,:), allocatable :: Hijkre, Hijkim
-      integer :: i,j,p,q,ik,ikx,iky,ikz,stat,ij,pq,ip
+      integer :: i,j,p,q,stat,ij,pq
       intent(inout) :: f
       character (len=2) :: label
+      real :: dt
 !
 !  Check that the relevant arrays are registered
 !
@@ -3175,7 +3234,7 @@ if (ip < 25 .and. abs(k1) <nx .and. abs(k2) <ny .and. abs(k3) <nz) print*,k1,k2,
 !
         call fft_xyz_parallel(Tpq_re(:,:,:,:),Tpq_im(:,:,:,:))
       endif
-      call solve_and_stress(f,S_T_re,S_X_re,S_T_im,S_X_im)
+      call solve_and_stress(f,S_T_re,S_X_re,S_T_im,S_X_im,dt)
 !
 !  back to real space: hTX
 !  re-utilize S_T_re, etc as workspace.
@@ -3256,6 +3315,8 @@ if (ip < 25 .and. abs(k1) <nx .and. abs(k2) <ny .and. abs(k3) <nz) print*,k1,k2,
 !
       integer :: iname
       logical :: lreset,lwrite
+
+      call keep_compiler_quiet(lwrite)
 !!!
 !!!  reset everything in case of reset
 !!!  (this needs to be consistent with what is defined above!)
@@ -3532,6 +3593,14 @@ if (ip < 25 .and. abs(k1) <nx .and. abs(k2) <ny .and. abs(k3) <nz) print*,k1,k2,
     call copy_addr(appa_om_init,p_par(75)) 
     call copy_addr(luse_mag,p_par(76)) ! bool
     call copy_addr(lsplit_gw_rhs_from_rest_on_gpu,p_par(77)) ! bool
+    call copy_addr(ntimesteps_per_gw_step,p_par(78)) ! int dconst
+    call copy_addr(lsingle_precision_ffts_for_gw_update,p_par(79)) ! bool
+
+    call keep_compiler_quiet(OmL0)
+    call keep_compiler_quiet(nfactd_GW)
+    call keep_compiler_quiet(lno_transverse_part)
+    call keep_compiler_quiet(aux_stress)
+
 
     endsubroutine pushpars2c
 !***********************************************************************

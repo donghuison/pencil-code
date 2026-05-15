@@ -65,7 +65,7 @@ module Special
   real :: rhoT_sum_diagnos
 
   real :: sbackreact_Q=1., sbackreact_chi=1., sbackreact_JJ=1., tback=1e6, dtback=1e6
-  real :: lnkmin0, lnkmin0_dummy, lnkmax0, dlnk
+  real :: lnkmin0=-1., lnkmin0_dummy, lnkmax0, dlnk
   real :: nmin0=-1., nmax0=3., horizon_factor=0., sgn=1.
   real, dimension (nx) :: dt1_special, lnk
   logical :: lbackreact=.false., lwith_eps=.true., lupdate_background=.true.
@@ -240,9 +240,8 @@ module Special
 !
       real, dimension (mx,my,mz,mfarray) :: f
       real :: lnH, lna, a
-      real :: kmax=2., lnkmax, lnk0=1.
-      real :: Q, Qdot, chi, chidot, phi, phidot
-      real :: U, V, beta
+      real :: phidot
+      real :: V, beta
       integer :: ik
 !
 !  Initialize any module variables which are parameter dependent
@@ -271,8 +270,8 @@ module Special
         H=sqrt(onethird*(.5*phidot**2+V))
       endif
 
-      lna=alog(a)
-      lnH=alog(H)
+      lna=log(a)
+      lnH=log(H)
       if (lstart) then
         lnkmin0=nmin0+lnH+lna
         lnkmax0=nmax0+lnH+lna
@@ -297,6 +296,7 @@ module Special
             k(ik)=exp(lnk(ik))
           enddo
           if (ip<10) print*,'iproc,lnk=',iproc,lnk
+
           kindex_array=nint((lnk-lnkmin0)/dlnk)
         endif
       elseif (llnk_spacing) then
@@ -345,9 +345,7 @@ module Special
       real, dimension (nx) :: psi, psidot, TR, TRdot, uR, uRdot
       real, dimension (nx) :: impsi, impsidot, imTR, imTRdot, imuR, imuRdot
       real :: chi0, V, Uprime0, beta, fourier_factor
-      real :: lnt, lnH, lna, a
-      real :: kmax=2., lnkmax, lnk0=1.
-      integer :: ik
+      real :: a
 !
       intent(inout) :: f
 !
@@ -379,7 +377,7 @@ module Special
           else
             if (ip<10) print*,'k=',k
             if (lhubble) then
-              f_ode(iaxi_lna)=alog(ascale_ini)
+              f_ode(iaxi_lna)=log(ascale_ini)
               f_ode(iaxi_phi)=phi_ini
               f_ode(iaxi_phidot)=0.
               select case (V_choice)
@@ -519,10 +517,10 @@ module Special
     endsubroutine calc_pencils_special
 !***********************************************************************
     subroutine get_Hubble
+!
     real :: phi,phidot,U,V,beta,chi,chidot,Q,Qdot
 !
 !  29-jul-25/TP: carved from dspecial_dt/dt_ode
-!
 !
 !  Possibility to evolve the Hubble parameter (in cosmic time)
 !
@@ -547,9 +545,11 @@ module Special
       else if (lgpu) then
         H=H_init
       endif
+!
     endsubroutine get_Hubble
 !***********************************************************************
     subroutine get_analytical_solution(psi_anal,psidot_anal,TR_anal,TRdot_anal)
+!
       real, dimension(nx), intent(OUT) :: psi_anal,psidot_anal,TR_anal,TRdot_anal
       if (lconf_time) then
         psi_anal=(1./sqrt(2.*k))*cos(-k*t)
@@ -562,6 +562,7 @@ module Special
         TR_anal=(1./sqrt(2.*k))*cos(k/(a*H))
         TRdot_anal=(k/sqrt(2.*k))*sin(k/(a*H))
       endif
+!
     endsubroutine get_analytical_solution
 !***********************************************************************
     subroutine dspecial_dt(f,df,p)
@@ -591,12 +592,11 @@ module Special
       real, dimension (nx) :: impsi , impsidot , impsiddot , imTR, imTRdot, imTRddot, imuR, imuRdot, imuRddot
       real, dimension (nx) :: impsiL, impsiLdot, impsiLddot, imTL, imTLdot, imTLddot, imuL, imuLdot, imuLddot
       real, dimension (nx) :: epsQE, epsQB
-      real :: Q, Qdot, chi, chidot, phi, phidot, adot, addot
+      real :: Q, Qdot, chi, chidot, adot, addot
       real :: Uprime, mQ, xi
       real :: sign_swap=1.
       real, parameter :: fact=1.
       real :: epsilon_sr,inflaton
-      integer :: ik
       type (pencil_case) :: p
 !
       intent(in) :: p
@@ -680,7 +680,7 @@ module Special
       Uprime=-mu**4/fdecay*sin(chi/fdecay)
       if (lconf_time) then
         if (lhubble_var) then
-          epsilon_sr=0.8*(1+tanh(0.3*(alog(-1/(H*t))-18)))*0.5
+          epsilon_sr=0.8*(1+tanh(0.3*(log(-1/(H*t))-18)))*0.5
           a=-1./(H*t*(1-epsilon_sr))
           Hscript=a*H
           if (.not.lkeep_mQ_const) then
@@ -981,6 +981,9 @@ module Special
       real, dimension(mx,my,mz,mfarray) :: f
       real, parameter :: fact=1.
       type(pencil_case) :: p
+
+      call keep_compiler_quiet(p)
+
       if (ldiagnos) then
 
         call get_analytical_solution(psi_anal,psidot_anal,TR_anal,TRdot_anal)
@@ -1048,10 +1051,10 @@ module Special
       else
         get_mQ=g*Q/H
       endif
+!
     endfunction get_mQ
 !***********************************************************************
-    subroutine calc_ode_dt(f_ode,Qddot,chiddot,phiddot,grant_sum,dgrant_sum, &
-      JJ_sum)
+    subroutine calc_ode_dt(f_ode,Qddot,chiddot,phiddot,grant_sum,dgrant_sum,JJ_sum)
 !
 !  29-jul-25/TP: carved from dspecial_dt_ode
 !
@@ -1065,8 +1068,10 @@ module Special
       real :: Q, Qdot, chi, chidot, phi, phidot
       real :: Uprime, mQ, xi, Vprime, beta
       !real :: U, Uprime, mQ, xi, V, Vprime
-      real :: fact=1., sign_swap=1.
+      real :: fact=1.
       real :: epsilon_sr,inflaton
+
+      call keep_compiler_quiet(grant_sum)
 !
 !  Set the all variable
 !
@@ -1074,8 +1079,8 @@ module Special
       Qdot=f_ode(iaxi_Qdot)
       chi=f_ode(iaxi_chi)
       chidot=f_ode(iaxi_chidot)
-      if(iaxi_phi > 0) phi = f_ode(iaxi_phi)
-      if(iaxi_phidot > 0) phidot = f_ode(iaxi_phidot)
+      if (iaxi_phi > 0) phi = f_ode(iaxi_phi)
+      if (iaxi_phidot > 0) phidot = f_ode(iaxi_phidot)
 
       if (lhubble) then
         Hdot=-.5*phidot**2-.5*chidot**2-((Qdot+H*Q)**2+g**2*Q**4)
@@ -1089,7 +1094,7 @@ module Special
       Uprime=-mu**4/fdecay*sin(chi/fdecay)
       if (lconf_time) then
         if (lhubble_var) then
-          epsilon_sr=0.8*(1+tanh(0.3*(alog(-1/(H*t))-18)))*0.5
+          epsilon_sr=0.8*(1+tanh(0.3*(log(-1/(H*t))-18)))*0.5
           a=-1./(H*t*(1-epsilon_sr))
           Hscript=a*H
           xi=lamf*chidot*(0.5/Hscript)
@@ -1149,7 +1154,7 @@ module Special
           fact=1.
         endif
 !
-!  apply factor to switch on bachreaction gradually:
+!  apply factor to switch on backreaction gradually:
 !
         if (lconf_time) then
           Qddot  =Qddot  -sbackreact_Q  *fact*a**2 *grand_sum
@@ -1160,36 +1165,6 @@ module Special
         endif
       endif
     endsubroutine calc_ode_dt
-!***********************************************************************
-    subroutine read_sums_from_device
-!
-!  Why do we need to do this like so?
-!  Is anyone going to run this with GPUs?
-!
-!  16-dec-2025/axel: added JJ_R etc
-!
-      use GPU, only: get_gpu_reduced_vars
-      real, dimension(12) :: tmp
-      call get_gpu_reduced_vars(tmp)
-      grand_sum  = tmp(1)
-      dgrant_sum = tmp(2)
-      JJ_R_sum = tmp(11)
-      JJ_L_sum = tmp(12)
-      if (ldiagnos) then
-              grand_sum_diagnos = grand_sum
-              dgrant_sum_diagnos = dgrant_sum
-              JJ_R_sum_diagnos = JJ_R_sum 
-              JJ_L_sum_diagnos = JJ_L_sum 
-              TRdoteff2km_sum = tmp(3)
-              TRdoteff2m_sum =  tmp(4)
-              TReff2km_sum = tmp(5)
-              TReff2m_sum =  tmp(6)
-              TLdoteff2km_sum = tmp(7)
-              TLdoteff2m_sum =  tmp(8)
-              TLeff2km_sum = tmp(9)
-              TLeff2m_sum =  tmp(10)
-      endif
-    endsubroutine read_sums_from_device
 !***********************************************************************
     subroutine dspecial_dt_ode
 !
@@ -1205,7 +1180,7 @@ module Special
 !  identify module and boundary conditions
 !
       if (lgpu) then
-        call read_sums_from_device
+        call read_sums_from_GPU
       endif
       if (headtt.or.ldebug) print*,'dspecial_dt: SOLVE dSPECIAL_dt'
 !
@@ -1360,6 +1335,7 @@ module Special
 !  13-may-18/axel: added remove_mean_value for hij and gij
 !
       real, dimension (mx,my,mz,mfarray), intent(inout) :: f
+      call keep_compiler_quiet(f)
 !
     endsubroutine special_before_boundary
 !***********************************************************************
@@ -1472,7 +1448,7 @@ module Special
       real :: epsilon_sr,inflaton
       if (lconf_time) then
         if (lhubble_var) then
-          epsilon_sr=0.8*(1+tanh(0.3*(alog(-1/(H*t))-18)))*0.5
+          epsilon_sr=0.8*(1+tanh(0.3*(log(-1/(H*t))-18)))*0.5
           a=-1./(H*t*(1-epsilon_sr))
         else
           a=-1./(H*t)
@@ -1497,7 +1473,6 @@ module Special
 !
 !  29-jul-25/TP: carved from special_after_boundary
 !
-
       real, dimension (mx,my,mz,mfarray), intent(IN) :: f
       real, dimension(nx) ,intent(OUT)  :: TRpsim, TRpsikm, TRpsidotm, TRdotpsim
       real, dimension(nx) ,intent(OUT)  :: TRdoteff2km, TRdoteff2m, TReff2km, TReff2m
@@ -1505,10 +1480,10 @@ module Special
 
       real, dimension (nx) :: TR, TRdot, imTR, imTRdot, TReff2, TRdoteff2
       real, dimension (nx) :: TL, TLdot, imTL, imTLdot, TLeff2, TLdoteff2
-      real, dimension (nx) :: uR, uRdot, imuR, imuRdot, uReff2, uReff2m, uReff2km
-      real, dimension (nx) :: uL, uLdot, imuL, imuLdot, uLeff2, uLeff2m, uLeff2km
+      real, dimension (nx) :: uR, imuR, uReff2, uReff2m, uReff2km
+      real, dimension (nx) :: uL, imuL, uLeff2, uLeff2m, uLeff2km
       real, dimension (nx) :: psi, psidot, impsi , impsidot
-      real, dimension (nx) :: TRpsi , TRpsik , TRpsidot , TRdotpsi
+      real, dimension (nx) :: TRpsi , TRpsidot , TRdotpsi
       real, dimension (nx) :: TRdot_abs2, TLdot_abs2, TReff2k2m, TLeff2k2m
       real :: xi,chidot,mQ,Qdot
       real :: a
@@ -1713,19 +1688,19 @@ module Special
 !
 !  07-aug-17/axel: coded
 
-      use Mpicomm, only: mpireduce_sum, mpibcast
+      use Mpicomm, only: mpiallreduce_sum, mpibcast
 !
       real, dimension (mx,my,mz,mfarray), intent(inout) :: f
       real, dimension(nx) :: TRpsim, TRpsikm, TRpsidotm, TRdotpsim
       real, dimension(nx) :: TRdoteff2km, TRdoteff2m, TReff2km, TReff2m
       real, dimension(nx) :: TLdoteff2km, TLdoteff2m, TLeff2km, TLeff2m
-      real, dimension(nx) :: uRdoteff2km, uRdoteff2m, uReff2km, uReff2m
-      real, dimension(nx) :: uLdoteff2km, uLdoteff2m, uLeff2km, uLeff2m
+      real, dimension(nx) :: uReff2km, uReff2m
+      real, dimension(nx) :: uLeff2km, uLeff2m
       real :: Q, Qdot, chi, chidot, phi, phidot
       real :: U, V, beta
-      real :: lnt, lnH, lna, a, lnkmin, lnkmax
+      real :: lnH, lna, a, lnkmin, lnkmax
       integer :: ik, nswitch
-      real :: epsilon_sr,inflaton
+      real :: inflaton
 !
 !  make ODE variables available (should exist on all processors)
 !
@@ -1768,8 +1743,8 @@ module Special
 !  a=exp(N), N=H*t (=lna).
 !
       if (llnk_spacing_adjustable .and. lfirst) then
-        lna=alog(a)
-        lnH=alog(H)
+        lna=log(a)
+        lnH=log(H)
         lnkmin=nmin0+lnH+lna
         lnkmax=nmax0+lnH+lna
         if (lnkmin >= (lnkmin0+dlnk)) then
@@ -1827,8 +1802,8 @@ module Special
 !  the adjustable case, so her nswitch means just "output", but no switch
 !
       elseif (lfirst) then
-        lna=alog(a)
-        lnH=alog(H)
+        lna=log(a)
+        lnH=log(H)
         lnkmin=nmin0+lnH+lna
         if (lnkmin >= (lnkmin0_dummy+dlnk)) then
           nswitch=int((lnkmin-lnkmin0_dummy)/dlnk)
@@ -1863,24 +1838,24 @@ module Special
 !  Compute the sum over all processors.
 !  But result is only needed on root processor.
 !
-      call mpireduce_sum(sum(grand),grand_sum,1)
-      call mpireduce_sum(sum(grant),grant_sum,1)
-      call mpireduce_sum(sum(dgrant),dgrant_sum,1)
-      call mpireduce_sum(sum(rhoT),rhoT_sum,1)
+      call mpiallreduce_sum(sum(grand),grand_sum,1)
+      call mpiallreduce_sum(sum(grant),grant_sum,1)
+      call mpiallreduce_sum(sum(dgrant),dgrant_sum,1)
+      call mpiallreduce_sum(sum(rhoT),rhoT_sum,1)
       if (lSchwinger_scalar) then
-        call mpireduce_sum(sum(uReff2km),uReff2km_sum,1)
-        call mpireduce_sum(sum(uReff2m),uReff2m_sum,1)
-        call mpireduce_sum(sum(uLeff2km),uLeff2km_sum,1)
-        call mpireduce_sum(sum(uLeff2m),uLeff2m_sum,1)
-        call mpireduce_sum(sum(JJ_R),JJ_R_sum,1)
-        call mpireduce_sum(sum(JJ_L),JJ_L_sum,1)
-        call mpireduce_sum(sum(JJ_R+JJ_L),JJ_sum,1)
+        call mpiallreduce_sum(sum(uReff2km),uReff2km_sum,1)
+        call mpiallreduce_sum(sum(uReff2m),uReff2m_sum,1)
+        call mpiallreduce_sum(sum(uLeff2km),uLeff2km_sum,1)
+        call mpiallreduce_sum(sum(uLeff2m),uLeff2m_sum,1)
+        call mpiallreduce_sum(sum(JJ_R),JJ_R_sum,1)
+        call mpiallreduce_sum(sum(JJ_L),JJ_L_sum,1)
+        call mpiallreduce_sum(sum(JJ_R+JJ_L),JJ_sum,1)
      else
        JJ_R_sum=0.
        JJ_L_sum=0.
        JJ_sum=0.
      endif
-     if(.not. lmultithread) then
+     if (.not. lmultithread) then
         grand_sum_diagnos  = grand_sum
         dgrant_sum_diagnos = dgrant_sum
         rhoT_sum_diagnos = rhoT_sum
@@ -1888,22 +1863,22 @@ module Special
 !
 !  These 8 lines are only needed for diagnostics and could be escaped.
 !
-      call mpireduce_sum(sum(TRpsim),TRpsim_sum,1)
-      call mpireduce_sum(sum(TRpsikm),TRpsikm_sum,1)
-      call mpireduce_sum(sum(TRpsidotm),TRpsidotm_sum,1)
-      call mpireduce_sum(sum(TRdotpsim),TRdotpsim_sum,1)
+      call mpiallreduce_sum(sum(TRpsim),TRpsim_sum,1)
+      call mpiallreduce_sum(sum(TRpsikm),TRpsikm_sum,1)
+      call mpiallreduce_sum(sum(TRpsidotm),TRpsidotm_sum,1)
+      call mpiallreduce_sum(sum(TRdotpsim),TRdotpsim_sum,1)
 !
-      call mpireduce_sum(sum(TRdoteff2km),TRdoteff2km_sum,1)
-      call mpireduce_sum(sum(TRdoteff2m),TRdoteff2m_sum,1)
-      call mpireduce_sum(sum(TReff2km),TReff2km_sum,1)
-      call mpireduce_sum(sum(TReff2m),TReff2m_sum,1)
+      call mpiallreduce_sum(sum(TRdoteff2km),TRdoteff2km_sum,1)
+      call mpiallreduce_sum(sum(TRdoteff2m),TRdoteff2m_sum,1)
+      call mpiallreduce_sum(sum(TReff2km),TReff2km_sum,1)
+      call mpiallreduce_sum(sum(TReff2m),TReff2m_sum,1)
 !
 !  Same for left-handed modes
 !
-      call mpireduce_sum(sum(TLdoteff2km),TLdoteff2km_sum,1)
-      call mpireduce_sum(sum(TLdoteff2m),TLdoteff2m_sum,1)
-      call mpireduce_sum(sum(TLeff2km),TLeff2km_sum,1)
-      call mpireduce_sum(sum(TLeff2m),TLeff2m_sum,1)
+      call mpiallreduce_sum(sum(TLdoteff2km),TLdoteff2km_sum,1)
+      call mpiallreduce_sum(sum(TLdoteff2m),TLdoteff2m_sum,1)
+      call mpiallreduce_sum(sum(TLeff2km),TLeff2km_sum,1)
+      call mpiallreduce_sum(sum(TLeff2m),TLeff2m_sum,1)
 !
     endsubroutine special_after_boundary
 !***********************************************************************
@@ -1919,7 +1894,7 @@ module Special
 !
 !   SAMPLE IMPLEMENTATION
 !
-      integer :: iname, inamexy, inamexz
+      integer :: iname, inamexy
       logical :: lreset,lwr
       logical, optional :: lwrite
 !
@@ -2009,6 +1984,44 @@ module Special
 !
     endsubroutine rprint_special
 !***********************************************************************
+! Subroutines below needed only for GPUs, if you do not care about GPUs don't worry about them
+!***********************************************************************
+    subroutine read_sums_from_GPU
+!
+!  The sums needed for ODE and PDE advancement are computed on the GPUs in before_boundary.
+!  Then we need them back on the host to advance the ODEs which this function does.
+!
+!  16-dec-2025/axel: added JJ_R etc
+!
+
+!  AB: Is anyone going to run this with GPUs?
+!  TP: I don't know. I see the point that these simulations inexpensive enough
+!      that no one would bother. 
+!      If you think the GPU stuff is annoying and gets in the way for no benefit I can remove it.
+
+      use GPU, only: get_gpu_reduced_vars
+      real, dimension(12) :: tmp
+      call get_gpu_reduced_vars(tmp)
+      grand_sum  = tmp(1)
+      dgrant_sum = tmp(2)
+      JJ_R_sum = tmp(11)
+      JJ_L_sum = tmp(12)
+      if (ldiagnos) then
+              grand_sum_diagnos = grand_sum
+              dgrant_sum_diagnos = dgrant_sum
+              JJ_R_sum_diagnos = JJ_R_sum 
+              JJ_L_sum_diagnos = JJ_L_sum 
+              TRdoteff2km_sum = tmp(3)
+              TRdoteff2m_sum =  tmp(4)
+              TReff2km_sum = tmp(5)
+              TReff2m_sum =  tmp(6)
+              TLdoteff2km_sum = tmp(7)
+              TLdoteff2m_sum =  tmp(8)
+              TLeff2km_sum = tmp(9)
+              TLeff2m_sum =  tmp(10)
+      endif
+    endsubroutine read_sums_from_GPU
+!***********************************************************************
     subroutine pushpars2c(p_par)
 
     use Syscalls, only: copy_addr
@@ -2073,6 +2086,20 @@ module Special
     call copy_addr(dlnk,p_par(53))
     call copy_addr(dk,p_par(54))
 
+    call copy_addr(iaxi_ur,p_par(55)) ! int
+    call copy_addr(iaxi_urdot,p_par(56)) ! int
+    call copy_addr(iaxi_ul,p_par(57)) ! int
+    call copy_addr(iaxi_uldot,p_par(58)) ! int
+    call copy_addr(iaxi_imur,p_par(59)) ! int
+    call copy_addr(iaxi_imurdot,p_par(60)) ! int
+    call copy_addr(iaxi_imul,p_par(61)) ! int
+    call copy_addr(iaxi_imuldot,p_par(62)) ! int
+    call copy_addr(hdot,p_par(63))
+    call copy_addr(mscal,p_par(64))
+    call copy_addr(sgn_g,p_par(65))
+    call copy_addr(lschwinger_scalar,p_par(66)) ! bool
+
+    call keep_compiler_quiet(lvariable_k)
     endsubroutine pushpars2c
 !***********************************************************************
 !***********************************************************************

@@ -455,7 +455,7 @@ Additionally, \code{flex}, \code{bison}, \code{python}, and \code{cmake} (versio
 \subsection{Downloading}
 For a fresh checkout of all needed repositories, instead of the \name{git} cloning described in Sec.~\ref{sec:download}, do
 \begin{verbatim}
-git clone -b master --recurse-submodules https://github.com/pencil-code/pencil-code.git 
+git clone -b master --recurse-submodules --remote https://github.com/pencil-code/pencil-code.git 
 \end{verbatim}
 
 \vspace{-2mm}
@@ -464,7 +464,7 @@ git clone -b master --recurse-submodules https://github.com/pencil-code/pencil-c
 \end{verbatim}
 or
 \begin{verbatim}
-git clone -b master --recurse-submodules https://pencil-code.org/git/ pencil-code
+git clone -b master --recurse-submodules --remote https://pencil-code.org/git/ pencil-code
 \end{verbatim}
 of course with additional username specification as shown in Sec.~\ref{sec:download} for write access to the latter repo.
 Installation by SVN is not supported.
@@ -492,24 +492,30 @@ If you have activated GPU acceleration for an already existing setup, repeat \co
 
 \subsection{Running}
 Important: the parameter \command{ncpus} in \command{cparam.local} has now to be understood as ``number of MPI ranks = number of UNIX processes = number of GPUs". The number of CPUs employed is always larger  as
-the accelerated code makes use of CPU multithreading. Hence, setting in the environment (\code{bash}: by \command{export})
+the accelerated code makes use of CPU multithreading. Hence, setting the environment properly is essential, and \command{pc\_start} and \command{pc\_run} do this for you when invoked in a SLURM job with a proper setting of the \code{srun} parameter \code{cpus-per-task} (see below). Without SLURM, you have to set
+(\code{bash}: by \command{export})
 \begin{verbatim}
  OMP_NUM_THREADS=<ncores>
 \end{verbatim}
-with \command{ncores}$ >=2$ before running is mandatory. 
+with \command{ncores}$ >=2$ before running.
 Choose \command{ncores} as large as sensible in view of the hardware; on clusters consult the node specification.
-The additional settings
+
+When using \command{start.csh} and \command{run.csh}, it is recommended to additionally export the settings
 \begin{verbatim}
  OMP_MAX_ACTIVE_LEVELS=2
  OMP_PROC_BIND=close,spread
  OMP_WAIT_POLICY=PASSIVE
 \end{verbatim}
-are recommended. Note, that when running in a job system like SLURM, the number of CPUs assigned to an MPI process (\command{srun} option: \command{--cpus-per-task}) must agree with \command{ncores} and all exports to the environment need to be included in the \code{sbatch} script.
+before running.
+Note, that when running in SLURM,
+%a job system like SLURM, the number of CPUs assigned to an MPI process (\command{srun} option: \command{--cpus-per-task}) must agree with \command{ncores} and 
+all exports to the environment need to be included in the \code{sbatch} script.
 
-If you are using MPICH, add the following in your job script before calling \command{pc\_run} but after \command{pc\_start}.
+If you are using MPICH and \command{start.csh/run.csh}, add the following in your job script before calling \command{run.csh} but after \command{start.csh}:
 \begin{verbatim}
 export MPICH_GPU_SUPPORT_ENABLED=1
 \end{verbatim}
+while, again, \code{pc\_start/pc\_run} will do this for you.
 
 The normal usage of GPUs will imply runtime compilation, 
 because of which for module environments it is imperative that the same modules are used for the run as for the build.
@@ -517,10 +523,10 @@ To ensure this, add at the beginning of your \code{sbatch} script
 \begin{verbatim}
 source src/.moduleinfo
 \end{verbatim}
-Then, you run the code as usual with \command{pc\_start}/\command{pc\_run}. 
 
 Example SLURM batch script (CRAY machines):
 \begin{verbatim}
+#!/bin/bash -l
 #SBATCH --account=...
 #SBATCH --partition=...
 #SBATCH --nodes=...
@@ -533,21 +539,28 @@ Example SLURM batch script (CRAY machines):
 source src/.moduleinfo
 
 export LD_LIBRARY_PATH=${CRAY_LD_LIBRARY_PATH}:$LD_LIBRARY_PATH
-export OMP_NUM_THREADS= =${SLURM_CPUS_PER_TASK}
+
+pc_start
+pc_run
+
+# or alternatively, when using start.csh, run.csh:
+
+export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
 export OMP_MAX_ACTIVE_LEVELS=2
 export OMP_PROC_BIND=close,spread
 export OMP_WAIT_POLICY=PASSIVE
 
-pc_start
+start.csh
 export MPICH_GPU_SUPPORT_ENABLED=1   # MPICH only
-pc_run
+run.csh
+
+# end alternative
 
 \end{verbatim}
 
 Running with GPU acceleration for the first time in a work directory will take significant time ($\lesssim$ 10 minutes) for several preliminary steps before the simulation proper starts. At later (re)starts, this time reduces strongly as long as no input parameters or \command{*.local} settings are changed.
 
-The GPU module has a few parameters in the \code{gpu\_run\_pars} namelist, most relevant:
-\command{lac\_sparse\_autotuning} set to ``T" will accelerate the preliminaries noticeably.
+The best speedups are obtained for subdomain (= per-process) grid sizes of the order of $256^3$ or bigger. 
 
 \subsection{Limitations}
 \begin{itemize}

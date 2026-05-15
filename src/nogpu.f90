@@ -10,11 +10,13 @@ module GPU
 !
   use Cparam
   use General, only: keep_compiler_quiet, lpointer, keep_compiler_quiet_dble
+  use iso_c_binding
 
   implicit none
 
   logical :: ltest_bcs,ltest_rhs
   integer :: it_test_rhs
+
   include 'gpu.h'
 
 contains
@@ -56,7 +58,6 @@ contains
 !
       real, dimension (:,:,:,:) :: f
       integer :: itsub
-      logical :: early_finalize
 !
       call keep_compiler_quiet(f)
       call keep_compiler_quiet(itsub)
@@ -67,7 +68,6 @@ contains
 !
       real, dimension (:,:,:,:) :: f
       integer :: itsub
-      logical :: early_finalize
       logical :: lrmv
       real(KIND=rkind8), intent(IN) :: t
 !
@@ -115,6 +115,7 @@ contains
       logical, optional :: nowait_
 
       call keep_compiler_quiet(f)
+      if ((present(nowait_))) call keep_compiler_quiet(nowait_)
 
     endsubroutine copy_farray_from_GPU
 !**************************************************************************
@@ -142,9 +143,9 @@ contains
 
     endsubroutine update_on_gpu
 !**************************************************************************
-    subroutine gpu_set_dt()
+    subroutine gpu_prepare_for_first_substep()
 
-    endsubroutine gpu_set_dt
+    endsubroutine gpu_prepare_for_first_substep
 !**************************************************************************
     subroutine infer_gpu(flag)
 
@@ -195,4 +196,53 @@ contains
 
     endsubroutine pushpars2c
 !**************************************************************************
+    subroutine TF_create_model(model_name, config_file_path, lmpicomm)
+
+      logical :: lmpicomm
+      character(len=*), intent(in) :: model_name, config_file_path
+
+      call keep_compiler_quiet(lmpicomm)
+      call keep_compiler_quiet(model_name)
+      call keep_compiler_quiet(config_file_path)
+
+    endsubroutine TF_create_model
+!**************************************************************************
+    subroutine tau_snapshots()
+    endsubroutine tau_snapshots
+!**************************************************************************
+  subroutine TF_load_model(model_name, fname)
+
+    character(len=*), intent(in) :: model_name, fname
+
+    call keep_compiler_quiet(model_name)
+    call keep_compiler_quiet(fname)
+
+  endsubroutine TF_load_model
+!***********************************************************************
+  subroutine TF_load_model_checkpoint(model_name, checkpoint_dir)
+
+    character(len=*), intent(in) :: model_name, checkpoint_dir
+
+    call keep_compiler_quiet(model_name)
+    call keep_compiler_quiet(checkpoint_dir)
+
+  endsubroutine TF_load_model_checkpoint
+!***********************************************************************
+  subroutine TF_save_model(model_name, fname)
+
+    character(len=*), intent(in) :: model_name, fname
+
+    call keep_compiler_quiet(model_name)
+    call keep_compiler_quiet(fname)
+
+  endsubroutine TF_save_model
+!***********************************************************************
+  subroutine TF_save_checkpoint(model_name, checkpoint_dir)
+
+    character(len=*), intent(in) :: model_name, checkpoint_dir
+
+    call keep_compiler_quiet(model_name)
+    call keep_compiler_quiet(checkpoint_dir)
+  endsubroutine TF_save_checkpoint
+!***********************************************************************
 endmodule GPU

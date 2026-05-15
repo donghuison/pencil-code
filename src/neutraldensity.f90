@@ -31,7 +31,7 @@ module NeutralDensity
   real :: diffrhon=0.,diffrhon_hyper3=0.,diffrhon_shock=0.
   real :: lnrhon_const=0., rhon_const=1.
   real :: lnrhon_int=0.,lnrhon_ext=0.
-  real :: lnrhon0,lnrhon_left,lnrhon_right,alpha,zeta
+  real :: lnrhon0=0.,lnrhon_left=0.,lnrhon_right=0.,alpha=0.,zeta=0.
   real, dimension(3) :: diffrhon_hyper3_aniso=0.
   integer, parameter :: ndiff_max=4
   logical :: lmass_source=.false.,lcontinuity_neutral=.true.
@@ -40,12 +40,11 @@ module NeutralDensity
   logical :: ldiffn_hyper3lnrhon=.false.,ldiffn_hyper3_aniso=.false.
   logical :: lfreeze_lnrhonint=.false.,lfreeze_lnrhonext=.false.
   logical :: ldiffn_hyper3_polar=.false., luse_as_ionization=.false.
-  logical :: lpretend_star,lramp_up
+  logical :: lpretend_star=.false.,lramp_up=.false.
   real :: star_form_threshold=1.,star_form_exponent=1.5
   character (len=labellen), dimension(ninit) :: initlnrhon='nothing'
   character (len=labellen), dimension(ndiff_max) :: idiffn=''
   character (len=labellen) :: borderlnrhon='nothing', alpha_prescription='const'
-  character (len=intlen) :: iinit_str
 !
   namelist /neutraldensity_init_pars/ &
        ampllnrhon,initlnrhon,    &
@@ -174,7 +173,7 @@ module NeutralDensity
           if (lroot .and. (.not. lnothing)) print*,'diffusion: nothing'
         case default
           call fatal_error('initialize_neutraldensity', &
-               'No such value for idiff('//trim(itoa(i))//'): '//trim(idiffn(i)))
+               'no such idiff('//trim(itoa(i))//'): '//trim(idiffn(i)))
         endselect
         lnothing=.true.
       enddo
@@ -233,15 +232,7 @@ module NeutralDensity
 !  Tell the BorderProfiles module if we intend to use border driving, so
 !  that the module can request the right pencils.
 !
-      select case (borderlnrhon)
-!
-      case ('zero','0','constant','stratification')
-         call request_border_driving(borderlnrhon)
-      case ('nothing')
-        if (lroot.and.ip<=5) print*,"initialize_neutraldensity: borderlnrhon='nothing'"
-      case default
-         call fatal_error('initialize_neutraldensity','no such borderlnrhon: '//trim(borderlnrhon))
-      endselect
+      call request_border_driving((/borderlnrhon/),'initialize_neutraldensity',ilnrhon)
 !
     endsubroutine initialize_neutraldensity
 !***********************************************************************
@@ -293,10 +284,11 @@ module NeutralDensity
       use General, only: notanumber
       use EquationOfState, only: cs20, cs2bot,cs2top
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
 !
       logical :: lnothing
       integer :: j
+      character (len=intlen) :: iinit_str
 !
 !  Set default values for sound speed at top and bottom.
 !  These may be updated in one of the following initialization routines.
@@ -485,7 +477,7 @@ module NeutralDensity
 !
       use Sub, only: grad,dot,dot2,u_dot_grad,del2,del6,multmv,g2ij
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       type (pencil_case) :: p
       intent(inout) :: f,p
 !
@@ -593,12 +585,11 @@ module NeutralDensity
   !         if (ip<10) print*,'AXEL: p%alpha=',p%alpha
   !         if (ip<10) print*,'AXEL: unit_alpha=',unit_alpha
           else
-            call fatal_error('calc_pencils_neutraldensity', &
-              'no energy equation is used')
+            call fatal_error('calc_pencils_neutraldensity','entropy equation is not used')
           endif
         case default
           call fatal_error('calc_pencils_neutraldensity', &
-            'No such value for alpha_prescription')
+            'no such alpha_prescription: '//trim(alpha_prescription))
         endselect
       endif
 !
@@ -608,7 +599,7 @@ module NeutralDensity
 
       use General, only: keep_compiler_quiet
 
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       real :: ramping_period
 
       if (lpretend_star) then
@@ -632,18 +623,19 @@ module NeutralDensity
 
     endsubroutine neutraldensity_after_boundary
 !***********************************************************************
-    subroutine neutraldensity_before_boundary(f)
-
-      use General, only: keep_compiler_quiet
-
-      real, dimension (mx,my,mz,mfarray) :: f
+!Unused functions are on comment to suppress compiler warnings
+!    subroutine neutraldensity_before_boundary(f)
 !
-! Fill global rhon array using the ilnrhon data.
+!      use General, only: keep_compiler_quiet
 !
-      if (.not.lneutraldensity_nolog.and.irhon/=0) &
-        f(l1:l2,m1:m2,n1:n2,irhon) = exp(f(l1:l2,m1:m2,n1:n2,ilnrhon))
-
-    endsubroutine neutraldensity_before_boundary
+!      real, contiguous,dimension(:,:,:,:) :: f
+!!
+!! Fill global rhon array using the ilnrhon data.
+!!
+!      if (.not.lneutraldensity_nolog.and.irhon/=0) &
+!        f(l1:l2,m1:m2,n1:n2,irhon) = exp(f(l1:l2,m1:m2,n1:n2,ilnrhon))
+!
+!    endsubroutine neutraldensity_before_boundary
 !***********************************************************************
     subroutine dlnrhon_dt(f,df,p)
 !
@@ -655,8 +647,8 @@ module NeutralDensity
       use Deriv, only: der6
       use Sub, only: identify_bcs, del6fj, dot_mn
 !
-      real, dimension (mx,my,mz,mfarray) :: f
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous,dimension(:,:,:,:) :: f
+      real, contiguous,dimension(:,:,:,:) :: df
       type (pencil_case) :: p
 !
       intent(in)  :: f,p
@@ -728,9 +720,9 @@ module NeutralDensity
             call del6fj(f,diffrhon_hyper3_aniso,ilnrhon,tmp)
             fdiff = fdiff + tmp
             if (lupdate_courant_dt) diffus_diffrhon3=diffus_diffrhon3 + &
-                                                 diffrhon_hyper3_aniso(1)*dline_1(:,1)**6 + &
-                                                 diffrhon_hyper3_aniso(2)*dline_1(:,2)**6 + &
-                                                 diffrhon_hyper3_aniso(3)*dline_1(:,3)**6
+                                                     diffrhon_hyper3_aniso(1)*dline_1(:,1)**6 + &
+                                                     diffrhon_hyper3_aniso(2)*dline_1(:,2)**6 + &
+                                                     diffrhon_hyper3_aniso(3)*dline_1(:,3)**6
             if (headtt) print*,'dlnrhon_dt: diffrhon_hyper3=(Dx,Dy,Dz)=',diffrhon_hyper3_aniso
           endif
         endif
@@ -842,9 +834,9 @@ module NeutralDensity
       use BorderProfiles, only: border_driving
       use EquationOfState, only: cs0,cs20
 !
-      real, dimension(mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       type (pencil_case) :: p
-      real, dimension(mx,my,mz,mvar) :: df
+      real, contiguous,dimension(:,:,:,:) :: df
 
       real, dimension(nx) :: f_target !,OO_sph,OO_cyl,cs,theta
 !      real :: r0_pot=0.1
@@ -867,9 +859,7 @@ module NeutralDensity
          f_target=(p%rcyl_mn-p%r_mn)/(cs20*p%r_mn)
          if (lneutraldensity_nolog) f_target=exp(f_target)
          call border_driving(f,df,p,f_target,ilnrhon)
-      case ('nothing')
       endselect
-!
 !
     endsubroutine set_border_neutraldensity
 !***********************************************************************
@@ -966,7 +956,7 @@ module NeutralDensity
     subroutine pushpars2c(p_par)
 
     use Syscalls, only: copy_addr
-    use General , only: string_to_enum
+    use General , only: string_to_enum,keep_compiler_quiet
 
     integer, parameter :: n_pars=30
     integer(KIND=ikind8), dimension(n_pars) :: p_par
@@ -998,6 +988,15 @@ module NeutralDensity
     call copy_addr(enum_alpha_prescription,p_par(23)) ! int
     call string_to_enum(enum_borderlnrhon,borderlnrhon)
     call copy_addr(enum_borderlnrhon,p_par(24)) ! int
+
+    call keep_compiler_quiet(rhon_right)
+    call keep_compiler_quiet(lnrhon_right)
+    call keep_compiler_quiet(lnrhon_int)
+    call keep_compiler_quiet(lnrhon_ext)
+    call keep_compiler_quiet(lnrhon0)
+    call keep_compiler_quiet(kx_lnrhon)
+    call keep_compiler_quiet(ky_lnrhon)
+
     endsubroutine pushpars2c
 !***********************************************************************
 endmodule NeutralDensity

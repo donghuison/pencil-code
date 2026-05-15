@@ -19,6 +19,7 @@ module Snapshot
   type :: pars_for_external
     integer :: ind1, ind2
     character(LEN=fnlen) :: file
+    character(LEN=intlen) :: csnap_nr
   endtype
   type(pars_for_external) :: extpars
 
@@ -27,11 +28,11 @@ module Snapshot
   endinterface
 !
   public :: rsnap, wsnap, wsnap_down, powersnap, output_form, powersnap_prepare, perform_powersnap, &
-            perform_wsnap_ext, perform_wsnap_down
+            perform_wsnap_ext, perform_wsnap_down, perform_wsnap_down_ext
 !
   contains
 !***********************************************************************
-    subroutine wsnap_down(a,flist)
+    subroutine wsnap_down(a)
 !
 !  Write downsampled snapshot file VARd*, labelled consecutively
 !  timestep can be different from timestep for full snapshots
@@ -43,9 +44,9 @@ module Snapshot
 !
       use General, only: safe_character_assign
       use Sub, only: read_snaptime, update_snaptime
+      use Diagnostics, only: save_diagnostic_controls
 !
       real, dimension (:,:,:,:) :: a
-      character (len=*), optional :: flist
 !
       real, save :: tsnap
       integer, save :: nsnap
@@ -68,19 +69,19 @@ module Snapshot
 !
         if (.not.lstart.and.lgpu) call copy_farray_from_GPU(a)
         if (lmultithread) then
+          extpars%csnap_nr=ch
+          call save_diagnostic_controls(lsnap_time=.true.)
 !$        lmasterflags(PERF_WSNAP_DOWN) = .true.
         else
-          call perform_wsnap_down(a)
+          call perform_wsnap_down(a,ch)
         endif
 !
         lsnap_down=.false.
       endif
-! Keeping compiler quiet
-      if (present(flist)) then; endif;
 !
     endsubroutine wsnap_down
 !***********************************************************************
-    subroutine perform_wsnap_down(a)
+    subroutine perform_wsnap_down(a,ch)
 !
 !  Set the range for the variable index.
 !  Not yet possible: both mvar_down and maux_down>0, but mvar_down<mvar,
@@ -89,13 +90,15 @@ module Snapshot
       use Boundcond, only: boundconds_x, boundconds_y, boundconds_z
       use General, only: get_range_no, indgen, safe_character_assign
       use Grid, only: save_grid, coords_aux
-      use HDF5_IO, only: wdim, initialize_hdf5
-      use IO, only: output_snap, output_snap_finalize, lun_output, wgrid, log_filename_to_file
+      use HDF5_IO, only: initialize_hdf5
+      use IO, only: wdim, output_snap, output_snap_finalize, lun_output, wgrid, log_filename_to_file
       use Messages, only: warning
       use Mpicomm, only: periodic_bdry_x, periodic_bdry_y, periodic_bdry_z
       use Persist, only: output_persistent
 
       real, dimension(:,:,:,:) :: a
+      character (len=intlen) :: ch
+
       character (len=fnlen) :: file
 
       logical, save :: lfirst_call=.true.
@@ -104,10 +107,8 @@ module Snapshot
       real, dimension(:,:,:,:), allocatable :: buffer
       integer, dimension(nghost) :: inds
       real, dimension(nghost) :: dxs_ghost, dys_ghost, dzs_ghost
-      character (len=intlen) :: ch
 
-
-      if (mvar_down>0) then
+        if (mvar_down>0) then
           nv1=1
           if (mvar_down==mvar) then
             nv2=mvar+maux_down
@@ -117,6 +118,7 @@ module Snapshot
         else
           nv1=mvar+1; nv2=mvar+maux_down
         endif
+
         allocate(buffer(ndown(1)+2*nghost,ndown(2)+2*nghost,ndown(3)+2*nghost,nv1:nv2))
 
         if (maux_down>0) call update_auxiliaries(a)
@@ -201,13 +203,14 @@ module Snapshot
 !
 !  Calculate auxiliary grid variables for downsampled grid
 !
-        call coords_aux(x(1:ilastx+nghost), y(1:ilasty+nghost),z(1:ilastz+nghost))
+        call coords_aux(x(:ilastx+nghost), y(:ilasty+nghost),z(:ilastz+nghost))
 !
 !  For each direction at boundary: save upper index limit and inner start index for
 !  periodic BCs; then calculate values at downsampled ghost points from BCs
 !
         if (lfirst_proc_x.or.llast_proc_x) then
           l2s=l2; l2is=l2i; l2=ilastx; l2i=l2-nghost+1
+          !print*, 'iproc, l2, l2i=', iproc, l2, l2i
           if (lperi(1).and.nprocx>1) then
             call periodic_bdry_x(buffer,nv1,nv2)
           else
@@ -254,8 +257,8 @@ module Snapshot
 !
         call save_grid(lrestore=.true.)
         call initialize_hdf5
+
         ldownsampling=.false.
-!$      lhelperflags(PERF_WSNAP_DOWN) = .false.
 
     endsubroutine perform_wsnap_down
 !***********************************************************************
@@ -274,11 +277,12 @@ module Snapshot
 !
       use Boundcond, only: update_ghosts
       use General, only: safe_character_assign, loptest
-      use IO, only: log_filename_to_file
+      use IO, only: log_filename_to_file, IO_strategy
       use Sub, only: read_snaptime, update_snaptime
       use Syscalls, only: system_cmd
       use Mpicomm, only: mpibarrier
       use Chemistry, only: make_flame_index, make_mixture_fraction
+      use Diagnostics, only: save_diagnostic_controls
 !
 !  The dimension msnap can either be mfarray (for f-array in run.f90)
 !  or just mvar (for f-array in start.f90 or df-array in run.f90
@@ -294,7 +298,7 @@ module Snapshot
       real, save :: tsnap
       integer, save :: nsnap
       logical, save :: lfirst_call=.true.
-      character (len=fnlen) :: file
+      character (len=fnlen) :: file,tmpfile
       character (len=intlen) :: ch
       integer :: nv1_capitalvar
 !
@@ -339,9 +343,9 @@ module Snapshot
           case ('tphys')
             t_trigger=tphys
           case ('code_time')
-            t_trigger=t
+            t_trigger=real(t)
           case default
-            call fatal_error('wsnap','no such trigger_snap='//trim(trigger_snap))
+            call fatal_error('wsnap','no such trigger_snap: '//trim(trigger_snap))
         end select
         call update_snaptime(file,tsnap,nsnap,dsnap,dble(t_trigger),lsnap,ch)
 !
@@ -358,6 +362,7 @@ module Snapshot
           call safe_character_assign(file,trim(chsnap)//ch)
           if (lmultithread) then
             extpars%ind1=nv1_capitalvar; extpars%ind2=msnap; extpars%file=file
+            call save_diagnostic_controls(lsnap_time=.true.)
 !$          lmasterflags(PERF_WSNAP) = .true.
           else
             call perform_wsnap(a,nv1_capitalvar,msnap,file)
@@ -380,11 +385,14 @@ module Snapshot
         ! update ghosts, because 'update_auxiliaries' may change the data
         if (.not. loptest(noghost).or.ncoarse>1) call update_ghosts(a)
         call safe_character_assign(file,trim(chsnap))
-        if (lbackup_snap .and. .not.lstart .and. .not.(chsnap=='crash.dat' .or. chsnap(1:1)=='d' )) &
-            call system_cmd('mv -f '//trim(directory_snap)//'/'//trim(file)//' '// &
-                            trim(directory_snap)//'/'//trim(file)//'.bck '//' > /dev/null 2>&1')
+        if (lbackup_snap .and. .not.lstart .and. .not.(chsnap=='crash.dat' .or. chsnap(1:1)=='d' .or. chsnap(1:3)=='VAR')) then
+          tmpfile=merge('var.h5 ','var.dat',IO_strategy=='HDF5')
+          call system_cmd('mv -f '//trim(directory_snap)//'/'//trim(tmpfile)//' '// &
+                          trim(directory_snap)//'/'//trim(tmpfile)//'.bck '//' > /dev/null 2>&1')
+        endif
         if (lmultithread.and.nt>0) then
           extpars%ind1=1; extpars%ind2=msnap; extpars%file=file
+          call save_diagnostic_controls(lsnap_time=.true.)
 !$        lmasterflags(PERF_WSNAP) = .true.
         else
           call perform_wsnap(a,1,msnap,file)
@@ -403,9 +411,18 @@ module Snapshot
       real, dimension(:,:,:,:) :: a
 
       call perform_wsnap(a,extpars%ind1,extpars%ind2,extpars%file)
-!$     lhelperflags(PERF_WSNAP) = .false.
+!$    lhelperflags(PERF_WSNAP) = .false.
 
     endsubroutine perform_wsnap_ext
+!***********************************************************************
+    subroutine perform_wsnap_down_ext(a)
+
+      real, dimension(:,:,:,:) :: a
+
+      call perform_wsnap_down(a,extpars%csnap_nr)
+!$    lhelperflags(PERF_WSNAP_DOWN) = .false.
+
+    endsubroutine perform_wsnap_down_ext
 !***********************************************************************
     subroutine perform_wsnap(a,nv1,nv2,file)
 
@@ -430,18 +447,20 @@ module Snapshot
 
     endsubroutine perform_wsnap
 !***********************************************************************
-    subroutine read_predef_snaptimes(file,snaptimes)
+!TP: on comment since not used (to suppress compiler warnings)
+!    subroutine read_predef_snaptimes(file,snaptimes)
+!!
+!!  Yet a stub.
+!!
+!      use General, only: keep_compiler_quiet
 !
-!  Yet a stub.
+!      character(LEN=fnlen) :: file
+!      real, dimension(:), intent(OUT) :: snaptimes   ! allocatable
+!      
+!      call keep_compiler_quiet(file)
+!      call keep_compiler_quiet(snaptimes)
 !
-      use General, only: keep_compiler_quiet
-
-      character(LEN=fnlen) :: file
-      real, dimension(:), intent(OUT) :: snaptimes   ! allocatable
-      
-      call keep_compiler_quiet(snaptimes)
-
-    endsubroutine read_predef_snaptimes
+!    endsubroutine read_predef_snaptimes
 !***********************************************************************
     subroutine rsnap(chsnap,f,msnap,lread_nogrid)
 !
@@ -451,6 +470,9 @@ module Snapshot
 !   5-jan-13/axel: allowed for lread_oldsnap_lnrho2rho=T
 !   8-mar-13/MR  : made f assumed-size to work properly with calls in run.f90
 !  12-feb-15/MR  : added substraction of reference state
+!  15-apr-26/TP  : made f assumed-size again because of weird Fortran rules
+!                  having an explicit size allows the compiler to make a copy of
+!                  it ---> can run out of stack space
 !
       use IO, only: input_snap, input_snap_finalize
       use Persist, only: input_persistent
@@ -464,7 +486,7 @@ module Snapshot
 !
       logical :: lread_nogrid
       integer :: msnap, mode,ipscalar
-      real, dimension (mx,my,mz,msnap) :: f
+      real, dimension (:,:,:,:) :: f
       real, dimension (:,:,:,:), allocatable :: f_oversize
       character (len=*) :: chsnap
       character (len=fnlen) :: file
@@ -484,7 +506,6 @@ module Snapshot
         mode=1
       endif
       file = chsnap
-      if (lbackup_snap.and..not. file_exists(trim(directory_snap)//'/'//trim(chsnap))) file = trim(chsnap)//'.bck'
       if (lroot) call touch_file(trim(workdir)//'/READING')
 !
 !  No need to read maux variables as they will be calculated
@@ -680,7 +701,7 @@ module Snapshot
 !
       elseif (lread_oldsnap_nocoolprof) then
         if (lroot) print*,'read old snapshot file (but without cooling profile)'
-        call input_snap('var.dat',f,msnap-1,mode)
+        call input_snap('var',f,msnap-1,mode)
         if (lpersist) call input_persistent
         call input_snap_finalize
         ! shift the rest of the data
@@ -782,7 +803,7 @@ module Snapshot
           case ('tphys')
             t_trigger=tphys
           case ('code_time')
-            t_trigger=t
+            t_trigger=real(t)
           case default
             call fatal_error('powersnap_prepare','no such trigger_spec='//trim(trigger_spec))
         end select
@@ -807,7 +828,7 @@ module Snapshot
       use Sub, only: update_snaptime
       use Diagnostics, only: save_diagnostic_controls
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       logical, optional :: lwrite_only
 !
       logical :: llwrite_only=.false.,ldo_all,lfirstcall_powerhel
@@ -822,7 +843,7 @@ module Snapshot
 !AB: tspec=t is what Touko did before, and it works for unclear reasons.
 !AB: But now, we also have the possibility of other triggers, and then t is not ok.
 !AB: We still don't understand why this tspec=t is even needed...
-        if (trigger_spec=='code_time') tspec=t
+        if (trigger_spec=='code_time') tspec=real(t)
       else 
 
         !TP: if farray was already copied from the gpu during this iteration for rhs diagnostic purposes
@@ -846,6 +867,7 @@ module Snapshot
         if (ldo_all .and. .not. lmultithread) call update_ghosts(f)
 !
         if (lmultithread) then
+          call save_diagnostic_controls(lsnap_time=.true.)
 !$        lmasterflags(PERF_POWERSNAP) = .true.
         else
           call perform_powersnap(f)
@@ -875,7 +897,7 @@ module Snapshot
       use General, only: parser
 !$    use OMP_lib
 
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
 
       real, dimension (:,:,:), allocatable :: b_vec
       integer :: ivec,stat,ipos,ispec,nloc,mloc,n_pdfs,i,n_cs
@@ -896,10 +918,12 @@ module Snapshot
         if (relvel_spec) call power(f,'v')
         if (mag_spec) call power(f,'b')
         if (vec_spec) call power(f,'a')
+        if (gph_spec) call power(f,'gph')
         if (j_spec)   call power_vec(f,'j')
         if (jb_spec)  call powerhel(f,'j.b',lfirstcall_powerhel) !(not ready yet) ! ready now
         if (ja_spec)  call powerhel(f,'j.a',lfirstcall_powerhel) !(for now, use this instead) ! now does j.b spectra
         if (Lor_spec) call powerLor(f,'Lor')
+        if (OmU_spec) call powerOmU(f,'OmU')
         if (EMF_spec) call powerEMF(f,'EMF')
         if (Tra_spec) call powerTra(f,'Tra')
         lfirstcall=.true.
@@ -1207,7 +1231,7 @@ module Snapshot
       use Radiation, only: radtransfer
       use Shock, only: calc_shock_profile,calc_shock_profile_simple
 !
-      real, dimension (mx,my,mz,mfarray), intent (inout) :: a
+      real, contiguous, dimension(:,:,:,:), intent (inout) :: a
 !
       if (lshock) then
         call calc_shock_profile(a)
@@ -1326,7 +1350,9 @@ module Snapshot
       real, dimension (mx,my,mz,nv), intent(in) :: a
 !
       integer :: i, j, k, kk
-      real, dimension (nx*ny*nz) :: xx, yy, zz
+      real, allocatable, dimension(:) :: xx,yy,zz
+
+      allocate(xx(nx*ny*nz),yy(nx*ny*nz),zz(nx*ny*nz))  
 !
       open(lun_output,FILE=trim(directory_dist)//trim(file)//'.tec')
 !

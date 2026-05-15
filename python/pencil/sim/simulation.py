@@ -14,35 +14,12 @@ from pencil.util import (
     PathWrapper,
     pc_print,
     copy_docstring,
+    DotDict as _DotDict,
     )
 
 class CommandFailedError(RuntimeError):
     pass
 
-
-class _DotDict(dict):
-    """A dict subclass that also supports attribute-style access.
-
-    This allows sim.param to be used both as a dict (sim.param['key'])
-    and with attribute access (sim.param.key), so that it is compatible
-    with the Param objects returned by pc.read.param() and accepted by
-    all reading routines.
-    """
-
-    def __getattr__(self, key):
-        try:
-            return self[key]
-        except KeyError:
-            raise AttributeError("param.{} does not exist".format(key))
-
-    def __setattr__(self, key, value):
-        self[key] = value
-
-    def __delattr__(self, key):
-        try:
-            del self[key]
-        except KeyError:
-            raise AttributeError(key)
 
 class Simulation:
     """
@@ -571,50 +548,27 @@ class Simulation:
             REEXPORT = True
 
         if self.param == False:
-            try:
-                if exists(join(self.datadir, "param.nml")):
-                    if not quiet: print("~ Reading param.nml.. ")
-                    param = param(quiet=quiet, datadir=self.datadir)
-                    self.param = _DotDict()
-                    # read params into Simulation object
-                    for key in dir(param):
-                        if key.startswith("_") or key == "read":
-                            continue
-                        if type(getattr(param, key)) in [bool, list, float, int, str]:
-                            self.param[key] = getattr(param, key)
-                        else:
-                            try:
-                                # allow for nested param objects
-                                self.param[key] = _DotDict()
-                                for subkey in dir(getattr(param, key)):
-                                    if subkey.startswith("_") or subkey == "read":
-                                        continue
-                                    if type(getattr(getattr(param, key), subkey)) in [
-                                        bool,
-                                        list,
-                                        float,
-                                        int,
-                                        str,
-                                    ]:
-                                        self.param[key][subkey] = getattr(
-                                            getattr(param, key), subkey
-                                        )
-                            except:
-                                # not nested param objects
-                                continue
-                    REEXPORT = True
-                else:
-                    if not quiet:
-                        print(
-                            f"? WARNING: for {self.path}",
-                            + "? Simulation has not run yet! Meaning: No param.nml found!",
-                            sep='\n',
+            REEXPORT = True
+            if exists(join(self.datadir, "param.nml")):
+                if not quiet: print("~ Reading param.nml.. ")
+
+                try:
+                    self.param = param(
+                        quiet=quiet,
+                        datadir=self.datadir,
+                        keep_nested=True,
+                        conflicts_quiet=quiet,
                         )
-                    REEXPORT = True
-            except:
-                print(f"! ERROR: while reading param.nml for {self.path}")
-                self.param = False
-                REEXPORT = True
+                except Exception as e:
+                    warnings.warn(f"! ERROR: ({e}) while reading param.nml for {self.path}")
+                    self.param = False
+            else:
+                if not quiet:
+                    print(
+                        f"? WARNING: for {self.path}",
+                        "? Simulation has not run yet! Meaning: No param.nml found!",
+                        sep='\n',
+                    )
 
         if self.param != False and (self.grid == False or self.ghost_grid == False):
             # read grid only if param is not False
@@ -640,7 +594,7 @@ class Simulation:
                 self.param["dx"] = self.grid.dx
                 self.param["dy"] = self.grid.dy
                 self.param["dz"] = self.grid.dz
-            except:
+            except Exception:
                 if not quiet:
                     print(
                         "? WARNING: Updating grid and ghost_grid "
@@ -1012,7 +966,13 @@ class Simulation:
 
         with open(join(self.datadir, "time_series.dat"), "rb") as fh:
             first = next(fh).decode()
-            fh.seek(-1024, 2)
+            try:
+                fh.seek(-2, 2)
+                while fh.read(1).decode() != '\n':
+                    fh.seek(-2, 1)
+            except OSError:
+                #single-line file
+                fh.seek(0)
             last = fh.readlines()[-1].decode()
 
         header = [

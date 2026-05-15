@@ -23,7 +23,7 @@ module Initcond
   public :: soundwave,sinwave,sinwave_phase,coswave,coswave_phase,cos_cos_sin
   public :: hatwave
   public :: acosy
-  public :: sph_constb,tanh_hyperbola
+  public :: sph_constb,tanh_hyperbola,sech2x,coalesce_tubes,coalesce_tubes_pe
   public :: gaunoise, posnoise, posnoise_rel
   public :: gaunoise_rprof
   public :: gaussian, gaussian3d, gaussianpos
@@ -102,7 +102,7 @@ module Initcond
 !  14-oct-09/irina: coded
 !
       integer :: i,j,k
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: dmx,radius, dtheta,theta
 !
      dmx=(l2-l1)/mx
@@ -128,7 +128,7 @@ module Initcond
 !  26-jul-02/axel: coded
 !
       integer :: i,j
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, optional :: kx,ky,kz,KKx,KKy,KKz
       real :: ampl,kx1=pi/2.,ky1=0.,kz1=pi/2.,KKx1=0.,KKy1=0.,KKz1=0.
 !
@@ -167,7 +167,7 @@ module Initcond
 !  20-jan-07/axel: adapted
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real,optional :: kx,ky,kz
       real :: ampl,kx1=pi/2.,ky1=0.,kz1=pi/2.
 !
@@ -199,7 +199,7 @@ module Initcond
 !   2-dec-03/axel: coded
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real,optional :: kx,ky,kz
       real :: ampl,kx1=pi/2.,ky1=0.,kz1=pi/2.
 !
@@ -230,7 +230,7 @@ module Initcond
 !   8-may-12/axel: coded
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real,optional :: ky,kz
       real :: ampl, ky1=0., kz1=pi/2., x1, x2
 !
@@ -260,7 +260,7 @@ module Initcond
 !   2-dec-03/axel: coded
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, optional :: kx, ky, kz, xbot, nexp
       real :: ampl, kx1=pi/2., ky1=0., kz1=pi/2., xbot_, nexp_
 !
@@ -307,7 +307,7 @@ module Initcond
 !   2-dec-03/axel: coded
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real,optional :: kx,ky,kz,phasey
       real :: ampl,kx1=pi/2.,ky1=0.,kz1=pi/2., phasey1=0.
 !
@@ -341,7 +341,7 @@ module Initcond
       use General, only: roptest
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real,optional :: kx,ky,kz,phasey
 !
       real :: ampl,kx1,ky1,kz1,phasey1
@@ -374,7 +374,7 @@ module Initcond
 !   1-jul-07/axel: coded
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real,optional :: kx,ky,kz
       real :: ampl,kx1=pi/2.,ky1=0.,kz1=pi/2.
 !
@@ -403,7 +403,7 @@ module Initcond
 !   2-jul-07/axel: coded
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real,optional :: kx,ky,kz
       real :: ampl,kx1=pi/2.,ky1=0.,kz1=pi/2.
 !
@@ -432,7 +432,7 @@ module Initcond
 !  15-mar-07/axel: coded
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real,optional :: kx,ky,kz
       real :: ampl,kx1=pi/2.,ky1=0.,kz1=pi/2.
 !
@@ -462,7 +462,7 @@ module Initcond
 !  26-mar-25/TP: coded
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real,optional :: kx,ky,kz
       real :: ampl,kx1=pi/2.,ky1=0.,kz1=pi/2.
 !
@@ -493,7 +493,7 @@ module Initcond
 !   2-dec-03/axel: coded
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real,optional :: kx,ky,kz
       real :: ampl,kx1=pi/2.,ky1=0.,kz1=pi/2.
 !
@@ -524,7 +524,7 @@ module Initcond
 !  13-aug-09/axel: coded
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real,optional :: kx,kz
       real :: ampl,kx1=pi/2.,kz1=pi/2.
 !
@@ -554,7 +554,7 @@ module Initcond
 !  13-aug-09/axel: coded
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real,optional :: ky,kz
       real :: ampl,ky1=pi/2.,kz1=pi/2.
 !
@@ -584,7 +584,7 @@ module Initcond
 !   2-dec-03/axel: coded
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real,optional :: kx,ky,kz
       real :: ampl,kx1=pi/2.,ky1=0.,kz1=pi/2.
 !
@@ -614,7 +614,7 @@ module Initcond
 !  15-aug-09/axel: adapted from cosy_sinz
 !
       integer :: i,j
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real,optional :: kx,kz
       real :: ampl,kx1=1.,kz1=pi
 !
@@ -636,7 +636,7 @@ module Initcond
 !   11-oct-06/wolf: modified to only set one component of aa
 !
       integer :: i,j
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real,optional :: ky,kz
       real :: ampl,ky1=1.,kz1=pi
 !
@@ -658,7 +658,7 @@ module Initcond
 !   11-oct-06/wolf: modified to only set one component of aa
 !
       integer :: i,j
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real,optional :: ky,kz
       real :: ampl,ky1=1.,kz1=pi
 !
@@ -688,7 +688,7 @@ module Initcond
 !   11-oct-06/wolf: modified to only set one component of aa
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real,optional :: ky,kz
       real :: ampl,ky1=1.,kz1=pi
 !
@@ -711,7 +711,7 @@ module Initcond
 !   2-dec-03/axel: coded
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real,optional :: kx,ky,kz
       real :: ampl,kx1=pi/2.,ky1=0.,kz1=pi/2.
 !
@@ -748,7 +748,7 @@ module Initcond
 !  21-feb-08/axel: coded
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real,optional :: kx,ky,kz
       real :: ampl,kx1=1.,ky1=1.,kz1=1.
 !
@@ -787,7 +787,7 @@ module Initcond
 !   9-dec-10/bing: coded
 !
       integer, intent(in) :: i
-      real, dimension (mx,my,mz,mfarray) ,intent(inout) :: f
+      real, contiguous, dimension(:,:,:,:) ,intent(inout) :: f
       real, intent(in) :: ampl,x0,y0
 !
       if (ampl==0) then
@@ -806,7 +806,7 @@ module Initcond
 !  21-may-11/axel: coded
 !
       integer, intent(in) :: i
-      real, dimension (mx,my,mz,mfarray) ,intent(inout) :: f
+      real, contiguous, dimension(:,:,:,:) ,intent(inout) :: f
       real, intent(in) :: ampl,x0,y0
 !
       if (ampl==0) then
@@ -824,7 +824,7 @@ module Initcond
 !   9-mar-08/axel: coded
 !
       integer :: i,ll1,ll2,mm1,mm2,nn1,nn2
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,ampl2,width
 !
       intent(in)  :: ampl,ampl2,i,width
@@ -855,7 +855,7 @@ module Initcond
 !   12-jul-07/mgellert: coded
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl, mu, omegao, omegai, rinner, router, a, b
 !
       rinner=xyz0(1)
@@ -889,7 +889,7 @@ module Initcond
       real, dimension (nr)               :: om_nr, xsteps
       real, dimension (nr+2)             :: om_all, om_diff
       real, dimension (:), allocatable   :: omx
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real                              :: ampl, mu, gap, omegao, omegai, rinner, router, step
       real                              :: x0, y0
       character(len=20)                 :: unfmt
@@ -955,7 +955,7 @@ module Initcond
 !   2-may-03/axel: coded
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real,optional :: kx,ky,kz
       real :: ampl,width,k=1.,width2,k2
 !
@@ -1011,7 +1011,7 @@ module Initcond
 !   9-nov-04/anders: coded
 !
       integer :: i,l
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: kx,ky,kz,kx2,ky2,kz2
       real :: ampl,width,width2
 !
@@ -1044,7 +1044,7 @@ module Initcond
 !  20-sep-03/axel: added 1/2 factor in defn; hopefully ok with everyone?
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real,optional :: kx,ky,kz
       real :: ampl,k=1.
 !
@@ -1095,7 +1095,7 @@ module Initcond
 !  28-may-03/axel: coded
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,radius,radius21
 !
       radius21=1./radius**2
@@ -1113,7 +1113,7 @@ module Initcond
 !  Maybe could have been done by extending gaussian3d, but didn't want to interfere
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,radius,posx, posy, posz, radius21, alp
       real, dimension (nx) :: phase_factor
       real, optional :: slope
@@ -1159,7 +1159,7 @@ module Initcond
 !   2-may-03/axel: coded
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, optional :: kx,ky,kz
       real :: ampl,k=1.
 !
@@ -1210,7 +1210,7 @@ module Initcond
 !   6-jul-02/axel: coded
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, optional :: kx,ky,kz
       real :: ampl,k=1.
 !
@@ -1261,7 +1261,7 @@ module Initcond
 !  21-sep-09/axel: coded
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, optional :: kx,ky,kz
       real :: ampl,k=1.
 !
@@ -1312,7 +1312,7 @@ module Initcond
 !  14-apr-03/axel: coded
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, optional :: kx,ky,kz
       real :: ampl,k=1.
 !
@@ -1363,7 +1363,7 @@ module Initcond
 !  30-oct-03/axel: coded
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,ky
 !
       do n=n1,n2; do m=m1,m2
@@ -1381,7 +1381,7 @@ module Initcond
 !  30-oct-03/axel: coded
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       complex :: coef
       complex :: ii=(0.,1.)
       real :: ampl,kx,ky,kz
@@ -1399,7 +1399,7 @@ module Initcond
 !  30-oct-03/axel: coded
 !
       integer :: i,ivv
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       complex, dimension (3) :: coef
       complex :: ii=(0.,1.)
       real :: ampl,kx,ky,kz
@@ -1419,7 +1419,7 @@ module Initcond
 !  30-oct-03/axel: coded
 !
       integer :: i,ivv
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       complex, dimension (3) :: coef,coefb
       complex :: ii=(0.,1.)
       real :: ampl,kx,ky,kz,k2
@@ -1444,9 +1444,11 @@ module Initcond
 !  jump
 !
 !  19-sep-02/axel: coded
+!  16-apr-26/TP: wrote the spread calls out since at least with -O0 on the Cray compiler
+!                on LUMI would otherwise run out of stack space
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (mx,my) :: profxy
       real, dimension (mx) :: profx
       real, dimension (my) :: profy
@@ -1454,7 +1456,8 @@ module Initcond
       real :: fleft,fright,width
       real :: xmid,ymid,zmid
       character(len=*) :: dir
-      integer :: l,m
+      integer :: l,m,n
+
 !
 !  jump; check direction
 !
@@ -1462,15 +1465,27 @@ module Initcond
 !
       case ('x')
         profx=fleft+(fright-fleft)*.5*(1.+tanh((x-xmid)/width))
-        f(:,:,:,i)=f(:,:,:,i)+spread(spread(profx,2,my),3,mz)
+        do m=1,my
+        do n=1,mz
+          f(:,m,n,i)=f(:,m,n,i)+profx
+        enddo
+        enddo
 !
       case ('y')
         profy=fleft+(fright-fleft)*.5*(1.+tanh((y-ymid)/width))
-        f(:,:,:,i)=f(:,:,:,i)+spread(spread(profy,1,mx),3,mz)
+        do l=1,mx
+        do n=1,mz
+          f(l,:,n,i)=f(l,:,n,i)+profy
+        enddo
+        enddo
 !
       case ('z')
         profz=fleft+(fright-fleft)*.5*(1.+tanh((z-zmid)/width))
-        f(:,:,:,i)=f(:,:,:,i)+spread(spread(profz,1,mx),2,my)
+        do l=1,mx
+        do m=1,my
+          f(l,m,:,i)=f(l,m,:,i)+profz
+        enddo
+        enddo
 !
 !  2-D shocks
 !
@@ -1508,7 +1523,7 @@ module Initcond
 !  21-apr-05/axel: added possibility of Bz component
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (mx) :: profy,profz,alog_cosh_xwidth
       real :: fyleft,fyright,fzleft,fzright,width
       character(len=*) :: dir
@@ -1547,7 +1562,7 @@ module Initcond
 !  21-apr-05/axel: added possibility of Bz component
 !
       integer :: i,il,im
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (mz) :: profx,profy,alog_cosh_zwidth
       real :: fyleft,fyright,fxleft,fxright,width
       character(len=*) :: dir
@@ -1578,14 +1593,17 @@ module Initcond
 !
 !  19-jun-02/axel: coded
 !   5-jul-02/axel: made additive (if called twice), kx,ky,kz are optional
+!  16-apr-26/TP: wrote the spread calls out since at least with -O0 on the Cray compiler
+!                on LUMI would otherwise run out of stack space
 !
       integer :: i,j
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (mx) :: sfuncx,cfuncx
       real, dimension (my) :: sfuncy,cfuncy
       real, dimension (mz) :: sfuncz,cfuncz
       real, optional :: kx,ky,kz,kx2,ky2,kz2,phase
       real :: ampl,k=1.,ph
+      integer :: l,m,n
 !
 !  This routine should be removed by 2020
 !
@@ -1614,12 +1632,32 @@ module Initcond
           if (lroot) print*,'beltrami_old: ampl=0; kx=',k
         elseif (ampl>0) then
           if (lroot) print*,'beltrami_old: Beltrami field (pos-hel): kx,i=',k,i
-          j=i+1; f(:,:,:,j)=f(:,:,:,j)+spread(spread(sfuncx,2,my),3,mz)
-          j=i+2; f(:,:,:,j)=f(:,:,:,j)+spread(spread(cfuncx,2,my),3,mz)
+          j=i+1 
+          do m=1,my
+          do n=1,mz
+                f(:,m,n,j)=f(:,m,n,j)+sfuncx
+          enddo
+          enddo
+          j=i+2 
+          do m=1,my
+          do n=1,mz
+                f(:,m,n,j)=f(:,m,n,j)+cfuncx
+          enddo
+          enddo
         elseif (ampl<0) then
           if (lroot) print*,'beltrami_old: Beltrami field (neg-hel): kx,i=',k,i
-          j=i+1; f(:,:,:,j)=f(:,:,:,j)+spread(spread(cfuncx,2,my),3,mz)
-          j=i+2; f(:,:,:,j)=f(:,:,:,j)+spread(spread(sfuncx,2,my),3,mz)
+          j=i+1 
+          do m=1,my
+          do n=1,mz
+            f(:,m,n,j)=f(:,m,n,j)+cfuncx
+          enddo
+          enddo
+          j=i+2 
+          do m=1,my
+          do n=1,mz
+            f(:,m,n,j)=f(:,m,n,j)+sfuncx
+          enddo
+          enddo
         endif
       endif
 !
@@ -1635,12 +1673,32 @@ module Initcond
           if (lroot) print*,'beltrami_old: ampl=0; ky=',k
         elseif (ampl>0) then
           if (lroot) print*,'beltrami_old: Beltrami field (pos-hel): ky,i=',k,i
-          j=i;   f(:,:,:,j)=f(:,:,:,j)+spread(spread(cfuncy,1,mx),3,mz)
-          j=i+2; f(:,:,:,j)=f(:,:,:,j)+spread(spread(sfuncy,1,mx),3,mz)
+          j=i   
+          do l=1,mx
+          do n=1,mz
+            f(l,:,n,j)=f(l,:,n,j)+cfuncy
+          enddo
+          enddo
+          j=i+2 
+          do l=1,mx
+          do n=1,mz
+            f(l,:,n,j)=f(l,:,n,j)+sfuncy
+          enddo
+          enddo
         elseif (ampl<0) then
           if (lroot) print*,'beltrami_old: Beltrami field (neg-hel): ky,i=',k,i
-          j=i;   f(:,:,:,j)=f(:,:,:,j)+spread(spread(sfuncy,1,mx),3,mz)
-          j=i+2; f(:,:,:,j)=f(:,:,:,j)+spread(spread(cfuncy,1,mx),3,mz)
+          j=i  
+          do l=1,mx
+          do n=1,mz
+            f(l,:,n,j)=f(l,:,n,j)+sfuncy
+          enddo
+          enddo
+          j=i+2
+          do l=1,mx
+          do n=1,mz
+            f(l,:,n,j)=f(l,:,n,j)+cfuncy
+          enddo
+          enddo
         endif
       endif
 !
@@ -1656,12 +1714,32 @@ module Initcond
           if (lroot) print*,'beltrami_old: ampl=0; kz=',k
         elseif (ampl>0) then
           if (lroot) print*,'beltrami_old: Beltrami field (pos-hel): kz,i=',k,i
-          j=i;   f(:,:,:,j)=f(:,:,:,j)+spread(spread(sfuncz,1,mx),2,my)
-          j=i+1; f(:,:,:,j)=f(:,:,:,j)+spread(spread(cfuncz,1,mx),2,my)
+          j=i;
+          do l=1,mx
+          do m=1,my
+            f(l,m,:,j)=f(l,m,:,j)+sfuncz
+          enddo
+          enddo
+          j=i+1 
+          do l=1,mx
+          do m=1,my
+            f(l,m,:,j)=f(l,m,:,j)+cfuncz
+          enddo
+          enddo
         elseif (ampl<0) then
           if (lroot) print*,'beltrami_old: Beltrami field (neg-hel): kz,i=',k,i
-          j=i;   f(:,:,:,j)=f(:,:,:,j)+spread(spread(cfuncz,1,mx),2,my)
-          j=i+1; f(:,:,:,j)=f(:,:,:,j)+spread(spread(sfuncz,1,mx),2,my)
+          j=i;   
+          do l=1,mx
+          do m=1,my
+            f(l,m,:,j)=f(l,m,:,j)+cfuncz
+          enddo
+          enddo
+          j=i+1 
+          do l=1,mx
+          do m=1,my
+            f(l,m,:,j)=f(l,m,:,j)+sfuncz
+          enddo
+          enddo
         endif
       endif
 !
@@ -1676,7 +1754,7 @@ module Initcond
       use Sub, only: cubic_step
 !
       integer :: i,j,l,m,n
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (mx) :: sfuncx,cfuncx,xprof
       real, dimension (my) :: sfuncy,cfuncy,yprof
       real, dimension (mz) :: sfuncz,cfuncz,zprof
@@ -1754,16 +1832,19 @@ module Initcond
 !
 !  19-jun-02/axel: coded
 !   5-jul-02/axel: made additive (if called twice), kx,ky,kz are optional
+!  16-apr-26/TP: wrote the spread calls out since at least with -O0 on the Cray compiler
+!                on LUMI would otherwise run out of stack space
 !
       use Sub, only: cubic_step
 !
       integer :: i,j
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (mx) :: sfuncx,cfuncx
       real, dimension (my) :: sfuncy,cfuncy
       real, dimension (mz) :: sfuncz,cfuncz,zprof
       real, optional :: kx,ky,kz,kx2,ky2,kz2,phase,sigma,z0,width
       real :: ampl,k,ph,sig
+      integer :: l,m,n
 !
 !  possibility of shifting the Beltrami wave by phase ph
 !
@@ -1811,12 +1892,33 @@ module Initcond
           if (lroot) print*,'beltrami: ampl=0; kx=',k
         elseif (ampl>0) then
           if (lroot) print*,'beltrami: Beltrami field (pos-hel): kx,i=',k,i
-          j=i+1; f(:,:,:,j)=f(:,:,:,j)+spread(spread(sfuncx,2,my),3,mz)*sig
-          j=i+2; f(:,:,:,j)=f(:,:,:,j)+spread(spread(cfuncx,2,my),3,mz)
+          j=i+1 
+          do m=1,my
+          do n=1,mz
+            f(:,m,n,j)=f(:,m,n,j)+sfuncx*sig
+          enddo
+          enddo
+
+          j=i+2 
+          do m=1,my
+          do n=1,mz
+            f(:,m,n,j)=f(:,m,n,j)+cfuncx
+          enddo
+          enddo
         elseif (ampl<0) then
           if (lroot) print*,'beltrami: Beltrami field (neg-hel): kx,i=',k,i
-          j=i+1; f(:,:,:,j)=f(:,:,:,j)+spread(spread(cfuncx,2,my),3,mz)
-          j=i+2; f(:,:,:,j)=f(:,:,:,j)+spread(spread(sfuncx,2,my),3,mz)*sig
+          j=i+1
+          do m=1,my
+          do n=1,mz
+            f(:,m,n,j)=f(:,m,n,j)+cfuncx
+          enddo
+          enddo
+          j=i+2
+          do m=1,my
+          do n=1,mz
+            f(:,m,n,j)=f(:,m,n,j)+sfuncx*sig
+          enddo
+          enddo
         endif
       endif
 !
@@ -1832,12 +1934,32 @@ module Initcond
           if (lroot) print*,'beltrami: ampl=0; ky=',k
         elseif (ampl>0) then
           if (lroot) print*,'beltrami: Beltrami field (pos-hel): ky,i=',k,i
-          j=i;   f(:,:,:,j)=f(:,:,:,j)+spread(spread(cfuncy,1,mx),3,mz)
-          j=i+2; f(:,:,:,j)=f(:,:,:,j)+spread(spread(sfuncy,1,mx),3,mz)*sig
+          j=i   
+          do l=1,mx
+          do n=1,mz
+            f(l,:,n,j)=f(l,:,n,j)+cfuncy
+          enddo
+          enddo
+          j=i+2 
+          do l=1,mx
+          do n=1,mz
+            f(l,:,n,j)=f(l,:,n,j)+sfuncy*sig
+          enddo
+          enddo
         elseif (ampl<0) then
           if (lroot) print*,'beltrami: Beltrami field (neg-hel): ky,i=',k,i
-          j=i;   f(:,:,:,j)=f(:,:,:,j)+spread(spread(sfuncy,1,mx),3,mz)*sig
-          j=i+2; f(:,:,:,j)=f(:,:,:,j)+spread(spread(cfuncy,1,mx),3,mz)
+          j=i;
+          do l=1,mx
+          do n=1,mz
+            f(l,:,n,j)=f(l,:,n,j)+sfuncy*sig
+          enddo
+          enddo
+          j=i+2
+          do l=1,mx
+          do n=1,mz
+            f(l,:,n,j)=f(l,:,n,j)+cfuncy
+          enddo
+          enddo
         endif
       endif
 !
@@ -1853,12 +1975,32 @@ module Initcond
           if (lroot) print*,'beltrami: ampl=0; kz=',k
         elseif (ampl>0) then
           if (lroot) print*,'beltrami: Beltrami field (pos-hel): kz,i=',k,i
-          j=i;   f(:,:,:,j)=f(:,:,:,j)+spread(spread(sfuncz,1,mx),2,my)*sig
-          j=i+1; f(:,:,:,j)=f(:,:,:,j)+spread(spread(cfuncz,1,mx),2,my)
+          j=i   
+          do l=1,mx
+          do m=1,my
+            f(l,m,:,j)=f(l,m,:,j)+sfuncz*sig
+          enddo
+          enddo
+          j=i+1
+          do l=1,mx
+          do m=1,my
+            f(l,m,:,j)=f(l,m,:,j)+cfuncz
+          enddo
+          enddo
         elseif (ampl<0) then
           if (lroot) print*,'beltrami: Beltrami field (neg-hel): kz,i=',k,i
-          j=i;   f(:,:,:,j)=f(:,:,:,j)+spread(spread(cfuncz,1,mx),2,my)
-          j=i+1; f(:,:,:,j)=f(:,:,:,j)+spread(spread(sfuncz,1,mx),2,my)*sig
+          j=i
+          do l=1,mx
+          do m=1,my
+            f(l,m,:,j)=f(l,m,:,j)+cfuncz
+          enddo
+          enddo
+          j=i+1
+          do l=1,mx
+          do m=1,my
+            f(l,m,:,j)=f(l,m,:,j)+sfuncz*sig
+          enddo
+          enddo
         endif
       endif
 !
@@ -1872,7 +2014,7 @@ module Initcond
 !  16-apr-21/axel: coded
 !
       integer :: i,j
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: kx, ky, kz
       real :: ampl, phase
       complex :: phase_factor_x
@@ -1908,7 +2050,7 @@ module Initcond
 !   5-jul-02/axel: made additive (if called twice), kx,ky,kz are optional
 !
       integer :: i,j,l,m,n
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: kx, ky, kz, phase, k, cfunc, sfunc
       !real :: ex=.1, ey=.33, ez=.58
       !real :: ex=1., ey=.0, ez=1.
@@ -1949,15 +2091,18 @@ module Initcond
 !
 !  19-jun-02/axel: coded
 !   5-jul-02/axel: made additive (if called twice), kx,ky,kz are optional
+!  16-apr-26/TP: wrote the spread calls out since at least with -O0 on the Cray compiler
+!                on LUMI would otherwise run out of stack space
 !
       integer :: i,j
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (mx) :: sfuncx,cfuncx
       real, dimension (my) :: sfuncy,cfuncy
       real, dimension (mz) :: sfuncz,cfuncz
       logical, optional :: sym
       real, optional :: kx,ky,kz,kx2,ky2,kz2,phase
       real :: ampl,k=1.,kp,km,ph
+      integer :: l,m,n
 !
 !  possibility of shifting the Bihelical wave by phase ph
 !
@@ -1988,12 +2133,32 @@ module Initcond
           if (lroot) print*,'bihelical: ampl=0; kx=',k
         elseif (ampl>0) then
           if (lroot) print*,'bihelical: Bihelical field (pos-hel): kx,i=',k,i
-          j=i+1; f(:,:,:,j)=f(:,:,:,j)+spread(spread(sfuncx,2,my),3,mz)
-          j=i+2; f(:,:,:,j)=f(:,:,:,j)+spread(spread(cfuncx,2,my),3,mz)
+          j=i+1
+          do m=1,my
+          do n=1,mz
+            f(:,m,n,j)=f(:,m,n,j)+sfuncx
+          enddo
+          enddo
+          j=i+2
+          do m=1,my
+          do n=1,mz
+            f(:,m,n,j)=f(:,m,n,j)+cfuncx
+          enddo
+          enddo
         elseif (ampl<0) then
           if (lroot) print*,'bihelical: Bihelical field (neg-hel): kx,i=',k,i
-          j=i+1; f(:,:,:,j)=f(:,:,:,j)+spread(spread(cfuncx,2,my),3,mz)
-          j=i+2; f(:,:,:,j)=f(:,:,:,j)+spread(spread(sfuncx,2,my),3,mz)
+          j=i+1
+          do m=1,my
+          do n=1,mz
+            f(:,m,n,j)=f(:,m,n,j)+cfuncx
+          enddo
+          enddo
+          j=i+2 
+          do m=1,my
+          do n=1,mz
+            f(:,m,n,j)=f(:,m,n,j)+sfuncx
+          enddo
+          enddo
         endif
       endif
 !
@@ -2015,12 +2180,32 @@ module Initcond
           if (lroot) print*,'bihelical: ampl=0; ky=',k
         elseif (ampl>0) then
           if (lroot) print*,'bihelical: Bihelical field (pos-hel): ky,i=',k,i
-          j=i;   f(:,:,:,j)=f(:,:,:,j)+spread(spread(cfuncy,1,mx),3,mz)
-          j=i+2; f(:,:,:,j)=f(:,:,:,j)+spread(spread(sfuncy,1,mx),3,mz)
+          j=i
+          do l=1,mx
+          do n=1,mz
+            f(l,:,n,j)=f(l,:,n,j)+cfuncy
+          enddo
+          enddo
+          j=i+2
+          do l=1,mx
+          do n=1,mz
+            f(l,:,n,j)=f(l,:,n,j)+sfuncy
+          enddo
+          enddo
         elseif (ampl<0) then
           if (lroot) print*,'bihelical: Bihelical field (neg-hel): ky,i=',k,i
-          j=i;   f(:,:,:,j)=f(:,:,:,j)+spread(spread(sfuncy,1,mx),3,mz)
-          j=i+2; f(:,:,:,j)=f(:,:,:,j)+spread(spread(cfuncy,1,mx),3,mz)
+          j=i
+          do l=1,mx
+          do n=1,mz
+            f(l,:,n,j)=f(l,:,n,j)+sfuncy
+          enddo
+          enddo
+          j=i+2
+          do l=1,mx
+          do n=1,mz
+            f(l,:,n,j)=f(l,:,n,j)+cfuncy
+          enddo
+          enddo
         endif
       endif
 !
@@ -2042,12 +2227,32 @@ module Initcond
           if (lroot) print*,'bihelical: ampl=0; kz=',k
         elseif (ampl>0) then
           if (lroot) print*,'bihelical: Bihelical field (pos-hel): kz,i=',k,i
-          j=i;   f(:,:,:,j)=f(:,:,:,j)+spread(spread(sfuncz,1,mx),2,my)
-          j=i+1; f(:,:,:,j)=f(:,:,:,j)+spread(spread(cfuncz,1,mx),2,my)
+          j=i  
+          do l=1,mx
+          do m=1,my
+            f(l,m,:,j)=f(l,m,:,j)+sfuncz
+          enddo
+          enddo
+          j=i+1
+          do l=1,mx
+          do m=1,my
+            f(l,m,:,j)=f(l,m,:,j)+cfuncz
+          enddo
+          enddo
         elseif (ampl<0) then
           if (lroot) print*,'bihelical: Bihelical field (neg-hel): kz,i=',k,i
-          j=i;   f(:,:,:,j)=f(:,:,:,j)+spread(spread(cfuncz,1,mx),2,my)
-          j=i+1; f(:,:,:,j)=f(:,:,:,j)+spread(spread(sfuncz,1,mx),2,my)
+          j=i
+          do l=1,mx
+          do m=1,my
+            f(l,m,:,j)=f(l,m,:,j)+cfuncz
+          enddo
+          enddo
+          j=i+1
+          do l=1,mx
+          do m=1,my
+            f(l,m,:,j)=f(l,m,:,j)+sfuncz
+          enddo
+          enddo
         endif
       endif
 !
@@ -2059,7 +2264,7 @@ module Initcond
 !
       integer :: i
       integer :: ix,iy,iz
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,kz,nfactor,maxAx,maxAy,zmax,zmin,zzm !,maxA
       complex :: omega,Ax,Ay
 !
@@ -2088,15 +2293,18 @@ module Initcond
 !  Beltrami field (as initial condition)
 !
 !  23-sep-10/dhruba: adapted from beltrami
+!  16-apr-26/TP: wrote the spread calls out since at least with -O0 on the Cray compiler
+!                on LUMI would otherwise run out of stack space
 !
       integer :: i,j
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (mx) :: sfuncx,cfuncx
       real, dimension (my) :: sfuncy,cfuncy
       real, dimension (mz) :: sfuncz,cfuncz
       real, optional :: kx,ky,kz,kx2,ky2,kz2,phase
       real :: ampl,k=1.,ph
       complex :: omg,omgsqr
+      integer :: l,m,n
 !
 ! complex cube roots of unity
 !
@@ -2128,12 +2336,32 @@ module Initcond
           if (lroot) print*,'beltrami: ampl=0; kx=',k
         elseif (ampl>0) then
           if (lroot) print*,'beltrami: Beltrami field (pos-hel): kx,i=',k,i
-          j=i+1; f(:,:,:,j)=f(:,:,:,j)+spread(spread(sfuncx,2,my),3,mz)
-          j=i+2; f(:,:,:,j)=f(:,:,:,j)+spread(spread(cfuncx,2,my),3,mz)
+          j=i+1; 
+          do m=1,my
+          do n=1,mz
+            f(:,m,n,j)=f(:,m,n,j)+sfuncx
+          enddo
+          enddo
+          j=i+2
+          do m=1,my
+          do n=1,mz
+            f(:,m,n,j)=f(:,m,n,j)+cfuncx
+          enddo
+          enddo
         elseif (ampl<0) then
           if (lroot) print*,'beltrami: Beltrami field (neg-hel): kx,i=',k,i
-          j=i+1; f(:,:,:,j)=f(:,:,:,j)+spread(spread(cfuncx,2,my),3,mz)
-          j=i+2; f(:,:,:,j)=f(:,:,:,j)+spread(spread(sfuncx,2,my),3,mz)
+          j=i+1
+          do m=1,my
+          do n=1,mz
+            f(:,m,n,j)=f(:,m,n,j)+cfuncx
+          enddo
+          enddo
+          j=i+2
+          do m=1,my
+          do n=1,mz
+            f(:,m,n,j)=f(:,m,n,j)+sfuncx
+          enddo
+          enddo
         endif
       endif
 !
@@ -2151,12 +2379,32 @@ module Initcond
           if (lroot) print*,'beltrami: ampl=0; ky=',k
         elseif (ampl>0) then
           if (lroot) print*,'beltrami: Beltrami field (pos-hel): ky,i=',k,i
-          j=i;   f(:,:,:,j)=f(:,:,:,j)+spread(spread(cfuncy,1,mx),3,mz)
-          j=i+2; f(:,:,:,j)=f(:,:,:,j)+spread(spread(sfuncy,1,mx),3,mz)
+          j=i
+          do l=1,mx
+          do n=1,mz
+            f(l,:,n,j)=f(l,:,n,j)+cfuncy
+          enddo
+          enddo
+          j=i+2
+          do l=1,mx
+          do n=1,mz
+            f(l,:,n,j)=f(l,:,n,j)+sfuncy
+          enddo
+          enddo
         elseif (ampl<0) then
           if (lroot) print*,'beltrami: Beltrami field (neg-hel): ky,i=',k,i
-          j=i;   f(:,:,:,j)=f(:,:,:,j)+spread(spread(sfuncy,1,mx),3,mz)
-          j=i+2; f(:,:,:,j)=f(:,:,:,j)+spread(spread(cfuncy,1,mx),3,mz)
+          j=i
+          do l=1,mx
+          do n=1,mz
+            f(l,:,n,j)=f(l,:,n,j)+sfuncy
+          enddo
+          enddo
+          j=i+2
+          do l=1,mx
+          do n=1,mz
+            f(l,:,n,j)=f(l,:,n,j)+cfuncy
+          enddo
+          enddo
         endif
       endif
 !
@@ -2174,12 +2422,32 @@ module Initcond
           if (lroot) print*,'beltrami: ampl=0; kz=',k
         elseif (ampl>0) then
           if (lroot) print*,'beltrami: Beltrami field (pos-hel): kz,i=',k,i
-          j=i;   f(:,:,:,j)=f(:,:,:,j)+spread(spread(sfuncz,1,mx),2,my)
-          j=i+1; f(:,:,:,j)=f(:,:,:,j)+spread(spread(cfuncz,1,mx),2,my)
+          j=i
+          do l=1,mx
+          do m=1,my
+            f(l,m,:,j)=f(l,m,:,j)+sfuncz
+          enddo
+          enddo
+          j=i+1
+          do l=1,mx
+          do m=1,my
+            f(l,m,:,j)=f(l,m,:,j)+cfuncz
+          enddo
+          enddo
         elseif (ampl<0) then
           if (lroot) print*,'beltrami: Beltrami field (neg-hel): kz,i=',k,i
-          j=i;   f(:,:,:,j)=f(:,:,:,j)+spread(spread(cfuncz,1,mx),2,my)
-          j=i+1; f(:,:,:,j)=f(:,:,:,j)+spread(spread(sfuncz,1,mx),2,my)
+          j=i
+          do l=1,mx
+          do m=1,my
+            f(l,m,:,j)=f(l,m,:,j)+cfuncz
+          enddo
+          enddo
+          j=i+1 
+          do l=1,mx
+          do m=1,my
+            f(l,m,:,j)=f(l,m,:,j)+sfuncz
+          enddo
+          enddo
         endif
       endif
 !
@@ -2192,7 +2460,7 @@ module Initcond
 !  12-nov-09/axel: coded
 !
       integer :: i,j,l
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (mx) :: J0,J1
       real :: ampl,kx,kx1
 !
@@ -2222,7 +2490,7 @@ module Initcond
 !  12-nov-09/axel: coded
 !
       integer :: i,j,l
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (mx) :: J0
       real :: ampl,kx,kx1
 !
@@ -2248,7 +2516,7 @@ module Initcond
 !  23-mar-16/axel: coded
 !
       integer :: i,j,dimensionality
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,kx,ky,kz
 !
 !  check input parameters
@@ -2280,7 +2548,7 @@ module Initcond
 !  21-aug-07/axel: coded
 !
       integer :: i,j
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,kx,kz,zbot
 !
 !  check input parameters
@@ -2304,13 +2572,16 @@ module Initcond
 !  Roberts Flow (as initial condition)
 !
 !   9-jun-05/axel: coded
+!  16-apr-26/TP: wrote the spread calls out since at least with -O0 on the Cray compiler
+!                on LUMI would otherwise run out of stack space
 !
       integer :: i,j
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,k=1.,kf,fac1,fac2,relhel
       real, optional :: kx
       character (len=labellen) :: flowtype='I'
       character (len=labellen), optional :: flow
+      integer :: l,m,n
 !
 !  Possibility of changing the wavenumber
 !
@@ -2334,18 +2605,42 @@ module Initcond
 !
 !  shifted by 90 degrees in the x and y directions
 !
-        j=i+0; f(:,:,:,j)=f(:,:,:,j)+fac1*spread(spread(sin(k*x),2,my),3,mz)&
-                                         *spread(spread(cos(k*y),1,mx),3,mz)
+        j=i+0
+        do l=1,mx
+        do m=1,my
+        do n=1,mz
+          f(l,m,n,j)=f(l,m,n,j)+fac1*sin(k*x(l))*cos(k*y(m))
+        enddo
+        enddo
+        enddo
 !
-        j=i+1; f(:,:,:,j)=f(:,:,:,j)-fac1*spread(spread(cos(k*x),2,my),3,mz)&
-                                         *spread(spread(sin(k*y),1,mx),3,mz)
+        j=i+1
+        do l=1,mx
+        do m=1,my
+        do n=1,mz
+          f(l,m,n,j)=f(l,m,n,j)-fac1*cos(k*x(l))*sin(k*y(m))
+        enddo
+        enddo
+        enddo
 !
         if (flowtype=='I-shift') then
-          j=i+2; f(:,:,:,j)=f(:,:,:,j)+fac2*spread(spread(sin(k*x),2,my),3,mz)&
-                                           *spread(spread(sin(k*y),1,mx),3,mz)
+          j=i+2
+          do l=1,mx
+          do m=1,my
+          do n=1,mz
+            f(l,m,n,j)=f(l,m,n,j)+fac2*sin(k*x(l))*sin(k*y(m))
+          enddo
+          enddo
+          enddo
         elseif (flowtype=='II-shift') then
-          j=i+2; f(:,:,:,j)=f(:,:,:,j)+fac2*spread(spread(cos(k*x),2,my),3,mz)&
-                                           *spread(spread(cos(k*y),1,mx),3,mz)
+          j=i+2
+          do l=1,mx
+          do m=1,my
+          do n=1,mz
+            f(l,m,n,j)=f(l,m,n,j)+fac2*cos(k*x(l))*cos(k*y(m))
+          enddo
+          enddo
+          enddo
         else
           call fatal_error('robertsflow','no such flowtype')
         endif
@@ -2354,18 +2649,42 @@ module Initcond
 !  original, where field = curl(phi*zz)+phi*zz and curl(phi*zz)+tilde(phi)*zz
 !  with phi=cosk0x*cosk0y for flows I and II, respectively.
 !
-        j=i+0; f(:,:,:,j)=f(:,:,:,j)-fac1*spread(spread(cos(k*x),2,my),3,mz)&
-                                         *spread(spread(sin(k*y),1,mx),3,mz)
+        j=i+0
+        do l=1,mx
+        do m=1,my
+        do n=1,mz
+          f(l,m,n,j)=f(l,m,n,j)-fac1*cos(k*x(l))*sin(k*y(m))
+        enddo
+        enddo
+        enddo
 !
-        j=i+1; f(:,:,:,j)=f(:,:,:,j)+fac1*spread(spread(sin(k*x),2,my),3,mz)&
-                                         *spread(spread(cos(k*y),1,mx),3,mz)
+        j=i+1
+        do l=1,mx
+        do m=1,my
+        do n=1,mz
+          f(l,m,n,j)=f(l,m,n,j)+fac1*sin(k*x(l))*cos(k*y(m))
+        enddo
+        enddo
+        enddo
 !
         if (flowtype=='I') then
-          j=i+2; f(:,:,:,j)=f(:,:,:,j)+fac2*spread(spread(cos(k*x),2,my),3,mz)&
-                                           *spread(spread(cos(k*y),1,mx),3,mz)
+          j=i+2
+          do l=1,mx
+          do m=1,my
+          do n=1,mz
+            f(l,m,n,j)=f(l,m,n,j)+fac2*cos(k*x(l))*cos(k*y(m))
+          enddo
+          enddo
+          enddo
         elseif (flowtype=='II') then
-          j=i+2; f(:,:,:,j)=f(:,:,:,j)+fac2*spread(spread(sin(k*x),2,my),3,mz)&
-                                           *spread(spread(sin(k*y),1,mx),3,mz)
+          j=i+2
+          do l=1,mx
+          do m=1,my
+          do n=1,mz
+            f(l,m,n,j)=f(l,m,n,j)+fac2*sin(k*x(l))*sin(k*y(m))
+          enddo
+          enddo
+          enddo
         else
           call fatal_error('robertsflow','no such flowtype')
         endif
@@ -2380,7 +2699,7 @@ module Initcond
 !   6-jan-25/axel: coded
 !
       integer :: i,j
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,k=1.,kf,fac1,fac2,relhel
       real, optional :: kx
       character (len=labellen) :: flowtype='I'
@@ -2427,7 +2746,7 @@ module Initcond
 !   2-mar-13/axel: coded
 !
       integer :: j
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,KKz,fact
 !
 !  By(z)=B0*exp(-z/2H), and put KKz=1/2H, so
@@ -2445,7 +2764,7 @@ module Initcond
 !   9-jun-05/axel: coded
 !
       integer :: i,j
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,kx,ky,kz
 !
 !  prepare coefficients
@@ -2464,7 +2783,7 @@ module Initcond
 !  24-may-09/axel: coded
 !
       integer :: i,j
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,kx,ky,kz
 !
 !  sets up a nearly force-free bipolar region
@@ -2487,7 +2806,7 @@ module Initcond
 !  24-may-09/axel: coded
 !
       integer :: i,j
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,kx,ky
 !
 !  sets up a nearly force-free bipolar region
@@ -2510,7 +2829,7 @@ module Initcond
 !   2-aug-02/axel: adapted from Beltrami
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (mx) :: envelope_x
       real, optional :: kx,ky,kz,width
       real :: ampl, k=1., fac
@@ -2566,7 +2885,7 @@ module Initcond
 !  14-nov-03/axel: adapted from sinwave
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, optional :: kx, ky, kz
       real :: ampl, k=1., fac
 !
@@ -2619,7 +2938,7 @@ module Initcond
 !!  14-nov-03/axel: adapted from sinwave
 !!
 !      integer :: i
-!      real, dimension (mx,my,mz,mfarray) :: f
+!      real, contiguous, dimension(:,:,:,:) :: f
 !      real,optional :: kx,ky,kz
 !      real :: ampl
 !!
@@ -2638,7 +2957,7 @@ module Initcond
 !  27-aug-09/dhruba: adapted from sinwave
 !
       integer :: izero,l,m
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl
 !
 ! set minimum and maximum values for r and theta
@@ -2664,7 +2983,7 @@ module Initcond
 !  22-jul-22/axel: added keyword pos for positive values only
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, optional :: kx, ky, kz, power, pos
       real :: ampl,k=1.,fac,width,pow=1.
 !
@@ -2722,7 +3041,7 @@ module Initcond
 !  14-nov-03/axel: adapted from sound wave
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, optional :: kx,ky,kz
       real :: ampl,k=1.,fac
 !
@@ -2772,7 +3091,7 @@ module Initcond
 !
 !  23-jan-06/anders: adapted from sinwave.
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl, kx, ky, kz, phase, fact, k2
       integer :: i
       logical, optional :: lnorm_kk
@@ -2809,7 +3128,7 @@ module Initcond
 !
 !  13-jun-06/anders: adapted from sinwave-phase.
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl, kx, ky, kz, phase, fact, k2
       integer :: i
       logical, optional :: lnorm_kk
@@ -2846,7 +3165,7 @@ module Initcond
 !
 !  13-jun-05/maurice reyes: sent to axel via email
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (mx) :: funx
       real, dimension (my) :: funy
       real, dimension (mz) :: funz
@@ -2909,7 +3228,7 @@ module Initcond
       use Sub, only: write_zprof
       use Cdata, only: lnoghost_strati
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (mzgrid) :: lnrho0,ss0,lnTT0,acc0
       real, dimension (mz) :: lnrho_mz,ss_mz,lnTT_mz
       real :: tmp,var1,var2,var3
@@ -3091,7 +3410,7 @@ module Initcond
 !
       use EquationOfState, only: eoscalc
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (mxgrid) :: lnrho0,ss0,lnTT0
       real :: tmp,var1,var2
       logical :: exist
@@ -3210,11 +3529,13 @@ module Initcond
 !
       use EquationOfState, only: eoscalc
 !
-      real, dimension (mx,my,mz,mfarray) :: f
-      real, dimension (nxgrid,nzgrid,mvar) :: slice
+      real, contiguous, dimension(:,:,:,:) :: f
+      real, allocatable, dimension(:,:,:) :: slice
       logical :: exist
       integer :: stat
       character (len=labellen) :: strati_type
+      
+      allocate(slice(nxgrid,nzgrid,mvar))
 !
 !  read mean stratification and write into array
 !  if file is not found in run directory, search under trim(directory)
@@ -3260,7 +3581,7 @@ module Initcond
 !
       use Mpicomm, only: mpireduce_sum, mpibcast_real, MPI_COMM_PENCIL
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (nx) :: hh, xi
       real, dimension (mz) :: hz
       real :: delS,ampl,sigma2,sigma,delta2,delta,eps,radius,a_ell,b_ell,c_ell
@@ -3389,7 +3710,7 @@ module Initcond
 !
       use Mpicomm, only: mpireduce_sum, mpibcast_real, MPI_COMM_PENCIL
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (nx) :: hh, xi, r_ell
       real :: rbound,sigma2,sigma,delta2,delta,eps,radius
       real :: gamma,eps2,radius2,width,a_ell,b_ell,c_ell
@@ -3502,7 +3823,7 @@ module Initcond
 !
 !   8-jun-04/anders: adapted from planet
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (nx) :: r_ell, xi
       real :: sigma,eps_ell,a_ell,b_ell,width,rbound
 !
@@ -3538,7 +3859,7 @@ module Initcond
 !  Baroclinic shearing sheet initial condition
 !  11-nov-03/anders: coded
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: sz,I_int
       real :: gamma,dlnrhobdx,co1_ss,co2_ss,cs20
 !
@@ -3580,7 +3901,7 @@ module Initcond
 !  19-may-02/axel: coded
 !
       integer :: i,j
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl
 !
       if (lroot) print*, 'crazy: sinusoidal magnetic field: for debugging purposes'
@@ -3606,7 +3927,7 @@ module Initcond
 !  24-april-09/dhruba: coded
 !
       integer :: i,ix,iy
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl
 !      real :: arg1,arg2
 !
@@ -3631,7 +3952,7 @@ module Initcond
 !  30-may-11/axel: tanh layer
 !
       integer :: i1
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,eps
 !
       if (ampl==0) then
@@ -3661,7 +3982,7 @@ module Initcond
 !  14-jul-13/axel: adapted for Cartesian coordinates
 !
       integer :: i1,i2
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (nx) :: rr,rr2,pp,Ap
       real :: ampl,radius
 !
@@ -3715,7 +4036,7 @@ module Initcond
 !  14-jul-13/axel: coded
 !
       integer :: i1,i2
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (nx) :: rr2,tmp
       real :: ampl,radius
 !
@@ -3765,7 +4086,7 @@ module Initcond
 !  11-sep-02/axel: allowed for scalar field (if i1=i2)
 !
       integer :: i1,i2
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (nx) :: tmp,tube_radius_sqr !,modulate
       real :: ampl,radius,eps
       real :: center1_x,center1_z
@@ -3818,7 +4139,7 @@ module Initcond
 !                  in Vermersch & Brandenburg (2009, AN 330, 797-806).
 !
       integer :: i1,i2
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (nx) :: tmp,modulate,tube_radius_sqr
       real :: ampl,radius,eps,kx
       real :: center1_y,center1_z
@@ -3876,7 +4197,7 @@ module Initcond
       use Sub, only: erfunc
 !
       integer :: i1,i2,l
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,a,eps,width,tmp,radius,r_minus_a
       real :: center1_x,center1_z
 !
@@ -3937,7 +4258,7 @@ module Initcond
 !  11-sep-02/axel: allowed for scalar field (if i1=i2)
 !
       integer :: i1,i2
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (nx) :: tmp,modulate
       real :: ampl,radius,epsilon_nonaxi,ky
 !
@@ -3991,7 +4312,7 @@ module Initcond
 !  17-may-15/piyali.chatterjee: coded from  htube2
 !
       integer :: i1,i2
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (mx) :: tmp,modulate
       real :: ampl,radius,epsilon_nonaxi,kx,qtube
       real :: center1_y,center1_z,rhorad
@@ -4051,7 +4372,7 @@ module Initcond
 !
 !   7-dec-02/axel: coded
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,H,A0,gravz,cs0,rho0,lnrho0
 !
       if (ampl==0) then
@@ -4076,7 +4397,7 @@ module Initcond
 !  19-jun-02/axel: coded
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,zflayer,width
 !
       if (ampl==0) then
@@ -4101,7 +4422,7 @@ module Initcond
 !  09-apr-10/piyali: copied from hfluxlayer
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,zflayer,width
       logical, intent(in), optional :: ladd_bb
 !
@@ -4135,7 +4456,7 @@ module Initcond
 !  19-jul-13/axel+illa: copied from hfluxlayer_y
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl
 !
       if (ampl==0) then
@@ -4160,7 +4481,7 @@ module Initcond
 !  22-mar-04/axel: coded
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,xflayer,width
 !
       if (ampl==0) then
@@ -4185,7 +4506,7 @@ module Initcond
 !  17-jun-04/axel: coded
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,kx,kz,zmid
 !
       if (ampl==0) then
@@ -4216,7 +4537,7 @@ module Initcond
 !  19-jun-02/axel: coded
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,kz,zbot
 !
       if (ampl==0) then
@@ -4243,7 +4564,7 @@ module Initcond
 !  19-jun-02/axel: coded
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,kx
 !
       if (ampl==0) then
@@ -4269,7 +4590,7 @@ module Initcond
 !  19-jun-02/axel: coded
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl
 !
       if (ampl==0) then
@@ -4294,7 +4615,7 @@ module Initcond
 !  27-jul-02/axel: coded
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl
 !
       if (ampl==0) then
@@ -4319,7 +4640,7 @@ module Initcond
 !  24-jul-03/axel: adapted from uniform_x
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl
 !
       if (ampl==0) then
@@ -4350,7 +4671,7 @@ module Initcond
 !  27-jul-02/axel: coded
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (nx) :: rr
       real :: ampl
 !
@@ -4379,7 +4700,7 @@ module Initcond
       use Sub, only: erfunc
 
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl, z0_gaussian, width_gaussian
 !
       if (ampl==0) then
@@ -4405,7 +4726,7 @@ module Initcond
 !  05-jul-07/mgellert: coded
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl
 !
       if (ampl==0) then
@@ -4435,7 +4756,7 @@ module Initcond
 !  02-aug-2005/joishi: allowed for arbitrary kx
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl
       real, optional :: kx
       real :: k
@@ -4468,7 +4789,7 @@ module Initcond
 !  22-jun-04/anders: adapted from vfield
 !
       integer :: i
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,kx
 !
       if (ampl==0) then
@@ -4494,7 +4815,7 @@ module Initcond
 !
       integer :: i,i1,i2
       real, dimension (mx) :: tmp
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl
 !
 !  set gaussian random noise vector
@@ -4521,7 +4842,7 @@ module Initcond
 !
       integer :: i
       real, dimension (mx) :: tmp
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl
 !
 !  set positive random noise vector
@@ -4552,7 +4873,7 @@ module Initcond
 !
       integer :: i,i1,i2
       real, dimension (mx) :: tmp
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,ampl_rel
 !
 !  set random noise vector
@@ -4579,7 +4900,7 @@ module Initcond
 !
       integer :: i
       real, dimension (mx) :: tmp
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,ampl_rel
 !
 !  set random noise vector
@@ -4605,7 +4926,7 @@ module Initcond
 !  10-sep-03/axel: result only *added* to whatever f array had before
 !
       real :: ampl
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: i1,i2
 !
       intent(in)    :: ampl,i1,i2
@@ -4645,7 +4966,7 @@ module Initcond
 !  10-sep-03/axel: result only *added* to whatever f array had before
 !
       real :: ampl
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: i
 !
       real, dimension (mx) :: r,p,tmp
@@ -4683,7 +5004,7 @@ module Initcond
 ! 18-apr-04/wolf: adapted from gaunoise_vect
 !
       real, dimension (nz) :: ampl
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: i1,i2
 !
       real, dimension (mx) :: r,p,tmp
@@ -4717,7 +5038,7 @@ module Initcond
 ! 18-apr-04/wolf: coded
 !
       real, dimension (nz) :: ampl
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: i
 !
       intent(in)    :: ampl,i
@@ -4739,7 +5060,7 @@ module Initcond
       use Sub, only: cubic_step, get_radial_distance
 !
       real :: ampl,rnoise_int,rnoise_ext
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: i1,i2
 !
       real, dimension (mx) :: prof, rr, r, p, tmp, rr_cyl, rr_sph
@@ -4795,7 +5116,7 @@ module Initcond
 !
 !  18-apr-04/wolf: coded
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,rnoise_int,rnoise_ext
       integer :: i
 !
@@ -4815,7 +5136,7 @@ module Initcond
 ! 23-nov-02/axel: included scaling factor ampl, corrected lperi argument
 !
       real :: amplx,amply,amplz
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: ivar
 !
       real, dimension (nx) :: tmp
@@ -4861,7 +5182,7 @@ module Initcond
 !  20-jul-09/hubbard: coded
 !
       real :: ampl
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: ivar
 !
       real, dimension (nx) :: tmp
@@ -4918,7 +5239,7 @@ module Initcond
 ! 21-jul-09/hubbard: coded
 !
       real :: powerlr
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: ivar
 !
       real :: zoverh, hoverr
@@ -4945,7 +5266,7 @@ module Initcond
 !  7-dec-02/axel: coded
 !
       integer :: ivar
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,kx,ky,kz
 !
       if (lroot) print*, 'cos_cos_sin: ivar = ', ivar
@@ -4967,7 +5288,7 @@ module Initcond
 !  12-feb-03/ulf: coded
 !
       integer :: ivar
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,ky,kz
 !
       if (lroot) print*, 'tor_pert: sinusoidal modulation of ivar = ', ivar
@@ -4987,7 +5308,7 @@ module Initcond
 !  16-jul-03/axel: coded
 !
       real :: ampl
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: ivar
 !
       if (lroot) print*, 'const_omega: constant angular velcoity  = ', ivar
@@ -5005,7 +5326,7 @@ module Initcond
 !  16-jul-03/axel: coded
 !
       real :: ampl
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: ivar
 !
       if (lroot) print*, 'diffrot: sinusoidal modulation of ivar = ', ivar
@@ -5023,7 +5344,7 @@ module Initcond
 !  16-jul-03/axel: coded
 !
       real :: ampl
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: ivar
 !
       real :: kx,kz
@@ -5048,7 +5369,7 @@ module Initcond
       use Fourier, only: fourier_transform
 !
       real :: ampl,initpower,cutoff
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: i1,i2
 !
       real, dimension (:,:,:), allocatable :: k2, u_re, u_im
@@ -5075,13 +5396,13 @@ module Initcond
 !
         if ((initpower/=2.).or.(cutoff/=0.)) then
 !
-          k2x = cshift((/(i-(nx+1)/2,i=0,nx-1)/),+(nx+1)/2)*2*pi/Lx
+          k2x = cshift((/(i-floor((nx+1)/.2),i=0,nx-1)/),+floor((nx+1)/.2))*2*pi/Lx
           k2 =      (spread(spread(k2x,2,ny),3,nz))**2
 !
-          k2y = cshift((/(i-(ny+1)/2,i=0,ny-1)/),+(ny+1)/2)*2*pi/Ly
+          k2y = cshift((/(i-floor((ny+1)/.2),i=0,ny-1)/),+floor((ny+1)/.2))*2*pi/Ly
           k2 = k2 + (spread(spread(k2y,1,nx),3,nz))**2
 !
-          k2z = cshift((/(i-(nz+1)/2,i=0,nz-1)/),+(nz+1)/2)*2*pi/Lz
+          k2z = cshift((/(i-floor((nz+1)/.2),i=0,nz-1)/),+floor((nz+1)/.2))*2*pi/Lz
           k2 = k2 + (spread(spread(k2z,1,nx),2,ny))**2
 !
           k2(1,1,1) = 1.  ! Avoid division by zero
@@ -5144,7 +5465,7 @@ module Initcond
       real, dimension (:,:,:), allocatable :: k2, u_re, u_im, r
       real, dimension (:,:,:), allocatable :: k2mkpeak
       real, dimension (:), allocatable :: kx, ky, kz
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,initpower,mhalf,cutoff,scale_factor
       real :: nfact=4.,kpeak,kpeak1,kpeak21,nexp1,nexp2,kgaussian,fact
 !
@@ -5186,15 +5507,15 @@ module Initcond
 !
         scale_factor=1
         if (.not.lscale_tobox1) scale_factor=2*pi/Lx
-        kx=cshift((/(i-(nxgrid+1)/2,i=0,nxgrid-1)/),+(nxgrid+1)/2)*scale_factor
+        kx=cshift((/(i-floor((nxgrid+1)/.2),i=0,nxgrid-1)/),+floor((nxgrid+1)/2.))*scale_factor
 !
         scale_factor=1
         if (.not.lscale_tobox1) scale_factor=2*pi/Ly
-        ky=cshift((/(i-(nygrid+1)/2,i=0,nygrid-1)/),+(nygrid+1)/2)*scale_factor
+        ky=cshift((/(i-floor((nygrid+1)/.2),i=0,nygrid-1)/),+floor((nygrid+1)/2.))*scale_factor
 !
         scale_factor=1
         if (.not.lscale_tobox1) scale_factor=2*pi/Lz
-        kz=cshift((/(i-(nzgrid+1)/2,i=0,nzgrid-1)/),+(nzgrid+1)/2)*scale_factor
+        kz=cshift((/(i-floor((nzgrid+1)/.2),i=0,nzgrid-1)/),+floor((nzgrid+1)/2.))*scale_factor
 !
 !  integration over shells
 !
@@ -5347,7 +5668,7 @@ module Initcond
       logical :: lskip_projection,lfactors,llogbranch,ldouble, ltime, ltime_old1
       logical :: ltime_new1, lrho_nonuni1, l2d1, lsqrt_qirro1, lnot_amp1, lrandom_ampl1
       logical :: lfixed_phase1
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: i, i1, i2, ikx, iky, ikz, stat, ik, nk, ilnr1
       integer, intent(in), optional :: ilnr
       real, intent(in), optional :: k1hel, k2hel, qexp, nfact0, compk0
@@ -5525,21 +5846,21 @@ module Initcond
 !
       scale_factor=1
       if (.not.lscale_tobox1) scale_factor=2*pi/Lx
-      kx=cshift((/(i-nxgrid/2,i=0,nxgrid-1)/),nxgrid/2)*scale_factor
+      kx=cshift((/(i-idiv(nxgrid,2),i=0,nxgrid-1)/),idiv(nxgrid,2))*scale_factor
       if (lroot.and.ip<10) print*,'AXEL: kx=',kx
 !
       if (.not. lsquash1) then
         scale_factor=1
         if (.not.lscale_tobox1) scale_factor=2*pi/Ly
       endif
-      ky=cshift((/(i-nygrid/2,i=0,nygrid-1)/),nygrid/2)*scale_factor
+      ky=cshift((/(i-idiv(nygrid,2),i=0,nygrid-1)/),idiv(nygrid,2))*scale_factor
       if (lroot.and.ip<10) print*,'AXEL: ky=',ky
 !
       if (.not. lsquash1) then
         scale_factor=1
         if (.not.lscale_tobox1) scale_factor=2*pi/Lz
       endif
-      kz=cshift((/(i-nzgrid/2,i=0,nzgrid-1)/),nzgrid/2)*scale_factor
+      kz=cshift((/(i-idiv(nzgrid,2),i=0,nzgrid-1)/),idiv(nzgrid,2))*scale_factor
       if (lroot.and.ip<10) print*,'AXEL: kz=',kz
 !
 !  Generate flat spectrum with random phase (between -pi and pi).
@@ -5611,8 +5932,8 @@ module Initcond
 !
       if (lfixed_phase1) then
         do i=1,i2-i1+1
-          u_re(:,:,:,i)=u_im(:,:,:,i)*cos(-sqrt(k2)*t)
-          u_im(:,:,:,i)=u_im(:,:,:,i)*sin(-sqrt(k2)*t)
+          u_re(:,:,:,i)=u_im(:,:,:,i)*cos(-sqrt(k2)*real(t))
+          u_im(:,:,:,i)=u_im(:,:,:,i)*sin(-sqrt(k2)*real(t))
         enddo
       endif
 !
@@ -6187,26 +6508,44 @@ module Initcond
 !
     endsubroutine power_randomphase_hel
 !***********************************************************************
-    subroutine bunch_davies(f,i1a,i1b,i2a,i2b,ampl,kpeak,deriv_prefactor)
+    subroutine bunch_davies(f,i1a,i1b,i2a,i2b,ampl,kpeak,deriv_prefactor, &
+        lappy_BD_k1D_factor,lapply_BD_kNy_factor,linv)
 !
 !  21-mar-25/axel: adapted from power_randomphase_hel
 !  21-may-25/axel: when kpeak<0, interpret is as sharp cutoff; powerlaw otherwise.
+!  12-apr-26/axel: added lappy_BD_k1D_factor, hardwired linv=T (indep of N, F -> scales with N^6 in 3-D)
 !
       use Fourier, only: fft_xyz_parallel
       use General, only: loptest, roptest
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: i, i1a, i1b, i2a, i2b, ikx, iky, ikz, stat, ndim_u, ndim_v
       real, dimension (:,:,:,:), allocatable :: u_re, u_im, v_re, v_im
       real, dimension (:,:,:), allocatable :: k1, r
       real, dimension (:), allocatable :: kx, ky, kz
-      real :: ampl, kpeak, deriv_prefactor, scale_factor=1.,ksteepness=5.
+      real :: ampl, ampl_scaled, kpeak, deriv_prefactor, scale_factor=1.,ksteepness=5.
+      real :: kNy_x, kNy_y, kNy_z
+      logical, optional :: lappy_BD_k1D_factor,lapply_BD_kNy_factor,linv
 !
       if (ampl==0.) then
-        if (lroot) print*,'bunch_davies: set variables to zero; i1a,i1b,i2a,i2b=',i1a,i1b,i2a,i2b
-        !f(:,:,:,i1a:i1b) = 0.
-        !f(:,:,:,i2a:i2b) = 0.
+        if (lroot) print*,'bunch_davies: do nothing with variables i1a,i1b,i2a,i2b=',i1a,i1b,i2a,i2b
         return
+      endif
+!
+!  Apply lappy_BD_k1D_factor. Note that what we call here scale_factor is the same as k1.
+!  Note also that this factor is here the other way around than in Caranano's thesis.
+!  But with this factor included, the spectra become independent of k1.
+!
+      scale_factor=2*pi/Lx
+      if (loptest(lapply_BD_kNy_factor)) then
+        kNy_x=2*pi*nxgrid/Lx
+        kNy_y=2*pi*nygrid/Ly
+        kNy_z=2*pi*nzgrid/Lz
+        ampl_scaled=ampl*sqrt(kNy_x*kNy_y*kNy_z)
+      elseif (loptest(lappy_BD_k1D_factor)) then
+        ampl_scaled=ampl*scale_factor**1.5
+      else
+        ampl_scaled=ampl
       endif
 !
 !  Allocate memory for arrays r and k1.
@@ -6240,14 +6579,13 @@ module Initcond
 !
 !  Scale factors if box size is not 2*pi
 !
-      scale_factor=2*pi/Lx
-      kx=cshift((/(i-nxgrid/2,i=0,nxgrid-1)/),nxgrid/2)*scale_factor
+      kx=cshift((/(i-idiv(nxgrid,2),i=0,nxgrid-1)/),idiv(nxgrid,2))*scale_factor
       if (lroot.and.ip<10) print*,'AXEL: kx=',kx
 !
-      ky=cshift((/(i-nygrid/2,i=0,nygrid-1)/),nygrid/2)*scale_factor
+      ky=cshift((/(i-idiv(nygrid,2),i=0,nygrid-1)/),idiv(nygrid,2))*scale_factor
       if (lroot.and.ip<10) print*,'AXEL: ky=',ky
 !
-      kz=cshift((/(i-nzgrid/2,i=0,nzgrid-1)/),nzgrid/2)*scale_factor
+      kz=cshift((/(i-idiv(nzgrid,2),i=0,nzgrid-1)/),idiv(nzgrid,2))*scale_factor
       if (lroot.and.ip<10) print*,'AXEL: kz=',kz
 !
 !  Set the 3 components of v_im to Gaussian-distributed random values.
@@ -6289,22 +6627,6 @@ module Initcond
       endif
       if (lroot) k1(1,1,1) = 1.  ! To avoid division by zero.
 !
-!  Put cutoff at kpeak in v_im.
-!
-!     if (kpeak<0.) then
-!       where(k1>=abs(kpeak))
-!         v_im(:,:,:,1)=0.
-!         v_im(:,:,:,2)=0.
-!         v_im(:,:,:,3)=0.
-!       endwhere
-!     else
-!       where(k1>=kpeak)
-!         v_im(:,:,:,1)=v_im(:,:,:,1)*(kpeak/k1)**3
-!         v_im(:,:,:,2)=v_im(:,:,:,2)*(kpeak/k1)**3
-!         v_im(:,:,:,3)=v_im(:,:,:,3)*(kpeak/k1)**3
-!       endwhere
-!     endif
-!
 !  Compute Bunch-Davies vacuum, A = e^(-i*k*eta)/sqrt(2*k), so
 !  E = -dA/deta = +i*k*e^(-i*k*eta)/sqrt(2*k) = i*e^(-i*k*eta)*sqrt(k/2)
 !  Here, v_im serves as a temporary array until the last line.
@@ -6313,22 +6635,24 @@ module Initcond
 !  exp(-i*k1) = cos(-i*k1) + i*sin(-i*k1)
 !
       do i=1,1+i1b-i1a
-        !u_re(:,:,:,i)=+ampl*v_im(:,:,:,i)*cos(-k1)/sqrt(k1*2.)
-        !u_im(:,:,:,i)=+ampl*v_im(:,:,:,i)*sin(-k1)/sqrt(k1*2.)
-        u_re(:,:,:,i)=+ampl*v_re(:,:,:,i)/sqrt(2.*k1)*.5*(1.-tanh(ksteepness*(k1/kpeak-1.)))
-        u_im(:,:,:,i)=+ampl*v_im(:,:,:,i)/sqrt(2.*k1)*.5*(1.-tanh(ksteepness*(k1/kpeak-1.)))
-        v_re(:,:,:,i)=-k1*u_im(:,:,:,i)
-        v_im(:,:,:,i)=+k1*u_re(:,:,:,i)
+        u_re(:,:,:,i)=+ampl_scaled*v_re(:,:,:,i)/sqrt(2.*k1)*.5*(1.-tanh(ksteepness*(k1/kpeak-1.)))
+        u_im(:,:,:,i)=+ampl_scaled*v_im(:,:,:,i)/sqrt(2.*k1)*.5*(1.-tanh(ksteepness*(k1/kpeak-1.)))
+        if (i2a>0) then
+          v_re(:,:,:,i)=-k1*u_im(:,:,:,i)
+          v_im(:,:,:,i)=+k1*u_re(:,:,:,i)
+        endif
       enddo
 !
 !  Fourier transform to real space.
 !
       do i=1,1+i1b-i1a
-        call fft_xyz_parallel(u_re(:,:,:,i),u_im(:,:,:,i),linv=.true.)
-        call fft_xyz_parallel(v_re(:,:,:,i),v_im(:,:,:,i),linv=.true.)
+        call fft_xyz_parallel(u_re(:,:,:,i),u_im(:,:,:,i),linv=loptest(linv))
+        if (i2a>0) &
+          call fft_xyz_parallel(v_re(:,:,:,i),v_im(:,:,:,i),linv=loptest(linv))
       enddo
 !
-!  Use real parts of u and v for A and E.
+!  Use real parts of u and v for A and E. But do the second part only if
+!  the prefactor is different from zero.
 !
       f(l1:l2,m1:m2,n1:n2,i1a:i1b)=f(l1:l2,m1:m2,n1:n2,i1a:i1b)+u_re
       f(l1:l2,m1:m2,n1:n2,i2a:i2b)=f(l1:l2,m1:m2,n1:n2,i2a:i2b)+v_re*deriv_prefactor
@@ -6359,7 +6683,7 @@ module Initcond
       use Sub, only: cross, dot, dot2
 !
       integer :: modeN,N_modes,l,n,m,i1
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
 !
 ! how many wavenumbers?
       real, dimension (3,1024) :: kk,RA,RB !or through whole field for each wavenumber?
@@ -6487,7 +6811,7 @@ module Initcond
 !
       use Sub, only: cross, dot, dot2
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
 !
       character (len=1) :: dummy
       complex :: ii=(0.,1.)
@@ -6551,7 +6875,7 @@ module Initcond
       use EquationOfState, only: lnrho0,cs20,cs2top,cs2bot
       use Mpicomm, only: mpibcast_real
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: tmp,ztop,zbot,gamma,gamma_m1,dummy=1.
       integer, parameter :: prof_nz=150
       real, dimension (prof_nz) :: prof_lnT,prof_lnrho,prof_z
@@ -6581,7 +6905,7 @@ module Initcond
       call mpibcast_real(prof_z,prof_nz)
       call mpibcast_real(prof_lnrho,prof_nz)
 !
-      prof_z = prof_z*1.e6/unit_length
+      prof_z = real(prof_z*1.e6/unit_length)
       prof_lnT = prof_lnT - alog(real(unit_temperature))
       prof_lnrho = prof_lnrho - alog(real(unit_density))
 
@@ -6656,7 +6980,7 @@ module Initcond
       use Fourier, only: fourier_transform_other, kx_fft, ky_fft
       use Mpicomm, only: mpibcast_real,stop_it_if_any
 !
-      real, dimension (mx,my,mz,mfarray), intent (inout) :: f
+      real, contiguous, dimension(:,:,:,:), intent (inout) :: f
 !
       real, dimension (:,:), allocatable :: kx,ky,k2,Bz0_i,Bz0_r,A_r,A_i
       logical, intent (in) :: periodic
@@ -6741,19 +7065,19 @@ module Initcond
 !
       if (lroot) then
         if (nxgrid==1.and.nygrid/=1) then
-          Bzflux =  sum(abs(Bz0_r * 1e-4))*dy*unit_length
+          Bzflux =  real(sum(abs(Bz0_r * 1e-4))*dy*unit_length)
           write (*,'(A,E10.2)') 'Bz flux sum(|B|)*dl [Tm] :',Bzflux
         elseif (nxgrid/=1.and.nygrid==1) then
-          Bzflux =  sum(abs(Bz0_r * 1e-4))*dx*unit_length
+          Bzflux =  real(sum(abs(Bz0_r * 1e-4))*dx*unit_length)
           write (*,'(A,E10.2)') 'Bz flux sum(|B|)*dl [Tm] :',Bzflux
         elseif (nxgrid/=1.and.nygrid/=1) then
-          Bzflux =  sum(abs(Bz0_r * 1e-4))*dx*unit_length*dy*unit_length
+          Bzflux =  real(sum(abs(Bz0_r * 1e-4))*dx*unit_length*dy*unit_length)
           write (*,'(A,E10.2)') 'Bz flux sum(|B|)*dA [Tm^2] :',Bzflux
         endif
       endif
 !
       Bz0_i = 0.
-      Bz0_r = Bz0_r * 1e-4 / unit_magnetic ! Gauss to Tesla and SI to PENCIL units
+      Bz0_r = real(Bz0_r * 1e-4 / unit_magnetic) ! Gauss to Tesla and SI to PENCIL units
 !
 !  Fourier Transform of Bz0:
 !
@@ -6838,12 +7162,13 @@ module Initcond
       use Fourier, only: setup_extrapol_fact, field_extrapol_z_parallel
       use Mpicomm, only: stop_it_if_any, mpisend_real, mpirecv_real, sum_xy
 !
-      real, dimension (mx,my,mz,mfarray), intent(inout) :: f
+      real, contiguous, dimension(:,:,:,:), intent(inout) :: f
 !
       real, dimension (:,:), allocatable :: Bz
       real, dimension (:,:,:), allocatable :: exp_fact
-      integer, parameter :: bnx=nxgrid, bny=ny/nprocx ! data in pencil shape
-      integer, parameter :: enx=nygrid, eny=nx/nprocy ! transposed data in pencil shape
+      integer, parameter :: bnx=nxgrid ! data in pencil shape
+      integer, parameter :: enx=nygrid ! transposed data in pencil shape
+      integer :: bny,eny
       integer, parameter :: unit=11
       integer, parameter :: tag_xy=131, tag_z=132
       integer :: py, pz, partner
@@ -6856,6 +7181,10 @@ module Initcond
       ! file location settings
       character (len=*), parameter :: mag_field_dat = 'driver/mag_field.dat'
 !
+
+      bny = idiv(ny,nprocx)
+      eny = idiv(nx,nprocy)
+
       if (.not. lperi(1) .or. .not. lperi(2)) call fatal_error ('mag_init', &
           'Currently only implemented for xy-periodic setups!')
       if (.not. lequidist(1) .or. .not. lequidist(2)) call not_implemented('mag_init', &
@@ -6911,19 +7240,19 @@ module Initcond
       endif
 !
       ! Gauss to Tesla and SI to PENCIL units
-      Bz = Bz * 1e-4 / unit_magnetic
+      Bz = real(Bz * 1e-4 / unit_magnetic)
 !
       if (lfirst_proc_z) then
         if ((nxgrid==1).and.(nygrid/=1)) then
-          Bz_flux_local = sum(abs(Bz)) * dy * unit_magnetic*unit_length
+          Bz_flux_local = real(sum(abs(Bz)) * dy * unit_magnetic*unit_length)
           call sum_xy (Bz_flux_local, Bz_flux)
           if (lroot) write (*,*) 'Total vertical flux: sum(|Bz|)*dy [T*m] =', Bz_flux
         elseif ((nxgrid/=1).and.(nygrid==1)) then
-          Bz_flux_local = sum(abs(Bz)) * dx * unit_magnetic*unit_length
+          Bz_flux_local = real(sum(abs(Bz)) * dx * unit_magnetic*unit_length)
           call sum_xy (Bz_flux_local, Bz_flux)
           if (lroot) write (*,*) 'Total vertical flux: sum(|Bz|)*dx [T*m] =', Bz_flux
         elseif ((nxgrid/=1).and.(nygrid/=1)) then
-          Bz_flux_local = sum(abs(Bz)) * dx*dy * unit_magnetic*unit_length**2
+          Bz_flux_local = real(sum(abs(Bz)) * dx*dy * unit_magnetic*unit_length**2)
           call sum_xy (Bz_flux_local, Bz_flux)
           if (lroot) write (*,*) 'Total vertical flux: sum(|Bz|)*(dx*dy) [T*m^2] =', Bz_flux
         endif
@@ -6959,7 +7288,7 @@ module Initcond
 !
       use Mpicomm, only: stop_it_if_any, distribute_xy
 !
-      real, dimension (mx,my,mz,mfarray), intent(inout) :: f
+      real, contiguous, dimension(:,:,:,:), intent(inout) :: f
 !
       real, dimension (:,:), allocatable :: A_global, A_local
       integer, parameter :: unit=11
@@ -7017,7 +7346,7 @@ module Initcond
 !
       use Mpicomm, only: stop_it_if_any, distribute_xy, mpisend_real, mpirecv_real
 !
-      real, dimension (mx,my,mz,mfarray), intent(inout) :: f
+      real, contiguous, dimension(:,:,:,:), intent(inout) :: f
 !
       real, dimension (:,:,:), allocatable :: A_global, A_local
       integer, parameter :: unit=11
@@ -7114,7 +7443,7 @@ module Initcond
       use Gravity, only: gravz
       use Mpicomm, only: mpibcast_real
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ztop,zbot,dummy=1.
       integer, parameter :: prof_nz=150
       real, dimension (prof_nz) :: prof_lnT,prof_z
@@ -7147,7 +7476,7 @@ module Initcond
       call mpibcast_real(prof_lnT,prof_nz)
       call mpibcast_real(prof_z,prof_nz)
       !
-      prof_z = prof_z*1.e6/unit_length
+      prof_z = real(prof_z*1.e6/unit_length)
       prof_lnT = prof_lnT - alog(real(unit_temperature))
       !
       ! get step width
@@ -7196,7 +7525,7 @@ module Initcond
 !
 !  5-nov-05/weezy: coded
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl
       integer::i
 !
@@ -7223,7 +7552,7 @@ module Initcond
       use Mpicomm, only: mpireduce_sum, mpibcast_real
 !
       integer :: i,icpu
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,tmp1,tmp3
       real, dimension(ncpus)::sumtmp,tmp2
 !
@@ -7295,7 +7624,7 @@ module Initcond
       use Mpicomm, only: mpireduce_sum, mpibcast_real
 !
       integer :: i ,icpu
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: ampl,tmp1,tmp3
       real, dimension(ncpus)::sumtmp,tmp2
 !
@@ -7358,7 +7687,7 @@ module Initcond
 !  18-feb-10/mvaisala: coded
 !
       integer :: i,j,l
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, optional :: xsphere,ysphere,zsphere
       real :: omega, radius, phi, rr_rot, ampl, x01=0.
       real :: y01=0., z01=0., x_real, y_real, z_real
@@ -7412,7 +7741,7 @@ module Initcond
 !  18-feb-10/mvaisala: coded
 !
       integer :: i,j,l
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, optional :: xsphere,ysphere,zsphere
       real :: omega, radius, phi, rr_rot, ampl, x01=0.
       real :: y01=0., z01=0., x_real, y_real, z_real
@@ -7463,7 +7792,7 @@ module Initcond
 !
 !  18-jun-13/MR: coded
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: ix
       real :: amp, rpart, rr2, pom2, r_inner, r_outer
       real, optional :: r_inner_, r_outer_
@@ -7523,7 +7852,7 @@ module Initcond
 !
 !  30-nov-25/axel: adapted from dipole
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: ix
       real :: amp, rpart, rr2, pom2, r_inner, r_outer
       real, optional :: r_inner_, r_outer_
@@ -7577,7 +7906,7 @@ module Initcond
 !
 !  30-nov-25/axel: adapted from dipole
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: ix
       real :: amp, rpart, rr2, pom2, r_inner, r_outer
       real, optional :: r_inner_, r_outer_
@@ -7630,7 +7959,7 @@ module Initcond
 !
 !  30-nov-25/axel: adapted from dipole
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: ix
       real :: amp, rpart, rr2, pom2, r_inner, r_outer
       real, optional :: r_inner_, r_outer_
@@ -7680,7 +8009,7 @@ module Initcond
 !
 !  initial vector potential for dipole A
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: ix
       real :: amp, rr, r, angle
 !
@@ -7712,7 +8041,7 @@ module Initcond
 !
 !  initial vector potential for dipole B
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: ix
       real :: amp, rr, e, angle
 !
@@ -7740,7 +8069,7 @@ module Initcond
 !
 !  18-jun-13/MR: coded
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: ix
       real :: amp, amp2, rpart, rr2, pom2, r_inner, r_outer
       real, optional :: r_inner_, r_outer_
@@ -7802,7 +8131,7 @@ module Initcond
 !
       use General, only: loptest
 
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: ix
       real :: amp, rpart
       logical, optional :: ladd
@@ -7838,7 +8167,7 @@ module Initcond
 !
 !  23 June 2016/dhruba.mitra
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real :: amp,yzero,delta,kk
       integer, intent(in) :: ix
       integer :: m,l
@@ -7852,6 +8181,100 @@ module Initcond
 
 !
     endsubroutine
+!***********************************************************************
+    subroutine sech2x(amp,f,ix,width)
+!
+!  initial vector potential for tearing instability
+!
+!  23 Mar 2026/vinay.kumar
+!
+      real, contiguous, dimension(:,:,:,:) :: f
+      real :: amp,width
+      integer, intent(in) :: ix
+      real, parameter :: A0 = 1.29903871135
+      f(:,:,:,ix)   = 0.
+      f(:,:,:,ix+1) = 0.
+      f(:,:,:,ix+2) = spread(spread(A0*width*amp/(cosh(x/width)**2),2,my),3,mz)
+!
+    endsubroutine
+
+!***********************************************************************
+  subroutine coalesce_tubes(amp,f,ix,width,cs20)
+
+!
+!  initial vector potential for coalescing tubes/islands in 2D.
+!  reference: https://doi.org/10.1063/1.3420208 -- Huang and Bhattacharjee 2010
+!
+!  7 Apr 2026/vinay.kumar
+!
+
+    real, contiguous, dimension(:,:,:,:) :: f
+    real, dimension (mx,my) :: By0, By
+    real, intent(in) :: amp, width, cs20
+    integer, intent(in) :: ix
+    real :: xx, yy, width_r
+
+    integer :: m,l
+
+    do m = m1,m2 
+      do l = l1,l2 
+        xx = x(l)*2*pi/Lx
+        yy = y(m)*2*pi/Ly
+        width_r = width*2*pi/Lx
+
+        f(l,m,:,ix)   = 0.
+        f(l,m,:,ix+1) = 0.
+        f(l,m,:,ix+2) = amp/(2*pi) * tanh(xx/width_r) * cos(yy/2) * sin(xx)
+        By(l,m) = amp/(2*pi)/width_r/cosh(xx/width_r)**2  * cos(yy/2) * sin(xx) + &
+                      amp/(2*pi) * tanh(xx/width_r) * cos(yy/2) * cos(xx)
+        By0(l,m)= amp/(2*pi) * cos(xx) * cos(yy/2)        
+        f(l,m,:,ilnrho) = log(exp(f(l,m,:,ilnrho)) &
+                          +(2*pi/Lx)*(2*pi/Ly)*(1/cs20)*5/8*(amp/(2*pi)*cos(yy/2)*sin(xx))**2 &
+                          +(By0(l,m)**2 - By(l,m)**2)/(2.*cs20))
+      enddo
+    enddo 
+
+  end subroutine
+
+!***********************************************************************
+  subroutine coalesce_tubes_pe(amp,f,ix,width,cs20)
+
+!
+!  initial vector potential for coalescing tubes/islands in 2D.
+!  reference: https://doi.org/10.1063/1.3420208 -- Huang and Bhattacharjee 2010
+!
+!  7 Apr 2026/vinay.kumar
+!
+    
+    real, contiguous, dimension(:,:,:,:) :: f
+    real, dimension (mx,my) :: By0, By
+    real, intent(in) :: amp, width, cs20
+    integer, intent(in) :: ix
+    real :: xx, yy, width_r
+    integer :: m,l
+
+    call keep_compiler_quiet(cs20)
+    do m = m1,m2 
+      do l = l1,l2 
+        xx = x(l)*2*pi/Lx
+        yy = y(m)*2*pi/Ly
+        width_r = width*2*pi/Lx
+        f(l,m,:,ix)   = 0.
+        f(l,m,:,ix+1) = 0.
+        f(l,m,:,ix+2) = amp/(2*pi) * tanh(xx/width_r) * cos(yy/2) * sin(xx)
+        By(l,m) = amp/(2*pi)/width_r/cosh(xx/width_r)**2  * cos(yy/2) * sin(xx) + &
+                        amp/(2*pi) * tanh(xx/width_r) * cos(yy/2) * cos(xx)
+        By0(l,m)= amp/(2*pi) * cos(xx) * cos(yy/2)             
+        !f(l,m,:,ilnrho) = log(exp(f(l,m,:,ilnrho)) &
+        !                  +(2*pi/Lx)*(2*pi/Ly)*(1/cs20)*5/8*(amp/(2*pi)*cos(yy/2)*sin(xx))**2 &
+        !                  +(By0(l,m)**2 - By(l,m)**2)/(2.*cs20))
+        
+        
+        !    set pressure equilibrium in start.in
+      enddo
+    enddo 
+    
+      end subroutine
 !***********************************************************************
     subroutine pre_stellar_cloud(f, datafile, mass_cloud,  &
         cloud_mode, T_cloud_out_rel, dens_coeff, &
@@ -7871,7 +8294,7 @@ module Initcond
       integer :: jj, test, n, m, l, len_file
       integer, parameter :: BE_resolution = 2000
       logical :: exist !
-      real, dimension (mx,my,mz,mfarray), intent(inout) :: f
+      real, contiguous, dimension(:,:,:,:), intent(inout) :: f
       real, dimension (BE_resolution) :: lnTT_file, lnrho_r, r_rho
       real :: tmp, var1, var2, var3
       real :: bigr, mass_cloud
@@ -7888,7 +8311,7 @@ module Initcond
       write (*,*) 'Solar mass:', M_sun
       write (*,*) 'unit_mass:', unit_mass
       write (*,*) 'unit_temperature', unit_temperature
-      mass_cloud = (mass_cloud * M_sun) / unit_mass
+      mass_cloud = real((mass_cloud * M_sun) / unit_mass)
 !
       select case (cloud_mode)
 !
@@ -7906,14 +8329,14 @@ module Initcond
              call fatal_error('Bonnor-Ebert Sphere', 'No input file')
            endif
            read(19,*) var1, len_file
-           bigr = var1/unit_length
+           bigr = real(var1/unit_length)
            write (*,*) '(Modified BE-sphere) R = ', var1, 'cm =',&
                         bigr, 'pc_units'
            do jj = 1, len_file
              read(19,*) var1, var2, var3
-             r_rho(jj) = var1/unit_length
-             lnrho_r(jj) = log(var2/unit_density)
-             lnTT_file(jj) = log(var3/unit_temperature)
+             r_rho(jj) = real(var1/unit_length)
+             lnrho_r(jj) = real(log(var2/unit_density))
+             lnTT_file(jj) = real(log(var3/unit_temperature))
            enddo
 !
            counter = 0
@@ -7974,14 +8397,14 @@ module Initcond
              call fatal_error('Bonnor-Ebert Sphere', 'No input file')
            endif
            read(19,*) var1, len_file, var2
-           bigr = var1/unit_length
-           lnTTpoint0 = log(var2*temp_coeff/unit_temperature)
+           bigr = real(var1/unit_length)
+           lnTTpoint0 = real(log(var2*temp_coeff/unit_temperature))
            write (*,*) '(Isothermal BE-sphere) R =', var1, 'cm =',&
                         bigr, 'pc_units, T =', var2, 'K'
            do jj = 1, len_file
              read(19,*) var1, var2
-             r_rho(jj) = var1/unit_length
-             lnrho_r(jj) = log(var2*dens_coeff/unit_density)
+             r_rho(jj) = real(var1/unit_length)
+             lnrho_r(jj) = real(log(var2*dens_coeff/unit_density))
            enddo
            write (*,*) 'Temperature, lnTT = ', lnTTpoint0
 !
@@ -8040,7 +8463,7 @@ module Initcond
 !   generated by an external script.
 !   13-may-13/mvaisala: created
 !
-      real, dimension (mx,my,mz,mfarray), intent(inout) :: f
+      real, contiguous, dimension(:,:,:,:), intent(inout) :: f
       logical :: exfile
       integer :: l,m,n, lfile, mfile, nfile, io_status, i
       real :: value
@@ -8082,8 +8505,8 @@ module Initcond
 !   13-may-13/mvaisala: created
 !
       use IO, only: input_snap, input_snap_finalize
-      real, dimension (mx,my,mz,mfarray), intent(inout) :: f
-      real, dimension (mx,my,mz,3) :: apot
+      real, contiguous, dimension(:,:,:,:), intent(inout) :: f
+      real, allocatable, dimension (:,:,:,:) :: apot
       logical :: exfile, lbin=.false.
       logical, optional :: lbinary
       integer :: l,m,n, lfile, mfile, nfile, io_status, i
@@ -8091,6 +8514,8 @@ module Initcond
       real, optional :: ampl
       character(len=*) :: datafile
 !
+
+      allocate(apot(mx,my,mz,3))
       inquire (file=datafile, exist=exfile)
       if (present(lbinary)) lbin=lbinary
       if (present(ampl)) scale_aa=ampl

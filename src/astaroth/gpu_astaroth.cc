@@ -19,6 +19,7 @@
 #include <fstream>
 #include <dlfcn.h>
 #include <thread>
+#include <stack>
 
 static std::thread GW_thread{};
 static int device_id = 0;
@@ -39,10 +40,12 @@ bool calculated_coeff_scales = false;
 
 // Astaroth headers
 #include "astaroth.h"
-#include "submodule/stdlib/fft.h"
+#include "fft.h"
 
 AcTaskGraph* GW_timestep_graph  =  NULL;
 AcTaskGraph* boundary_z_halo_exchange_graph =  NULL;
+//TP: logs performance metrics of Astaroth
+const bool performance_logs = false;
 
 #define real AcReal
 #include "math_utils.h"
@@ -58,6 +61,7 @@ AcTaskGraph* boundary_z_halo_exchange_graph =  NULL;
 
 //TP: these are ugly but for the moment we live with these
 #if TRANSPILATION
+  #define thread_block_loop_factors thread_block_loop_factors__mod__gpu
   #define luses_aa_pot2_top luses_aa_pot2_top__mod__cdata 
   #define luses_aa_pwd_top luses_aa_pwd_top__mod__cdata 
   #define lsplit_gw_rhs_from_rest_on_gpu lsplit_gw_rhs_from_rest_on_gpu__mod__gravitational_waves_htxk
@@ -131,7 +135,6 @@ AcTaskGraph* boundary_z_halo_exchange_graph =  NULL;
   #define lsingle_precision_timestep lsingle_precision_timestep__mod__gpu
   #define lperi                  lperi__mod__cdata
   #define lxyz                   lxyz__mod__cdata
-  #define lac_sparse_autotuning  lac_sparse_autotuning__mod__gpu
   #define ldebug ldebug__mod__cdata
   
   #define deltay  deltay__mod__cdata
@@ -165,14 +168,20 @@ static MPI_Comm comm_pencil = MPI_COMM_NULL;
 static AcMesh mesh = acInitMesh();
 //static AcMesh test_mesh;
 
-void torch_trainCAPI(int sub_dims[3], AcReal* input, AcReal* label, AcReal* loss_val,
+bool torch_train_CAPI(int sub_dims[3], AcReal* input, AcReal* label, AcReal* loss_val,
 		     const int input_fields, const int output_fields, const char* model_name);
-void torch_inferCAPI(int sub_dims[3], AcReal* input, AcReal* label, 
-		     const int input_fields, const int output_fields, const char* model_name);
+bool torch_infer_CAPI(int sub_dims[3], AcReal* input, AcReal* label, 
+		     const int input_fields, const int output_fields, const char* model_name, bool subsample);
+bool torch_create_model_CAPI(const char* name, const char* config_fname, int device);
+bool torch_create_distributed_model_CAPI(const char* name, const char* config_fname, MPI_Comm mpi_comm, int device);
+bool torch_load_CAPI(const char* name, const char* fname);
+bool torch_load_checkpoint_CAPI(const char* name, const char* checkpoint_dir, int64_t* step_train, int64_t* step_inference);
+bool torch_save_model_CAPI(const char* name, const char* fname);
+bool torch_save_checkpoint_CAPI(const char* name, const char* checkpoint_dir);
+
 void scaling();
-void print_debug();
+extern "C" void print_debug();
 float MSE();
-//void torch_createmodel(const char* name, const char* config_fname, MPI_Comm mpi_comm, int device);
 
 extern "C" void copyFarray(AcReal* f);    // forward declaration
 extern "C" void loadFarray(); // forward declaration
@@ -218,280 +227,6 @@ bool has_nans(AcMesh mesh_in)
     }
   }
   return res;
-}
-/***********************************************************************************************/
-extern "C" void testRHS(AcReal *farray_in, AcReal *dfarray_truth)
-{
-  const auto DEVICE_VTXBUF_IDX = [&](const int x, const int y, const int z)
-
-  				{
-					return acVertexBufferIdx(x,y,z,mesh.info);
-  				};
-  // __energy_MOD_pushpars2c(p_par_energy);
-  // mesh.info.profiles[AC_dlnhcond_prof]=dlnhcond_prof; // [2-1] dlnhcond_prof real(nz)
-  // for (int i=20;i<30;++i)
-  //   acLogFromRootProc(rank,"C: dlnhcond_prof %d=%f\n",i,mesh.info.profiles[AC_dlnhcond_prof][i]);
-  // fflush(stdout);
-  // return;
-  // make_tasks(diagnostics_func, reduction_func, finalize_func, write_func);
-  // thread_pool.WaitAll();
-  constexpr int num_of_steps = 100;
-
-  AcMesh mesh_true;
-  AcMesh mesh_test;
-  const AcReal epsilon = (AcReal)pow(0.1,12);
-  // constexpr AcReal epsilon = 0.0;
-  constexpr AcReal local_dt = (AcReal)0.001;
-  Device dev = acGridGetDevice();
-  acDeviceSetInput(acGridGetDevice(),AC_dt,local_dt);
-  acGridSynchronizeStream(STREAM_ALL);
-
-  size_t offset = 0;
-  for (int i = 0; i < acGetNumFields(); ++i)
-  {
-    mesh_test.vertex_buffer[VertexBufferHandle(i)] = &farray_in[offset];
-    offset += mw;
-  }
-  offset = 0;
-	for (int i = 0; i < acGetNumFields(); ++i)
-  {
-    mesh_true.vertex_buffer[VertexBufferHandle(i)] = &dfarray_truth[offset];
-    offset += mw;
-  }
-  AcMeshDims dims = acGetMeshDims(acGridGetLocalMeshInfo());
-  acLogFromRootProc(rank,"n0: %d,%d,%d\trank: %d\n", dims.n0.x, dims.n0.y, dims.n0.z, rank);
-  acLogFromRootProc(rank,"n1: %d,%d,%d\trank: %d\n", dims.n1.x, dims.n1.y, dims.n1.z, rank);
-
-  //dryrun
-  // acGridLaunchKernel(STREAM_DEFAULT, twopass_solve_intermediate_step0, dims.n0,dims.n1);
-  // acGridSynchronizeStream(STREAM_ALL);
-  // acGridSwapBuffers();
-  // acGridSynchronizeStream(STREAM_ALL);
-  // acGridLaunchKernel(STREAM_DEFAULT, twopass_solve_final_step0, dims.n0,dims.n1);
-  // acGridSynchronizeStream(STREAM_ALL);
-  // acGridSwapBuffers();
-  // acGridSynchronizeStream(STREAM_ALL);
-  // acGridLaunchKernel(STREAM_DEFAULT, twopass_solve_intermediate_step1, dims.n0,dims.n1);
-  // acGridSynchronizeStream(STREAM_ALL);
-  // acGridSwapBuffers();
-  // acGridSynchronizeStream(STREAM_ALL);
-
-  // acGridExecuteTaskGraph(rhs_test_graph,1);
-  AcTaskGraph *rhs =  acGetOptimizedDSLTaskGraph(AC_rhs);
-  for (int i = 0; i < 3; ++i)
-  {
-  	acDeviceSetInput(acGridGetDevice(), AC_step_num, (PC_SUB_STEP_NUMBER) i);
-  	acGridExecuteTaskGraph(rhs,1);
-  	acGridSynchronizeStream(STREAM_ALL);
-  }
-
-  acGridSynchronizeStream(STREAM_ALL);
-  acDeviceLoadMesh(acGridGetDevice(), STREAM_DEFAULT, mesh_test);
-  acGridSynchronizeStream(STREAM_ALL);
-  acDeviceStoreMesh(acGridGetDevice(), STREAM_DEFAULT, &mesh);
-  acGridSynchronizeStream(STREAM_ALL);
-
-  bool loaded_correct = true;
-  for (size_t i = 0; i < mx; i++)
-  {
-    for (size_t j = 0; j < my; j++)
-    {
-      for (size_t k = 0; k < mz; k++)
-      {
-        for (size_t ivar = 0; ivar < mfarray; ivar++)
-        {
-          AcReal out_val = mesh.vertex_buffer[ivar][DEVICE_VTXBUF_IDX(i, j, k)];
-          AcReal true_val = mesh_test.vertex_buffer[ivar][DEVICE_VTXBUF_IDX(i, j, k)];
-          if (out_val != true_val)
-          {
-            loaded_correct = false;
-            acLogFromRootProc(rank,"Loaded val wrong at %d,%d,%d\n", i, j, k);
-            acLogFromRootProc(rank,"field = %d", ivar);
-            acLogFromRootProc(rank,"Loaded val: %f\tTRUE val: %f\n", (double)out_val, (double)true_val);
-          }
-        }
-      }
-    }
-  }
-  //AcReal derx_ux;
-  //AcReal derx_normal;
-  //AcReal dery_uy;
-  //AcReal derz_uz;
-  //test calculating divu different ways
-  //const int y = 42;
-  //const int x = 42;
-  //const int z = 42;
-  //const AcReal AC_inv_dsx = 2.0;
-
-    // [0][0][-3] = -AC_inv_dsx * DER1_3,
-    // [0][0][-2] = -AC_inv_dsx * DER1_2,
-    // [0][0][-1] = -AC_inv_dsx * DER1_1,
-    // [0][0][1]  = AC_inv_dsx * DER1_1,
-    // [0][0][2]  = AC_inv_dsx * DER1_2,
-    // [0][0][3]  = AC_inv_dsx * DER1_3
-
-  // derx_normal = -AC_inv_dsx*DER1_3*(mesh.vertex_buffer[0][DEVICE_VTXBUF_IDX(x-3,y,z)]);
-  // derx_normal += -AC_inv_dsx*DER1_2*(mesh.vertex_buffer[0][DEVICE_VTXBUF_IDX(x-2,y,z)]);
-  // derx_normal += -AC_inv_dsx*DER1_1*(mesh.vertex_buffer[0][DEVICE_VTXBUF_IDX(x-1,y,z)]);
-  // derx_normal += AC_inv_dsx*DER1_1*(mesh.vertex_buffer[0][DEVICE_VTXBUF_IDX(x+1,y,z)]);
-  // derx_normal += AC_inv_dsx*DER1_2*(mesh.vertex_buffer[0][DEVICE_VTXBUF_IDX(x+2,y,z)]);
-  // derx_normal += AC_inv_dsx*DER1_3*(mesh.vertex_buffer[0][DEVICE_VTXBUF_IDX(x+3,y,z)]);
-  // acLogFromRootProc(rank,"test derx_ux: %.7e\n",derx_ux);
-  // acLogFromRootProc(rank,"normal derx_ux. %.7e\n",derx_normal);
-  fflush(stdout);
-  // return;
-  if (loaded_correct)
-  {
-    acLogFromRootProc(rank,"loaded correct data\n");
-  }
-  else
-  {
-    acLogFromRootProc(rank,"loaded incorrect data :(\n");
-  }
-
-  //set output buffer to 0 since if we are reading from it we don't want NaNs
-  // acGridExecuteTaskGraph(rhs_test_graph, 1);
-  // acGridSynchronizeStream(STREAM_ALL);
-  // acGridExecuteTaskGraph(rhs_test_rhs_1, 1);
-  // acGridSynchronizeStream(STREAM_ALL);
-  acGridLaunchKernel(STREAM_DEFAULT, AC_BUILTIN_RESET, dims.n0, dims.n1);
-  acGridSynchronizeStream(STREAM_ALL);
-
-  //actual run
-  //TP: works for only rk3 but is anyone anyways using this? Probably not
-  for (int i=0;i<num_of_steps;i++){
-    for (int substep = 0; substep <3; ++substep)
-    {
-    	acDeviceSetInput(acGridGetDevice(), AC_step_num, (PC_SUB_STEP_NUMBER)substep);
-    	acGridExecuteTaskGraph(acGetOptimizedDSLTaskGraph(AC_rhs),1);
-    	acGridSynchronizeStream(STREAM_ALL);
-    }
-    acGridSynchronizeStream(STREAM_ALL);
-    acDeviceStoreMesh(acGridGetDevice(), STREAM_DEFAULT, &mesh);
-  //  acGridSynchronizeStream(STREAM_ALL);
-  //  AcReal max_uux2 = 0.0;
-  //  AcReal max_uuy2 = 0.0;
-  //  AcReal max_uuz2 = 0.0;
-  //for (int i = dims.n0.x; i < dims.n1.x; i++)
-  //{
-  //  for (int j = dims.n0.y; j < dims.n1.y; j++)
-  //  {
-  //    for (int k = dims.n0.z; k < dims.n1.z; k++)
-  //    {
-  //        max_uux2 = max(max_uux2,pow(mesh.vertex_buffer[0][DEVICE_VTXBUF_IDX(i,j,k)],2));
-  //        max_uuy2 = max(max_uuy2,pow(mesh.vertex_buffer[1][DEVICE_VTXBUF_IDX(i,j,k)],2));
-  //        max_uuz2 = max(max_uuz2,pow(mesh.vertex_buffer[2][DEVICE_VTXBUF_IDX(i,j,k)],2));
-  //    }
-  //  }
-  //}
-  //acLogFromRootProc(rank,"GPU: uumax: %.7e\n", pow(max_uux2+max_uuy2+max_uuz2,0.5));
-  //  acGridSynchronizeStream(STREAM_ALL);
-  }
-    acGridSynchronizeStream(STREAM_ALL);
-  // acGridLaunchKernel(STREAM_DEFAULT, twopass_solve_intermediate_step0, dims.n0,dims.n1);
-  // acGridSynchronizeStream(STREAM_ALL);
-  // acGridSwapBuffers();
-  // acGridSynchronizeStream(STREAM_ALL);
-  // acGridLaunchKernel(STREAM_DEFAULT, twopass_solve_final_step0, dims.n0,dims.n1);
-  // acGridSynchronizeStream(STREAM_ALL);
-  // acGridSwapBuffers();
-  // acGridSynchronizeStream(STREAM_ALL);
-  // acGridLaunchKernel(STREAM_DEFAULT, twopass_solve_intermediate_step1, dims.n0,dims.n1);
-  // acGridSynchronizeStream(STREAM_ALL);
-  // acGridSwapBuffers();
-  // acGridSynchronizeStream(STREAM_ALL);
-
-  // acGridLaunchKernel(STREAM_DEFAULT, twopass_solve_final_step1, dims.n0,dims.n1);
-  // acGridSynchronizeStream(STREAM_ALL);
-  // acGridSwapBuffers();
-  // acGridSynchronizeStream(STREAM_ALL);
-
-  // acGridLaunchKernel(STREAM_DEFAULT, twopass_solve_intermediate_step2, dims.n0,dims.n1);
-  // acGridSynchronizeStream(STREAM_ALL);
-  // acGridSwapBuffers();
-  // acGridSynchronizeStream(STREAM_ALL);
-
-  // acGridLaunchKernel(STREAM_DEFAULT, twopass_solve_final_step2, dims.n0,dims.n1);
-  // acGridSynchronizeStream(STREAM_ALL);
-  // acGridSwapBuffers();
-  // acGridSynchronizeStream(STREAM_ALL);
-
-  acGridSynchronizeStream(STREAM_ALL);
-  acDeviceStoreMesh(acGridGetDevice(), STREAM_DEFAULT, &mesh);
-
-  bool passed = true;
-  AcReal max_abs_not_passed_val=-1.0;
-  AcReal true_pair{};
-  AcReal max_abs_relative_difference =-1.0;
-  AcReal max_abs_value = -1.0;
-  AcReal min_abs_value = 1.0;
-  AcReal gpu_val_for_largest_diff{};
-  AcReal true_val_for_largest_diff{};
-  int num_of_points_where_different[NUM_VTXBUF_HANDLES] = {0};
-
-  for (size_t i = dims.n0.x; i < dims.n1.x; i++)
-  {
-    for (size_t j = dims.n0.y; j < dims.n1.y; j++)
-    {
-      for (size_t k = dims.n0.z; k < dims.n1.z; k++)
-      {
-        for (size_t ivar = 0; ivar < acGetNumFields(); ivar++)
-        {
-          AcReal out_val = mesh.vertex_buffer[ivar][DEVICE_VTXBUF_IDX(i, j, k)];
-          AcReal true_val = mesh_true.vertex_buffer[ivar][DEVICE_VTXBUF_IDX(i, j, k)];
-          AcReal abs_diff = fabs(out_val - true_val);
-          if (fabs(true_val) > max_abs_value) max_abs_value = fabs(true_val);
-          if (fabs(true_val) < min_abs_value) min_abs_value = fabs(true_val);
-          if ((AcReal)(abs_diff/true_val) > epsilon || (true_val == (AcReal)0.0 && (AcReal)fabs(out_val) > (AcReal)pow(0.1,13)) || (epsilon == (AcReal)0.0 && true_val != out_val))
-          {
-            passed = false;
-            num_of_points_where_different[ivar]++;
-            // acLogFromRootProc(rank,"rhs val wrong at %d,%d,%d\n", i, j, k);
-            // acLogFromRootProc(rank,"field = %d", ivar);
-            // acLogFromRootProc(rank,"GPU val: %.7e\tTRUE val: %.7e\n", out_val, true_val);
-            // acLogFromRootProc(rank,"PID: %d\n", rank);
-            if (max_abs_not_passed_val<abs(out_val)){
-              max_abs_not_passed_val = abs(out_val);
-              true_pair = true_val;
-            }
-            if (true_val != (AcReal)0.0){
-              if (max_abs_relative_difference<(abs_diff/true_val)){
-                max_abs_relative_difference=(abs_diff/true_val);
-                gpu_val_for_largest_diff = out_val;
-                true_val_for_largest_diff = true_val;
-              }
-            }  
-          }
-          if (isnan(out_val))
-          {
-            acLogFromRootProc(rank,"nan before at %d,%d,%d,%d!\n!",i,j,k,ivar);
-            acLogFromRootProc(rank,"%.7e\n",(double)out_val);
-          }
-        }
-      }
-    }
-  }
-  auto volume_size = [](const auto& a)
-  {
-	  return a.x*a.y*a.z;
-  };
-  for (int ivar=0;ivar<acGetNumFields();ivar++)
-    acLogFromRootProc(rank,"ratio of values wrong for field: %d\t %f\n",ivar,(double)num_of_points_where_different[ivar]/volume_size(dims.n1-dims.n0));
-  passed &= !has_nans(mesh);
-  if (passed)
-  {
-    acLogFromRootProc(rank,"Passed GPU test :)\n");
-  }
-  else
-  {
-    acLogFromRootProc(rank,"Did not pass GPU test :(\n");
-  }
-  acLogFromRootProc(rank,"max abs not passed val: %.7e\t%.7e\n",(double)max_abs_not_passed_val, (double)fabs(true_pair));
-  acLogFromRootProc(rank,"max abs relative difference val: %.7e\n",(double)max_abs_relative_difference);
-  acLogFromRootProc(rank,"largest difference: %.7e\t%.7e\n",(double)gpu_val_for_largest_diff, (double)true_val_for_largest_diff);
-  acLogFromRootProc(rank,"abs range: %.7e-%7e\n",(double)min_abs_value,(double)max_abs_value);
-  fflush(stdout);
-  fflush(stderr);
 }
 /***********************************************************************************************/
 AcReal to_real(void* param, const char* name)
@@ -557,8 +292,6 @@ AcBool3 to_bool3(void* param, const char* name)
         return (AcBool3){arr[0],arr[1],arr[2]};
 }
 /***********************************************************************************************/
-//typedef void (*rangefunc)(const int a, const int b);
-/***********************************************************************************************/
 // PC interface headers.
 #include "PC_moduleflags.h"
 
@@ -587,26 +320,6 @@ torus_rect to_torus_rect(void* param, const char* name)
 #endif
 
 /***********************************************************************************************/
-int DCONST(const AcIntParam param)
-{
-  return mesh.info[param];
-}
-/***********************************************************************************************/
-int3 DCONST(const AcInt3Param param)
-{
-  return mesh.info[param];
-}
-/***********************************************************************************************/
-AcReal DCONST(const AcRealParam param)
-{
-  return mesh.info[param];
-}
-/***********************************************************************************************/
-AcReal3 DCONST(const AcReal3Param param)
-{
-  return mesh.info[param];
-}
-/***********************************************************************************************/
 template <typename T>
 void
 pushpars_special(const char* func_name, T p_pars)
@@ -617,7 +330,33 @@ pushpars_special(const char* func_name, T p_pars)
 	dlclose(handle);
 }
 /***********************************************************************************************/
+const char*
+get_cwd()
+{
+  static char cwd[9000];
+  cwd[0] = '\0';
+  const char* err = getcwd(cwd, sizeof(cwd));
+  if (err == NULL) 
+  {
+	  fprintf(stderr,"Was not able to get cwd!\n");
+	  exit(EXIT_FAILURE);
+  }
+  return cwd;
+}
+/***********************************************************************************************/
 #define PCLoad acPushToConfig
+/***********************************************************************************************/
+int same_path(const char *p1, const char *p2) {
+    char r1[PATH_MAX];
+    char r2[PATH_MAX];
+
+    if (!realpath(p1, r1) || !realpath(p2, r2)) {
+        return 0; // failed to resolve
+    }
+
+    return strcmp(r1, r2) == 0;
+}
+static int lac_sparse_autotuning = 0;
 /***********************************************************************************************/
 void setupConfig(AcMeshInfo& config)
 {
@@ -627,12 +366,12 @@ void setupConfig(AcMeshInfo& config)
 
   PCLoad(config, AC_use_cuda_aware_mpi,lcuda_aware_mpi);
   PCLoad(config, AC_bidiagonal_derij,lbidiagonal_derij);
-  //TP: loads for non-Cartesian derivatives
 
-#if TRANSPILATION
   PCLoad(config, AC_x,x__mod__cdata);
   PCLoad(config, AC_y,y__mod__cdata);
   PCLoad(config, AC_z,z__mod__cdata);
+
+  PCLoad(config, AC_thread_block_loop_factors,thread_block_loop_factors);
 
   PCLoad(config, AC_inv_cyl_r,rcyl_mn1);
   PCLoad(config, AC_inv_r,r1_mn);
@@ -654,13 +393,10 @@ void setupConfig(AcMeshInfo& config)
   PCLoad(config, AC_y12,y12__mod__cdata);
   PCLoad(config, AC_sinth12,sinth12__mod__cdata);
   PCLoad(config, AC_z12,z12__mod__cdata);
-#endif
 
   PCLoad(config, AC_rk_order, itorder);
   PCLoad(config, AC_shear,lshear);
-#if TRANSPILATION
   PCLoad(config, AC_rk_cumulative_df,lcumulative_df_on_gpu);
-#endif
 
   if (lcartesian_coords)
   {
@@ -674,10 +410,12 @@ void setupConfig(AcMeshInfo& config)
   {
           PCLoad(config, AC_coordinate_system, AC_CYLINDRICAL_COORDINATES);
   }
-  //TP: this is needed to not run out of memory for spherical-gdisk-planet-thermo on norlx51
-#if LNEWTON_COOLING
-  PCLoad(config,AC_only_default_stream_for_taskgraphs, lcpu_timestep_on_gpu);
+  //TP: this is needed to not run out of memory for spherical-gdisk-planet-thermo and backreact_infl on norlx51
+  PCLoad(config,AC_only_default_stream_for_taskgraphs, lonly_default_stream_for_taskgraphs__mod__gpu);
+#if LGRAVITATIONAL_WAVES_HTXK
+  PCLoad(config,AC_GW_Fourier_precision,lsingle_precision_ffts_for_gw_update__mod__gravitational_waves_htxk ? AC_SINGLE_PRECISION : AC_REAL_PRECISION);
 #endif
+  PCLoad(config,AC_error_buffer_precision,lsingle_precision_timestep ? AC_SINGLE_PRECISION : AC_REAL_PRECISION);
   PCLoad(config, AC_domain_decomposition, (int3) {nprocx,nprocy,nprocz});
   PCLoad(config, AC_ngrid, (int3){nxgrid,nygrid,nzgrid});
   PCLoad(config, AC_skip_single_gpu_optim, true);
@@ -703,39 +441,32 @@ void setupConfig(AcMeshInfo& config)
   //The statistics for doing the inverse are only needed when using the trained tau
   if(ltrained) denormalize("data/training/normalizer.bin", tau_hydro_means, tau_hydro_stds);
 
-	
-
   PCLoad(config,AC_tau_hydro_means,tau_hydro_means);
   PCLoad(config,AC_tau_hydro_stds ,tau_hydro_stds);
   #endif
   PCLoad(config,AC_sparse_autotuning,lac_sparse_autotuning);
 
-//  Enter physics related parameters in config.
-
-  #if LDENSITY
-    PCLoad(config,AC_ldensity_nolog,ldensity_nolog);
-    //printf("ldensity_nolog is %d \n",config[AC_ldensity_nolog]);//ldensity_nolog);
-  #endif
-  //Device dev = acGridGetDevice();
-#if LHYDRO
-  //dev->output.real_outputs[AC_maxadvec]=0.;
-#endif
-#if LENTROPY
-  //dev->output.real_outputs[AC_maxchi]=0.;
-#endif
+  //Calculate derived variable values based on the assignments in the initializations
   acHostUpdateParams(&config); 
+
+  //Redirect the runtime compilation log to a log file
   if (!ltraining) config.runtime_compilation_log_dst = "ac_compilation.log";
-  char cwd[9000];
-  cwd[0] = '\0';
-  const char* err = getcwd(cwd, sizeof(cwd));
-  if (err == NULL) 
-  {
-	  fprintf(stderr,"Was not able to get cwd!\n");
-	  exit(EXIT_FAILURE);
-  }
   char build_path[18000];
-  sprintf(build_path,"%s/src/astaroth/submodule/build",cwd);
+  sprintf(build_path,"%s/src/astaroth/submodule/build",get_cwd());
+  //Tell Astaroth that we want the runtime build to end up under this folder
   config.runtime_compilation_build_path = strdup(build_path);
+  //We find the DSL compiler under the sample which did the initial compilation
+  //So in case of pc_newrun -s the new sample would use the compiled compiler under the old sample.
+  //We do this because changing where the compiler path would kick in unnecessary recompilations.
+  config.acc_compiler_path = ACC_COMPILER_PATH;
+
+  sprintf(build_path,"%s/src/astaroth",get_cwd());
+  //This is here to skip the unnecessary make in case we run pc_newrun -s
+  if(!same_path(build_path,ORIGINAL_BUILD_PATH))
+  {
+	  config.runtime_compilation_skip_make_if_nothing_has_changed = true;
+  }
+
 }
 /***********************************************************************************************/
 //TP: x,y and z macros are too general
@@ -743,65 +474,8 @@ void setupConfig(AcMeshInfo& config)
 #undef y
 #undef z
 /***********************************************************************************************/
-std::array<AcReal,3> visc_get_max_diffus()
-{
-#if LVISCOSITY
-	 return {nu,nu_hyper2,nu_hyper3};
-#else
-	 return {0.0,0.0,0.0};
-#endif
-}
-/***********************************************************************************************/
-std::array<AcReal,3> magnetic_get_max_diffus()
-{
-#if Lmagnetic_MODULE
-	return {eta,eta_hyper2,eta_hyper3};
-#else
-	return {0.0,0.0,0.0};
-#endif
-}
-/***********************************************************************************************/
-std::array<AcReal,3> energy_get_max_diffus()
-{
-#if TRANSPILATION
-	return {0.0,0.0,0.0};
-#else
- 	constexpr AcReal chi_hyper2=0.;
-#if LENTROPY
-	return {gamma*chi,gamma*chi_hyper2,gamma*chi_hyper3};
-#else
-	return {0.0,0.0,0.0};
-#endif
-#endif
-}
-/***********************************************************************************************/
-std::array<AcReal,3> elem_wise_max(const std::array<AcReal,3>& a,const std::array<AcReal,3>& b,const std::array<AcReal,3>& c)
-{
- return {
-	  std::max(std::max(a[0],b[0]),c[0]),
-	  std::max(std::max(a[1],b[1]),c[1]),
-	  std::max(std::max(a[2],b[2]),c[2])
-	};
-}
-/***********************************************************************************************/
-AcReal max_diffus(AcReal maxnu_dyn, AcReal maxchi_dyn)
-{
-  AcReal3 dxyz_vals = get_dxyzs();
-
-  auto max_diffusions = elem_wise_max(visc_get_max_diffus(), magnetic_get_max_diffus(), energy_get_max_diffus());
-#if LENTROPY
-  max_diffusions[0] = std::max(max_diffusions[0],maxchi_dyn);
-#endif
-#if LVISCOSITY
-  max_diffusions[0] = std::max(max_diffusions[0],maxnu_dyn);
-#endif
-
-  return max_diffusions[0]*dxyz_vals.x/cdtv + max_diffusions[1]*dxyz_vals.y/cdtv2 + max_diffusions[2]*dxyz_vals.z/cdtv3;
-}
-/***********************************************************************************************/
 AcReal calc_dt1_courant(const AcReal t)
 {
-#if TRANSPILATION
       const AcReal gpu_max_dt1 = lsingle_precision_timestep 
 	      				? (AcReal)acDeviceGetOutput(acGridGetDevice(),AC_dt1_max_single_precision)
 					: acDeviceGetOutput(acGridGetDevice(),AC_dt1_max);
@@ -810,24 +484,6 @@ AcReal calc_dt1_courant(const AcReal t)
 	      return std::max((double)gpu_max_dt1,1./(dt_incr__mod__cdata*t));
       }
       return gpu_max_dt1;
-#else
-      AcReal maxadvec = 0.;
-#if LHYDRO
-      maxadvec = acDeviceGetOutput(acGridGetDevice(), AC_maxadvec)/cdt;
-      //if (rank==0) printf("rank, maxadvec= %d %e \n", rank, maxadvec);
-#endif
-      AcReal maxchi_dyn = 0.;
-#if LENTROPY
-      maxchi_dyn = acDeviceGetOutput(acGridGetDevice(), AC_maxchi);
-#endif
-      AcReal maxnu_dyn = 0.;
-#if LVISCOSITY
-      maxnu_dyn = acDeviceGetOutput(acGridGetDevice(), AC_maxnu);
-//if (rank==0) printf("maxnu_dyn= %e \n", maxnu_dyn);
-#endif
-      fprintf(stderr,"Maxadvec: %14e\n",maxadvec);
-      return (AcReal)sqrt(pow(maxadvec, 2) + pow(max_diffus(maxnu_dyn,maxchi_dyn), 2));
-#endif
 }
 /***********************************************************************************************/
 AcReal GpuCalcDt(const AcReal t)
@@ -946,12 +602,6 @@ extern "C" void splitUpdate(const AcReal error_tolerance, const int max_steps)
 /***********************************************************************************************/
 extern "C" void registerGPU()
 {
-  // AcReal* profile_x_host = (AcReal*)malloc(sizeof(AcReal)*mx);
-  // for (int i=0;i<mx;i++){
-  //     profile_x_host[i] = (AcReal)i;
-  //     acLogFromRootProc(rank,"profile_x_host[%d]=%f\n",i,profile_x_host[i]);
-  // }
-  // mesh.profiles[PROFILE_X] = profile_x_host;
 
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   mesh.info = acInitInfo();
@@ -964,6 +614,111 @@ extern "C" void registerGPU()
 	  fprintf(stderr,"No devices!\n");
 	  exit(EXIT_FAILURE);
   }
+#endif
+}
+/***********************************************************************************************/
+extern "C" void tf_create_model_c_api(const char *model_name, const char* config_file_path, int comm_fint, bool ldist){
+#if LTRAINING
+	int ndevices = 0;
+	
+	if(acGetDeviceCount(&ndevices) != cudaSuccess)
+	{
+			fprintf(stderr, "initialize_training, acGetDeviceCount failed");
+			fflush(stderr);
+			exit(EXIT_FAILURE);
+	}
+
+  if(acSetDevice(rank % ndevices) != cudaSuccess)
+  {
+  		fprintf(stderr,"Was not able to set device id!\n");
+			fflush(stderr);
+ 			exit(EXIT_FAILURE);
+  }
+
+  acLogFromRootProc(rank,"CONFIG_FILE: %s\n", config_file_path);
+  acLogFromRootProc(rank,"Model_NAME: %s\n", model_name);
+	
+	if(ldist){
+  	comm_pencil = MPI_Comm_f2c(comm_fint);
+		bool success = torch_create_distributed_model_CAPI(model_name, config_file_path, comm_pencil, 0);
+		if (success != 0){
+			acLogFromRootProc(rank, "Error when creating distributed model: %s from config file: %s\n", model_name, config_file_path);
+		}
+		else{
+  		acLogFromRootProc(rank,"CREATED DISTRIBUTED TRAINING\n");
+		}
+	}
+
+	else{
+		bool success = torch_create_model_CAPI(model_name, config_file_path, 0);
+		if (success != 0){
+			acLogFromRootProc(rank, "Error when creating the model: %s from config file: %s\n", model_name, config_file_path);
+		}
+		else{
+  		acLogFromRootProc(rank,"CREATED SINGLE TRAINING\n");
+		}
+	}
+	fflush(stderr);
+	fflush(stdout);
+#endif
+}
+/***********************************************************************************************/
+extern "C" void tf_load_model_c_api(const char* name, const char* fname){
+#if LTRAINING
+	bool success = torch_load_CAPI(name, fname);
+
+	if (success != 0){
+		acLogFromRootProc(rank, "Error when loading model %s\n", name);
+	}
+	else{
+		acLogFromRootProc(rank, "Torchfort model %s loaded succesfully", name);
+	}
+	fflush(stdout);
+	fflush(stderr);
+#endif
+}
+/***********************************************************************************************/
+extern "C" void tf_load_model_checkpoint_c_api(const char* name, const char* checkpoint_dir){
+#if LTRAINING
+	int64_t step_train=0;
+	int64_t step_inference=0;
+	bool success = torch_load_checkpoint_CAPI(name, checkpoint_dir, &step_train, &step_inference);
+	if (success != 0){
+		acLogFromRootProc(rank, "Error when loading model %s\n", name);
+	}
+	else{
+		acLogFromRootProc(rank, "Torchfort model %s loaded succesfully\n", name);
+	}
+	fflush(stdout);
+	fflush(stderr);
+#endif
+}
+/***********************************************************************************************/
+extern "C" void tf_save_model_c_api(const char* name, const char* fname){
+#if LTRAINING
+	bool success = torch_save_model_CAPI(name, fname);
+	if(success != 0){
+		acLogFromRootProc(rank, "save_model: Error when saving ML model: %s\n", name);
+	}
+	else{
+		acLogFromRootProc(rank, "save_model: Saving ML model to: %s\n", fname);
+	}
+	fflush(stdout);
+	fflush(stderr);
+#endif
+}
+/***********************************************************************************************/
+extern "C" void tf_save_checkpoint_c_api(const char* name, const char* checkpoint_dir){
+#if LTRAINING
+	bool success = torch_save_checkpoint_CAPI(name, checkpoint_dir);
+	if(success != 0){
+		acLogFromRootProc(rank, "save_checkpoint: Error when checkpointing ML model: %s in directory: %s\n", name, checkpoint_dir);
+	}
+	else{
+		acLogFromRootProc(rank, "save_checkpoint: Checkpoint ML model to: %s\n", checkpoint_dir);
+	}
+	fflush(stdout);
+	fflush(stderr);
 #endif
 }
 /***********************************************************************************************/
@@ -984,7 +739,8 @@ std::vector<int>train_nts;
 bool loaded_stats = false;
 bool snap_print = false;
 /***********************************************************************************************/
-void denormalize(std::string filename, AcRealSymmetricTensor &tau_means, AcRealSymmetricTensor &tau_stds){
+void denormalize(std::string filename, AcRealSymmetricTensor &tau_means, AcRealSymmetricTensor &tau_stds)
+{
 	if(!loaded_stats){
 		loaded_stats = true;
 		std::ifstream f(filename, std::ios::binary);
@@ -1086,21 +842,20 @@ void denormalize(std::string filename, AcRealSymmetricTensor &tau_means, AcRealS
 
 	}
 }
-
-
-
 /***********************************************************************************************/
-extern "C" void torch_infer_c_api(int itsub){	
-#if TRAINING
+extern "C" void torch_infer_c_api(int itsub)
+{	
+#if LTRAINING
 	#include "user_constants.h"
-	if(ltrained && itsub!=1) return;
+	if(!ltrained) return;
 	if(!calling_infer){
 		AcRealSymmetricTensor tau_means = mesh.info[AC_tau_hydro_means];
 		AcRealSymmetricTensor tau_stds  = mesh.info[AC_tau_hydro_stds];
-		fprintf(stderr,"Calling infer\n");
+    acLogFromRootProc(rank,"Doing inference\n");
 		fprintf(stderr,"means xx: %f, yy: %f, zz: %f, xy: %f, yz: %f, xz: %f\n", tau_means.xx, tau_means.yy, tau_means.zz, tau_means.xy, tau_means.yz, tau_means.xz);
 		fprintf(stderr,"stds xx: %f, yy: %f, zz: %f, xy: %f, yz: %f, xz: %f\n", tau_stds.xx, tau_stds.yy, tau_stds.zz, tau_stds.xy, tau_stds.yz, tau_stds.xz);
 		fflush(stderr);
+		fflush(stdout);
 	}
 	calling_infer = true;
 
@@ -1124,6 +879,7 @@ extern "C" void torch_infer_c_api(int itsub){
 	if (randomNumber == 4) acDeviceGetVertexBufferPtrs(acGridGetDevice(), UUMEANBatch[4].x, &uumean_ptr, &out);
 	if (randomNumber == 5) acDeviceGetVertexBufferPtrs(acGridGetDevice(), UUMEANBatch[5].x, &uumean_ptr, &out);
 	*/
+	
 
 	//
 	//check if trained on same grid size and do not smooth the averaged out vals
@@ -1133,27 +889,27 @@ extern "C" void torch_infer_c_api(int itsub){
 	acDeviceGetVertexBufferPtrs(acGridGetDevice(), TAU_HYDRO_INFERRED.xx, &tau_infer_ptr, &out);
 
 	acGridHaloExchange();
-
-	torch_inferCAPI((int[]){mx,my,mz}, uumean_ptr, tau_infer_ptr,input_channels,output_channels,"stationary");
+	
+	torch_infer_CAPI((int[]){mx,my,mz}, uumean_ptr, tau_infer_ptr,input_channels,output_channels,"stationary",calling_train);
 	
 	auto descale_inf = acGetOptimizedDSLTaskGraph(descale_inferred_taus);
 	acGridExecuteTaskGraph(descale_inf, 1);
 
         bcs = acGetOptimizedDSLTaskGraph(boundconds);	
 	acGridExecuteTaskGraph(bcs,1);
-
 #endif
 }
 /***********************************************************************************************/
 extern "C" void torch_train_c_api(AcReal *loss_val, int itsub, double t) {
-#if TRAINING
+#if LTRAINING
   #include "user_constants.h"
   #include <stdlib.h>
   if(itsub != 1) return;
   
   if(!calling_train){
-  	fprintf(stderr,"Calling training\n");
+    acLogFromRootProc(rank,"Doing training\n");
   	fflush(stderr);
+  	fflush(stdout);
   }
 
 
@@ -1176,9 +932,9 @@ extern "C" void torch_train_c_api(AcReal *loss_val, int itsub, double t) {
   acDeviceGetVertexBufferPtrs(acGridGetDevice(), uumean.x, &uumean_ptr, &out);
   
   acGridHaloExchange();
-  torch_trainCAPI((int[]){mx,my,mz}, uumean_ptr, TAU_ptr, loss_val,input_channels,output_channels,"stationary");
+  torch_train_CAPI((int[]){mx,my,mz}, uumean_ptr, TAU_ptr, loss_val,input_channels,output_channels,"stationary");
   train_loss.push_back(*loss_val);
-	train_nts.push_back(nt);
+	train_nts.push_back(it);
   train_counter++;
   print_debug();
   if (it==nt){
@@ -1205,7 +961,7 @@ extern "C" void torch_train_c_api(AcReal *loss_val, int itsub, double t) {
 }
 /***********************************************************************************************/
 float MSE(){
-#if TRAINING
+#if LTRAINING
 	#include "user_constants.h"
 
 	auto calc_validation = acGetOptimizedDSLTaskGraph(calc_validation_loss);
@@ -1223,47 +979,60 @@ float MSE(){
 /***********************************************************************************************/
 void load_f_ode()
 {
-        //TP: this is simply the initial implementation
-        //TODO: benchmark what is the most efficient way of getting ode array to the GPU each substep
-#if TRANSPILATION
+	//This seems to be a sufficiently performant way to keep ODE variables in sync:
+	//For backreact_infl 256^3 subdomain:
+	//Loading ode variables took: 6.08199999987846e-04
+	//BeforeBoundary took: 7.85426100003406e-03 to 1.9e-2 (TODO: why does it fluctuate so much?)
+        //RHS TOOK:   1.451359e-02
+	//So for large enough subdomains rhs dominates
         if (n_odevars > 0)
         {
+                AcReal start = MPI_Wtime();
                 acDeviceSynchronizeStream(acGridGetDevice(),STREAM_DEFAULT);
                 acDeviceLoad(acGridGetDevice(), STREAM_DEFAULT, mesh.info, AC_f_ode);
                 acDeviceSynchronizeStream(acGridGetDevice(),STREAM_DEFAULT);
+	        if(performance_logs) acLogFromRootProc(rank,"Loading ode variables took: %.14e\n",MPI_Wtime()-start);
         }
-#endif
 }
 /***********************************************************************************************/
-extern "C" void beforeBoundaryGPU(bool lrmv, int isubstep, double t)
+void
+reload_dynamically_changing_variables(bool lrmv, int isubstep, double t, bool lsubstepping_in_time)
 {
-// Load values of ODE variables to GPU since before boundary may use them
+// Loads the values of the ODE variables
+// which are are advanced on the host in dspecial_dt_ode
 	load_f_ode();
-
-// Load those dynamical parameters which depend on time to GPU
-
+// Sets the values of input parameters to the kernels.
+// Does not load them to the device but instead sets values of the Astaroth config
+// from which input parameters to the kernels are read from
+        acDeviceSetInput(acGridGetDevice(), AC_timestep_number,it);
         acDeviceSetInput(acGridGetDevice(), AC_step_num,(PC_SUB_STEP_NUMBER) (isubstep-1));
  	acDeviceSetInput(acGridGetDevice(), AC_lrmv, lrmv);
  	acDeviceSetInput(acGridGetDevice(), AC_t, AcReal(t));
-
+ 	acDeviceSetInput(acGridGetDevice(), AC_lsubstepping_in_time, lsubstepping_in_time);
+}
+/***********************************************************************************************/
+extern "C" void beforeBoundaryGPU(bool lrmv, int isubstep, double t, bool lsubstepping_in_time)
+{
+	reload_dynamically_changing_variables(lrmv,isubstep,t,lsubstepping_in_time);
+        
+	AcReal start_time = MPI_Wtime();
 // Execute all "before-boundary-actions", which do not update the halos, by separate task graph
-
 	acGridExecuteTaskGraph(acGetOptimizedDSLTaskGraph(AC_before_boundary_steps),1);
 
 //Some Fields are directly calculated on the halos like yH in ioncalc.
 //Could reformulate the kernels in a way that the bc is simply the same kernel as the normal calculation
 //But don't want to repeat calc too often so this is a somewhat easy way to do it
-#if TRANSPILATION
 	const auto steps_updating_halos = acGetOptimizedDSLTaskGraph(AC_before_boundary_steps_including_halos,
 					          (Volume){0,0,0},acGetLocalMM(acGridGetLocalMeshInfo()));
 	if (!acGridTaskGraphIsEmpty(steps_updating_halos))
 	{
 		AcTaskGraph* bcs = acGetOptimizedDSLTaskGraph(boundconds);
 		acGridExecuteTaskGraph(bcs,1);                            // apply boundconds
-		acGridHaloExchange();                                     // halo communication
+		//This is not anymore done since it is fine for the resulting inner halos to be incorrect.
+		//If those inner halos are later needed they will be anyways communicated
+		//acGridHaloExchange();                                     // halo communication
 		acGridExecuteTaskGraph(steps_updating_halos,1);           // f-array update
 	}
-#endif
 #if LSELFGRAVITY
 	if (t>=tstart_selfgrav)
 	{
@@ -1287,19 +1056,28 @@ extern "C" void beforeBoundaryGPU(bool lrmv, int isubstep, double t)
 #if LNEWTON_COOLING
 	acGridExecuteTaskGraph(acGetOptimizedDSLTaskGraph(AC_integrate_tau),1);
 #endif
+	if(performance_logs) acLogFromRootProc(rank,"BeforeBoundary took: %.14e\n",MPI_Wtime()-start_time);
 }
 /***********************************************************************************************/
 bool idx_init = false;
 std::vector<size_t> idx_cache;
 std::vector<double> buffer;
+std::stack<int> snaps({20000, 15000, 10000, 5000, 1000, 500, 100, 50, 10});
 
 
-void print_debug() {
-if (it % 50 !=0) return;
-#if TRAINING
+extern "C" void print_debug() {
+/*
+	if (snaps.empty() || it< snaps.top()) return;
+
+	while (!snaps.empty() && it >= snaps.top()) {
+		snaps.pop();
+	}
+*/
+
+#if LTRAINING
     #include "user_constants.h"
 		
-		std::string fname = "snapshots/snapshot_rank_" + std::to_string(my_rank) + "_it_" + std::to_string(it) + ".bin";
+		std::string fname = "snapshots/snapshot_294_rank_" + std::to_string(my_rank) + "_it_" + std::to_string(it) + ".bin";
 		std::ifstream infile(fname, std::ios::binary);
 		if (infile.good()) return;
 		
@@ -1412,7 +1190,7 @@ if (it % 50 !=0) return;
 	
 
 		//std::ostringstream fname;
-    //fname << "snapshots/snapshot_rank_" + std::to_string(my_rank) + "_it_" + std::to_string(it) + ".bin";
+    //fname << "snapshots/snapshot_38_rank_" + std::to_string(my_rank) + "_it_" + std::to_string(it) + ".bin";
     std::ofstream out(fname, std::ios::binary);
     out.write(reinterpret_cast<const char*>(buffer.data()), buffer.size() * sizeof(double));
     out.close();
@@ -1422,7 +1200,7 @@ if (it % 50 !=0) return;
 }
 /***********************************************************************************************/
 void
-GW_update()
+GW_update(const AcReal dt_gw)
 {
 #if LGRAVITATIONAL_WAVES_HTXK
 	//We set the device id here since another thread than the master might be executing this
@@ -1435,24 +1213,33 @@ GW_update()
 	//TP: do this if you want to test the performance of utilizing the conjugate symmetry
 	//acDeviceFFTR2HermitianPlanarBatched(acGridGetDevice(), acGetF_STRESS_0(),acGetAC_tpq_re__mod__gravitational_waves_htxk_0(),acGetAC_tpq_im__mod__gravitational_waves_htxk_0(),6,STREAM_10);
         acDeviceSynchronizeStream(acGridGetDevice(),STREAM_10);
+	acDeviceSetInput(acGridGetDevice(),AC_dt,dt_gw);
 	acGridExecuteTaskGraph(GW_timestep_graph,1);
+	acDeviceSetInput(acGridGetDevice(),AC_dt,dt);
 #endif
 }
 /***********************************************************************************************/
 extern "C" void afterSubStepGPU()
 {
+	static AcReal dt_gw=0.0;
 #if LGRAVITATIONAL_WAVES_HTXK
 	if (acDeviceGetInput(acGridGetDevice(), AC_step_num) == PC_FIRST_SUB_STEP)
 	{
-	   GW_update();
-	   //TP: do this if you want to test the performance of overlapping GW FFTs with the normal RHS
+	   dt_gw += dt;
+	   if((it+1) % ntimesteps_per_gw_step__mod__gravitational_waves_htxk == 0)
+	   {
+	     GW_update(dt_gw);
+	     dt_gw = 0.0;
+	   }
+	   //Do this if you want to test the performance of overlapping GW FFTs with the normal RHS
+	   //Usually this has given subpar performance
 	   //GW_thread = std::thread(GW_update);
 	}
 #endif
 	acGridExecuteTaskGraph(acGetOptimizedDSLTaskGraph(AC_after_timestep),1);
 }
 /***********************************************************************************************/
-//TP: not yet tested still work in progress
+//Tested to work with solar-atmosphere-magnetic
 void
 fourier_boundary_conditions()
 {
@@ -1515,8 +1302,78 @@ update_forcing(const int isubstep)
 	   fprintf(stderr,"Second forcing force not yet implemented on GPU!\n");
 	   exit(EXIT_FAILURE);
    }
-   if (isubstep == num_substeps) forcing_params.Update();  // calculate on CPU and load into GPU
+   if (isubstep == num_substeps) 
+	 {
+	   forcing_params.Update();  // calculate on CPU and load into GPU
+	 }
 #endif
+}
+/***********************************************************************************************/
+void
+prepare_rhs(const int isubstep, double t)
+{
+  fourier_boundary_conditions();
+  acDeviceSetInput(acGridGetDevice(), AC_step_num,(PC_SUB_STEP_NUMBER) (isubstep-1));
+  if (lshear) 
+  {
+	  acDeviceSetInput(acGridGetDevice(), AC_shear_delta_y, deltay);
+  }
+  acDeviceSetInput(acGridGetDevice(), AC_t,(AcReal)t);
+}
+/***********************************************************************************************/
+void
+set_timestep(double t)
+{
+    static bool lfirst_timestep_calculated = false;
+    //Lcpu_timestep_on_gpu enables the same timestep as PC when testing
+    if (ldt && lcourant_dt && (!lfirst_timestep_calculated || lcpu_timestep_on_gpu)) 
+    {
+            dt1_interface = GpuCalcDt(AcReal(t));
+    	lfirst_timestep_calculated = true;
+    }
+    //Done in this more complex manner to ensure the actually integrated time and the time reported by Pencil agree
+    //if we call set_dt after the first timestep there would be slight shift in dt what Pencil sees and what is actually used for time integration
+    if (ldt) 
+    {
+      set_dt(dt1_interface);
+    }
+    acDeviceSetInput(acGridGetDevice(), AC_dt,dt);
+}
+/***********************************************************************************************/
+void
+calc_timestep(double t)
+{
+  constexpr AcReal unit = 1.0;
+  AcReal dt1_;
+  if (!lcourant_dt)
+  {
+    const AcReal maximum_error = lsingle_precision_timestep 
+	    				? ((AcReal)acDeviceGetOutput(acGridGetDevice(), AC_maximum_error_single_precision))/eps_rkf
+	    				: ((AcReal)acDeviceGetOutput(acGridGetDevice(), AC_maximum_error))/eps_rkf;
+    AcReal dt_;
+    const AcReal dt_increase=-unit/(itorder+dtinc);
+    const AcReal dt_decrease=-unit/(itorder-dtdec);
+    constexpr AcReal safety=(AcReal)0.95;
+    if (maximum_error > 1)
+    {
+    	// Step above error threshold so decrease the next time step
+    	const AcReal dt_temp = safety*dt*pow(maximum_error,dt_decrease);
+    	// Don't decrease the time step by more than a factor of ten
+        constexpr AcReal decrease_factor = (AcReal)0.1;
+    	dt_ = sign(max(abs(dt_temp), decrease_factor*abs(dt)), dt);
+    } 
+    else
+    {
+    	dt_ = dt*pow(maximum_error,dt_increase);
+    }
+    set_next_dt(dt_);
+    dt1_ = unit/dt_;
+  }
+  else 
+  {
+    dt1_ = calc_dt1_courant(AcReal(t));
+  }
+  dt1_interface = dt1_;
 }
 /***********************************************************************************************/
 extern "C" void substepGPU(int isubstep, double t)
@@ -1524,87 +1381,45 @@ extern "C" void substepGPU(int isubstep, double t)
 //  Do the 'isubstep'th integration step on all GPUs on the node and handle boundaries.
 //
 {
-   //TP: logs performance metrics of Astaroth
-  const bool log = false;
-  fourier_boundary_conditions();
-  acDeviceSetInput(acGridGetDevice(), AC_step_num,(PC_SUB_STEP_NUMBER) (isubstep-1));
-  if (lshear) 
-  {
-	  acDeviceSetInput(acGridGetDevice(), AC_shear_delta_y, deltay);
-  }
-  Device dev = acGridGetDevice();
-  //TP: done in this more complex manner to ensure the actually integrated time and the time reported by Pencil agree
-  //if we call set_dt after the first timestep there would be slight shift in dt what Pencil sees and what is actually used for time integration
-  
-  acDeviceSetInput(acGridGetDevice(), AC_t,(AcReal)t);
+  prepare_rhs(isubstep,t);
   if (isubstep == 1) 
   {
-	  if(GW_thread.joinable())
-	  {
-	          GW_thread.join();
-	  }
-          static bool lfirst_timestep_calculated = false;
-	  //TP: lcpu_timestep_on_gpu enables the same timestep as PC when testing
-	  if (ldt && lcourant_dt && (!lfirst_timestep_calculated || lcpu_timestep_on_gpu)) 
-	  {
-		dt1_interface = GpuCalcDt(AcReal(t));
-	  	lfirst_timestep_calculated = true;
-	  }
-	  if (ldt) set_dt(dt1_interface);
-	  acDeviceSetInput(acGridGetDevice(), AC_dt,dt);
 #if LGRAVITATIONAL_WAVES_HTXK
-	  if(lsplit_gw_rhs_from_rest_on_gpu)
-	  {
-  		acGridExecuteTaskGraph(acGetOptimizedDSLTaskGraph(AC_GW_rhs),1);
-	  }
+    if(GW_thread.joinable())
+    {
+            GW_thread.join();
+    }
+#endif
+    set_timestep(t);
+#if LGRAVITATIONAL_WAVES_HTXK
+    if(lsplit_gw_rhs_from_rest_on_gpu)
+    {
+          acGridExecuteTaskGraph(acGetOptimizedDSLTaskGraph(AC_GW_rhs),1);
+    }
 #endif
   }
-  //TP: Important that the update of forcing comes after setting dt since it depends on it!
+  //Important that forcing vectors are updated only after the timestep is calculated
+  //since the timestep is used in the calculation
   update_forcing(isubstep);
 
-  //fprintf(stderr,"before acGridExecuteTaskGraph");
   AcTaskGraph *rhs =  acGetOptimizedDSLTaskGraph(AC_rhs);
   auto start = MPI_Wtime();
   acGridExecuteTaskGraph(rhs, 1);
   auto end = MPI_Wtime();
-  if (log && !rank) fprintf(stderr,"RHS TOOK: %14e\n",end-start);
+  if (performance_logs) acLogFromRootProc(rank,"RHS TOOK: %14e\n",end-start);
   if (ldt && (   (isubstep == 5 && !lcourant_dt) 
               || (isubstep == 1 &&  lcourant_dt)
              )
      )
   {
-    constexpr AcReal unit = 1.0;
-    AcReal dt1_;
-    if (!lcourant_dt)
-    {
-      const AcReal maximum_error = lsingle_precision_timestep 
-	      				? ((AcReal)acDeviceGetOutput(acGridGetDevice(), AC_maximum_error_single_precision))/eps_rkf
-	      				: ((AcReal)acDeviceGetOutput(acGridGetDevice(), AC_maximum_error))/eps_rkf;
-      AcReal dt_;
-      const AcReal dt_increase=-unit/(itorder+dtinc);
-      const AcReal dt_decrease=-unit/(itorder-dtdec);
-      constexpr AcReal safety=(AcReal)0.95;
-      if (maximum_error > 1)
-      {
-      	// Step above error threshold so decrease the next time step
-      	const AcReal dt_temp = safety*dt*pow(maximum_error,dt_decrease);
-      	// Don't decrease the time step by more than a factor of ten
-        constexpr AcReal decrease_factor = (AcReal)0.1;
-      	dt_ = sign(max(abs(dt_temp), decrease_factor*abs(dt)), dt);
-      } 
-      else
-      {
-      	dt_ = dt*pow(maximum_error,dt_increase);
-      }
-      set_next_dt(dt_);
-      dt1_ = unit/dt_;
-    }
-    else 
-    {
-      dt1_ = calc_dt1_courant(AcReal(t));
-    }
-    dt1_interface = dt1_;
+	calc_timestep(t);
   }
+#if LTIMEAVGS
+  if(isubstep == num_substeps)
+  {
+	  acGridExecuteTaskGraph(acGetOptimizedDSLTaskGraph(AC_update_timeavgs));
+  }
+#endif
   return;
 }
 /***********************************************************************************************/
@@ -1622,7 +1437,7 @@ void copyFarray(AcReal* f)
 
   AcMesh* dst = &mesh;
   AcMesh tmp;
-  if (dimensionality <= 1 || (dimensionality == 2 && nygrid == 1))
+  if (nghost > 0 && (dimensionality <= 1 || (dimensionality == 2 && nygrid == 1)))
   {
   	acHostMeshCopy(mesh, &tmp);
 	dst = &tmp;
@@ -1640,9 +1455,9 @@ void copyFarray(AcReal* f)
 	  acDeviceStoreVertexBuffer(acGridGetDevice(),STREAM_DEFAULT,VertexBufferHandle(index),dst);
   }
   acGridSynchronizeStream(STREAM_ALL);
-  //TP: Astaroth does not allocate ghost zones for inactive dimensions for 1d and 2d simulations, and unlike for xy  we cannot simply offset into the farray so have to manually copy the values
+  // Astaroth does not allocate ghost zones for inactive dimensions for 1d and 2d simulations, and unlike for xy  we cannot simply offset into the farray so have to manually copy the values
   //    This is fine since 1d simulations are anyways mainly for testing
-  if (dimensionality == 1)
+  if (nghost > 0 && dimensionality == 1)
   {
   	for (int i = 0; i < end; ++i)
   	{
@@ -1674,7 +1489,7 @@ void copyFarray(AcReal* f)
 	}
   	acHostMeshDestroy(&tmp);
   }
-  if (dimensionality == 0)
+  if (nghost > 0 && dimensionality == 0)
   {
     	for (int i = 0; i < end; ++i)
   	{
@@ -1685,7 +1500,7 @@ void copyFarray(AcReal* f)
  		mesh.vertex_buffer[i][f_index] = dst->vertex_buffer[i][ac_index];
 	}
   }
-  if (dimensionality == 2 && nygrid == 1)
+  if (nghost > 0 && dimensionality == 2 && nygrid == 1)
   {
     	for (int i = 0; i < end; ++i)
   	{
@@ -1703,51 +1518,6 @@ void copyFarray(AcReal* f)
 	}
   	acHostMeshDestroy(&tmp);
   }
-}
-/***********************************************************************************************/
-void checkConfig(AcMeshInfo &config)
-{
- acLogFromRootProc(rank,"Check that config is correct\n");
- acLogFromRootProc(rank,"d[xyz]: %.14f %.14f %.14f \n", dx, dy, dz);
-// acLogFromRootProc(rank,"rank= %d: l1, l2, n1, n2, m1, m2= %d %d %d %d %d %d \n", rank, l1, l2, n1, n2, m1, m2);
-// acLogFromRootProc(rank,"zlen= %.14f %.14f \n", config[AC_len].z, lxyz[2]);
- /*
-#if LHYDRO
- acLogFromRootProc(rank,"lpressuregradientgas= %d %d \n", lpressuregradient_gas, config[AC_lpressuregradient_gas]);
-#endif
-#if LENTROPY
- acLogFromRootProc(rank,"chi= %f %f \n", chi, config[AC_chi]);
- acLogFromRootProc(rank,"nkramers= %f %f \n", nkramers, config[AC_nkramers]);
- acLogFromRootProc(rank,"hcond0_kramers= %f %f \n", hcond0_kramers, config[AC_hcond0_kramers]);
- acLogFromRootProc(rank,"hcond_Kconst= %f %f \n", hcond_Kconst, config[AC_hcond_Kconst]);
- //acLogFromRootProc(rank,"Fbot= %f %f \n", Fbot, config[AC_Fbot]);
- acLogFromRootProc(rank,"chi_t= %f %f \n", chi_t, config[AC_chi_t]);
-#endif
-#if LVISCOSITY
- acLogFromRootProc(rank,"nu= %f %f \n", nu, config[AC_nu]);
- acLogFromRootProc(rank,"zeta= %f %f \n", zeta, config[AC_zeta]);
-#endif
-#if LMAGNETIC
-  acLogFromRootProc(rank,"eta= %f %f \n", eta, config[AC_eta]);
-#endif
-#if LEOS
-  acLogFromRootProc(rank,"cs20= %f %f \n", cs20, config[AC_cs20]);
-  //  acLogFromRootProc(rank,"gamma= %f %f \n", gamma, get_real_param(config,comp_infoAC_gamma));
-  acLogFromRootProc(rank,"gamma_m1= %f %f \n", gamma_m1, config[AC_gamma_m1]);
-  acLogFromRootProc(rank,"gamma1= %f %f \n", gamma1, config[AC_gamma1]);
-  acLogFromRootProc(rank,"cv= %f %f \n", cv, config[AC_cv]);
-  acLogFromRootProc(rank,"cp= %f %f \n", cp, config[AC_cp]);
-  acLogFromRootProc(rank,"lnT0= %f %f \n", lnTT0, config[AC_lnTT0]);
-  acLogFromRootProc(rank,"lnrho0= %f %f \n", lnrho0, config[AC_lnrho0]);
-#endif
-#if LFORCING
-  acLogFromRootProc(rank,"iforcing_zsym= %f %f \n", iforcing_zsym, config[AC_iforcing_zsym]);
-  acLogFromRootProc(rank,"k1_ff= %f %f \n", k1_ff, config[AC_k1_ff]);
-  acLogFromRootProc(rank,"tforce_stop= %f %f \n", tforce_stop, config[AC_tforce_stop]);
-  acLogFromRootProc(rank,"k1_ff,profx_ampl, val= %f %d %lf %lf\n", k1_ff, profx_ampl, profx_ampl[0], profx_ampl[nx-1]);
-#endif
-  acLogFromRootProc(rank,"mu0= %f %f \n", (double)mu0, (double)config[AC_mu0]);
-*/
 }
 /***********************************************************************************************/
 extern "C" void getFArrayIn(AcReal **p_f_in)
@@ -1793,21 +1563,23 @@ void autotune_all_integration_substeps()
   	acDeviceSetInput(acGridGetDevice(), AC_lrmv,true);
 	acGetOptimizedDSLTaskGraph(AC_rhs);
         if (rank==0 && ldebug) printf("memusage after GetOptimizedDSLTaskGraph= %f MBytes\n", acMemUsage()/1024.);
- 	beforeBoundaryGPU(true,i,0.0);
-        beforeBoundaryGPU(false,i,0.0);
+ 	beforeBoundaryGPU(true,i,0.0,false);
+        beforeBoundaryGPU(false,i,0.0,false);
   }
   radTransfer();
+  //This is here mainly because GW_update will allocate buffers on the first call
+  //and I don't those allocations to mess with timing measurements for short runs
+  GW_update(0.0);
   splitUpdate(1e11,1);
 }
 /***********************************************************************************************/
-extern "C" void loadFarray()
+AcMesh
+get_f_src()
 {
-  AcMesh src = mesh;
-  AcMesh tmp;
-  if (dimensionality == 1)
+  if (nghost > 0 && dimensionality == 1)
   {
-  	acHostMeshCopy(mesh, &tmp);
-	src = tmp;
+        AcMesh src;
+  	acHostMeshCopy(mesh, &src);
     	for (int i = 0; i < mfarray; ++i)
   	{
 		const int index = (i < mvar) ? i : maux_vtxbuf_index[i];
@@ -1837,11 +1609,12 @@ extern "C" void loadFarray()
 			}
 		}
 	}
+	return src;
   }
-  if (dimensionality == 2 && nygrid == 1)
+  if (nghost > 0 && dimensionality == 2 && nygrid == 1)
   {
-  	acHostMeshCopy(mesh, &tmp);
-	src = tmp;
+        AcMesh src;
+  	acHostMeshCopy(mesh, &src);
     	for (int i = 0; i < mfarray; ++i)
   	{
 		const int index = (i < mvar) ? i : maux_vtxbuf_index[i];
@@ -1856,11 +1629,12 @@ extern "C" void loadFarray()
 			}
 		}
 	}
+	return src;
   }
-  if (dimensionality == 0)
+  if (nghost > 0 && dimensionality == 0)
   {
-  	acHostMeshCopy(mesh, &tmp);
-	src = tmp;
+	AcMesh src;
+  	acHostMeshCopy(mesh, &src);
     	for (int i = 0; i < mfarray; ++i)
   	{
 		const int index = (i < mvar) ? i : maux_vtxbuf_index[i];
@@ -1869,31 +1643,46 @@ extern "C" void loadFarray()
 		const size_t ac_index = 0;
 		src.vertex_buffer[index][ac_index] = mesh.vertex_buffer[index][f_index];
 	}
+	return src;
   }
+  return mesh;
+}
+/***********************************************************************************************/
+extern "C" void loadFarray()
+{
+  AcMesh src = get_f_src();
   acGridSynchronizeStream(STREAM_ALL);
-  {
-    for (int i = 0; i < mvar; ++i)
-  	acDeviceLoadVertexBuffer(acGridGetDevice(), STREAM_DEFAULT, src, VertexBufferHandle(i));
 
-    int n_aux_on_gpu = 0;
-    for (int i = 0; i < mfarray; ++i)
-      if (maux_vtxbuf_index[i] != -1)
-      {
-	      n_aux_on_gpu++;
-  		acDeviceLoadVertexBuffer(acGridGetDevice(), STREAM_DEFAULT, src, VertexBufferHandle(maux_vtxbuf_index[i]));
-      }
-    for (int i = 0; i < mfarray-mvar-maux; ++i)
+  for (int i = 0; i < mvar; ++i)
+      acDeviceLoadVertexBuffer(acGridGetDevice(), STREAM_DEFAULT, src, VertexBufferHandle(i));
+
+  int n_aux_on_gpu = 0;
+  for (int i = 0; i < mfarray; ++i)
+  {
+    if (maux_vtxbuf_index[i] != -1)
     {
-  	acDeviceLoadVertexBuffer(acGridGetDevice(), STREAM_DEFAULT, src, VertexBufferHandle(mvar+n_aux_on_gpu+i));
+        n_aux_on_gpu++;
+      	acDeviceLoadVertexBuffer(acGridGetDevice(), STREAM_DEFAULT, src, VertexBufferHandle(maux_vtxbuf_index[i]));
     }
   }
+  for (int i = 0; i < mglobal; ++i)
+  {
+      acDeviceLoadVertexBuffer(acGridGetDevice(), STREAM_DEFAULT, src, VertexBufferHandle(mvar+n_aux_on_gpu+i));
+  }
+
   acGridSynchronizeStream(STREAM_ALL);
-  if (dimensionality == 1) acHostMeshDestroy(&tmp);
+  if (nghost > 0 && (dimensionality < 2 || (dimensionality == 2 && nygrid == 1))) acHostMeshDestroy(&src);
 }
 /***********************************************************************************************/
 void generate_bcs()
 {
 	if(rank != 0) return;
+	bool bc2ast_exists = (system("ls src/scripts/bc2ast > /dev/null 2>&1") == 0);
+	if(!bc2ast_exists)
+	{
+		fprintf(stderr,"AC Warning: Did not find src/scripts/bc2ast so skipping possible bc generation!\n");
+		return;
+	}
 	if(system("cd src && scripts/bc2ast 1> ../tmp_bcs 2> /dev/null && cd .."))
 	{
 		fprintf(stderr,"AC Error: Was not able to generate bcs!\n");
@@ -1923,8 +1712,10 @@ extern "C" void testBCs();     // forward declaration
 /***********************************************************************************************/
 extern "C" void initializeGPU(AcReal *farr, int comm_fint, double t, int nt_,
 				int lread_all_vars_from_device_,
-				int lcpu_timestep_on_gpu_)  // MPI_Fint comm_fint
+				int lcpu_timestep_on_gpu_,
+				int lac_sparse_autotuning_)  // MPI_Fint comm_fint
 {
+  lac_sparse_autotuning = lac_sparse_autotuning_;
   if(lread_all_vars_from_device_) lread_all_vars_from_device = true;
   if(lcpu_timestep_on_gpu_) lcpu_timestep_on_gpu = true;
   //Setup configurations used for initializing and running the GPU code
@@ -1948,8 +1739,8 @@ extern "C" void initializeGPU(AcReal *farr, int comm_fint, double t, int nt_,
   acLogFromRootProc(rank, "Done setupConfig\n");
 #endif
   fflush(stdout);
-  //TP: done after setupConfig and acCompile since we need maux_vtxbuf_index and acGetNumFields
-  //TP: this is an ugly way to do this but works for now
+  //Done after setupConfig and acCompile since we need maux_vtxbuf_index and acGetNumFields
+  //This is an ugly way to do this but works for now
   {
     const size_t z_offset  = (dimensionality == 2 && nzgrid == 1) ? NGHOST*mx*my : 0;
     for (int i = 0; i < mvar; ++i)
@@ -1982,7 +1773,6 @@ extern "C" void initializeGPU(AcReal *farr, int comm_fint, double t, int nt_,
     	}
     }
   }
-  checkConfig(mesh.info);
   if (rank==0 && ldebug) printf("memusage grid_init= %f MBytes\n", acMemUsage()/1024.);
   acGridInit(mesh);
   if(acGetDevice(&device_id) != cudaSuccess)
@@ -1993,7 +1783,7 @@ extern "C" void initializeGPU(AcReal *farr, int comm_fint, double t, int nt_,
   if (rank==0 && ldebug) printf("memusage after grid_init= %f MBytes\n", acMemUsage()/1024.);
 
   mesh.info = acGridDecomposeMeshInfo(mesh.info);
-  //TP: important to do before autotuning
+  //Important that this is before autotuning
   acDeviceSetInput(acGridGetDevice(), AC_step_num,(PC_SUB_STEP_NUMBER)0);
   acDeviceSetInput(acGridGetDevice(), AC_dt,dt);
   acDeviceSetInput(acGridGetDevice(), AC_t,AcReal(t));
@@ -2012,7 +1802,7 @@ extern "C" void initializeGPU(AcReal *farr, int comm_fint, double t, int nt_,
 
 		
   if (ltest_bcs) testBCs();
-  //TP: for autotuning
+  //This is for autotuning
   afterSubStepGPU();
   autotune_all_integration_substeps();
   if (rank==0 && ldebug) printf("memusage before store config= %f MBytes\n", acMemUsage()/1024.);
@@ -2040,7 +1830,9 @@ extern "C" void reloadConfig()
 	  if (rank == 0) 
 	  {
 		  fprintf(stderr,"Was not successful in closing Astaroth lib!\n");
-		  system("touch ERROR");
+		  int err = system("touch ERROR");
+		  if(err)
+		    fprintf(stderr,"Unable to create ERROR file!\n");
 	  }
   	  MPI_Barrier(MPI_COMM_WORLD);
 	  exit(EXIT_FAILURE);
@@ -2053,7 +1845,9 @@ extern "C" void reloadConfig()
 	  if(rank == 0) 
 	  {
 		  fprintf(stderr,"Was not able to compile Astaroth!\n");
-		  system("touch ERROR");
+		  int err = system("touch ERROR");
+		  if(err)
+		    fprintf(stderr,"Unable to create ERROR file!\n");
 	  }
   	  MPI_Barrier(MPI_COMM_WORLD);
 	  exit(EXIT_FAILURE);
@@ -2072,6 +1866,7 @@ extern "C" void reloadConfig()
   acDeviceUpdate(acGridGetDevice(), mesh.info);
   acGridSynchronizeStream(STREAM_ALL);
 #endif
+  acStoreConfig(acDeviceGetLocalConfig(acGridGetDevice()), "PC-AC.conf");
   acLogFromRootProc(rank, "DONE reloading on GPU\n");
   fflush(stdout);
   fflush(stderr);
@@ -2131,16 +1926,21 @@ extern "C" void finalizeGPU()
 	// write the loss values to a file
 
 	std::ofstream myFile;
+
 	std::string fileString = "train_loss_" + std::to_string(my_rank)  + ".csv";	
-
 	myFile.open(fileString);
-
   myFile << "epoch,train_loss\n";
-
 	for (int i=0;i<train_loss.size();i++){
 		myFile << i << "," << train_loss[i] << "\n";
 	}
-	
+  myFile.close();
+
+	std::string train_sample = "train_sample_" + std::to_string(my_rank) + ".csv";
+  myFile.open(train_sample);
+  myFile << "train_sample_nts\n";
+  for (int i=0;i<train_nts.size();i++){
+  	myFile << train_nts[i] << "\n";
+  }
 	myFile.close();
 }
 /***********************************************************************************************/
@@ -2151,172 +1951,6 @@ extern "C" void random_initial_condition()
   //AcMeshDims dims = acGetMeshDims(acGridGetLocalMeshInfo());
   //acGridLaunchKernel(STREAM_DEFAULT, randomize, dims.n0, dims.n1);
   //acGridSynchronizeStream(STREAM_ALL);
-}
-/***********************************************************************************************/
-//TP: this is not written the most optimally since it needs two extra copies of the mesh where at least the tmp
-//could be circumvented by temporarily using the output buffers on the GPU to store the f-array and load back from there
-//but if we truly hit the mem limit for now the user can of course simply test the bcs with a smaller mesh and skip the test with a larger mesh
-/***********************************************************************************************/
-void sym_z(AcMesh mesh_in)
-{
-  const auto DEVICE_VTXBUF_IDX = [&](const int x, const int y, const int z)
-  				{
-					return acVertexBufferIdx(x,y,z,acGridGetLocalMeshInfo());
-  				};
-  AcMeshDims dims = acGetMeshDims(acGridGetLocalMeshInfo());
-  for (size_t i = 0; i < dims.m1.x; i++)
-  {
-    for (size_t j = 0; j < dims.m1.y; j++)
-    {
-      for (size_t k = 0; k < dims.m1.z; k++)
-      {
-	if (
-	   i >= NGHOST && i < dims.n1.x &&
-	   j >= NGHOST && j < dims.n1.y &&
-	   k >= NGHOST && k < dims.n1.z
-	   ) continue;
-	if (k >= NGHOST && k < dims.n1.z) continue;
-        for (int ivar = 0; ivar < acGetNumFields(); ivar++)
-        {
-	  //BOT
-	  if (k < NGHOST)
-	  {
-	  	const auto idx = DEVICE_VTXBUF_IDX(i,j,k);
-	        const auto offset = NGHOST-k;
-	  	const auto domain_z= NGHOST+offset;
-	  	const auto domain_idx = DEVICE_VTXBUF_IDX(i,j,domain_z);
-	        mesh_in.vertex_buffer[ivar][idx] = mesh_in.vertex_buffer[ivar][domain_idx];
-	        //mesh_in.vertex_buffer[ivar][idx] = mesh.vertex_buffer[ivar][idx];
-	  }
-	  //TOP:
-	  else
-	  {
-	  	const auto idx = DEVICE_VTXBUF_IDX(i,j,k);
-	        const auto offset = k-mesh_in.info[AC_nlocal_max].z+1;
-	  	const auto domain_z= mesh_in.info[AC_nlocal_max].z-offset;
-	  	const auto domain_idx = DEVICE_VTXBUF_IDX(i,j,domain_z);
-	        mesh_in.vertex_buffer[ivar][idx] = mesh_in.vertex_buffer[ivar][domain_idx];
-	        //mesh_in.vertex_buffer[ivar][idx] = mesh.vertex_buffer[ivar][idx];
-	  }
-	}
-      }
-    }
-  }
-}
-/***********************************************************************************************/
-void check_sym_z(AcMesh mesh_in)
-{
-  const auto DEVICE_VTXBUF_IDX = [&](const int x, const int y, const int z)
-  				{
-					return acVertexBufferIdx(x,y,z,acGridGetLocalMeshInfo());
-  				};
-  if (rank == 1)
-  {
-  	//printf("HMM: %14e\n",mesh_in.vertex_buffer[0][DEVICE_VTXBUF_IDX(14,15,2)]);
-  	//printf("HMM: %14e\n",mesh_in.vertex_buffer[0][DEVICE_VTXBUF_IDX(14,15,2)]);
-  	//printf("HMM: %14e\n",mesh_in.vertex_buffer[0][DEVICE_VTXBUF_IDX(26,14,1)]);
-  	//printf("HMM: %14e\n",mesh_in.vertex_buffer[0][DEVICE_VTXBUF_IDX(26,14,5)]);
-  }
-  AcMeshDims dims = acGetMeshDims(acGridGetLocalMeshInfo());
-  for (size_t i = 0; i < dims.m1.x; i++)
-  {
-    for (size_t j = 0; j < dims.m1.y; j++)
-    {
-      for (size_t k = 0; k < dims.m1.z; k++)
-      {
-	if (
-	   i >= NGHOST && i < dims.n1.x &&
-	   j >= NGHOST && j < dims.n1.y &&
-	   k >= NGHOST && k < dims.n1.z
-	   ) continue;
-	if (k >= NGHOST && k < dims.n1.z) continue;
-        for (int ivar = 0; ivar < acGetNumFields(); ivar++)
-        {
-	  //BOT
-	  if (k < NGHOST)
-	  {
-	  	const auto idx = DEVICE_VTXBUF_IDX(i,j,k);
-	        const auto offset = NGHOST-k;
-	  	const auto domain_z= NGHOST+offset;
-	  	const auto domain_idx = DEVICE_VTXBUF_IDX(i,j,domain_z);
-	        if (mesh_in.vertex_buffer[ivar][idx] !=  mesh_in.vertex_buffer[ivar][domain_idx])
-	         	printf("WRONG\n");
-	  }
-	  //TOP:
-	  else
-	  {
-	  	const auto idx = DEVICE_VTXBUF_IDX(i,j,k);
-	        const auto offset = k-mesh_in.info[AC_nlocal_max].z+1;
-	  	const auto domain_z= mesh_in.info[AC_nlocal_max].z-offset;
-	  	const auto domain_idx = DEVICE_VTXBUF_IDX(i,j,domain_z);
-	        mesh_in.vertex_buffer[ivar][idx] = mesh.vertex_buffer[ivar][domain_idx];
-	        if (mesh_in.vertex_buffer[ivar][idx] !=  mesh_in.vertex_buffer[ivar][domain_idx])
-	         	printf("WRONG\n");
-	  }
-	}
-      }
-    }
-  }
-}
-/***********************************************************************************************/
-void check_sym_x(const AcMesh mesh_in)
-{
-  const auto DEVICE_VTXBUF_IDX = [&](const int x, const int y, const int z)
-  				{
-					return acVertexBufferIdx(x,y,z,acGridGetLocalMeshInfo());
-  				};
-  if (rank == 1)
-  {
-  	//printf("HMM: %14e\n",mesh_in.vertex_buffer[0][DEVICE_VTXBUF_IDX(14,15,2)]);
-  	//printf("HMM: %14e\n",mesh_in.vertex_buffer[0][DEVICE_VTXBUF_IDX(14,15,2)]);
-  	//printf("HMM: %14e\n",mesh_in.vertex_buffer[0][DEVICE_VTXBUF_IDX(26,14,1)]);
-  	//printf("HMM: %14e\n",mesh_in.vertex_buffer[0][DEVICE_VTXBUF_IDX(26,14,5)]);
-  }
-  AcMeshDims dims = acGetMeshDims(acGridGetLocalMeshInfo());
-  for (size_t i = 0; i < dims.m1.x; i++)
-  {
-    for (size_t j = 0; j < dims.m1.y; j++)
-    {
-      for (size_t k = 0; k < dims.m1.z; k++)
-      {
-	if (
-	   i >= NGHOST && i < dims.n1.x &&
-	   j >= NGHOST && j < dims.n1.y &&
-	   k >= NGHOST && k < dims.n1.z
-	   ) continue;
-	if (i >= NGHOST && i < dims.n1.x) continue;
-        for (int ivar = UUY; ivar <= UUY; ivar++)
-        {
-	  //BOT
-	  if (i < NGHOST)
-	  {
-	  	const auto idx = DEVICE_VTXBUF_IDX(i,j,k);
-	 	const auto offset = NGHOST-i;
-	  	const auto domain_x= NGHOST+offset;
-	  	const auto domain_idx = DEVICE_VTXBUF_IDX(domain_x,j,k);
-	 	if (mesh_in.vertex_buffer[ivar][idx] !=  mesh_in.vertex_buffer[ivar][domain_idx])
-	 	{
-	 		fprintf(stderr,"WRONG\n");
-	 		exit(EXIT_FAILURE);
-	 	}
-	  }
-	  //TOP:
-	  else
-	  {
-	  	const auto idx = DEVICE_VTXBUF_IDX(i,j,k);
-	 	const auto offset = i-mesh_in.info[AC_nlocal_max].x+1;
-	  	const auto domain_x= mesh_in.info[AC_nlocal_max].x-offset;
-	  	const auto domain_idx = DEVICE_VTXBUF_IDX(domain_x,j,k);
-	 	if (mesh_in.vertex_buffer[ivar][idx] !=  mesh_in.vertex_buffer[ivar][domain_idx])
-	 	{
-	 		fprintf(stderr,"WRONG\n");
-	 		exit(EXIT_FAILURE);
-	 	}
-	  }
-	}
-      }
-    }
-  }
 }
 /***********************************************************************************************/
 void testBCs()
@@ -2362,9 +1996,6 @@ void testBCs()
   acDeviceStoreMesh(acGridGetDevice(), STREAM_DEFAULT, &mesh_to_copy);
   acGridSynchronizeStream(STREAM_ALL);
 
-  //check_sym_x(mesh);
-  //check_sym_x(mesh_to_copy);
-
   AcMeshDims dims = acGetMeshDims(acGridGetLocalMeshInfo());
   bool passed = true;
   AcReal max_abs_not_passed_val=-1.0;
@@ -2376,7 +2007,6 @@ void testBCs()
   AcReal true_val_for_largest_diff{};
   AcReal epsilon = (AcReal)pow(10.0,-12.0);
   int4 largest_diff_point{};
-  //AcReal epsilon = 0.0;
 
   auto skip_x = nxgrid == 1 || acGridTaskGraphHasPeriodicBoundcondsX(rhs);
   auto skip_y = nygrid == 1 || acGridTaskGraphHasPeriodicBoundcondsY(rhs);
@@ -2495,17 +2125,17 @@ void testBCs()
   exit(EXIT_SUCCESS);
 }
 /***********************************************************************************************/
-extern "C" void gpuSetDt(double t)
+extern "C" void prepareForFirstSubstep(double t)
 {
 	acGridSynchronizeStream(STREAM_ALL);
  	acDeviceSetInput(acGridGetDevice(), AC_t,AcReal(t));
-	beforeBoundaryGPU(false,0,t);
-	if (!lcourant_dt)
+	beforeBoundaryGPU(false,0,t,false);
+	acGridExecuteTaskGraph(acGetOptimizedDSLTaskGraph(AC_initialize_sums),1);
+	if (!lcourant_dt || !ldt)
 	{
-		fprintf(stderr,"gpuSetDt works only for Courant timestep!!\n");
-		exit(EXIT_FAILURE);
+		return;
 	}
-	//TP: not needed but for extra safety
+	//Not needed but for extra safety
   	acDeviceSetInput(acGridGetDevice(), AC_step_num, (PC_SUB_STEP_NUMBER) 0);
 	const auto graph = acGetOptimizedDSLTaskGraph(AC_calculate_timestep);
 
@@ -2515,13 +2145,20 @@ extern "C" void gpuSetDt(double t)
 	set_dt(dt1_);
 	dt1_interface = dt1_;
         acDeviceSwapBuffers(acGridGetDevice());
+	//Not strictly needed but for extra safety
 	loadFarray();
-	//TP: not strictly needed but for extra safety
 }
 /***********************************************************************************************/
+//Reads the results of reductions and copies them to the host.
+//At the moment the only use case are sums used in ODE integrations.
 extern "C" void getGPUReducedVars(AcReal* dst)
 {
         acDeviceSynchronizeStream(acGridGetDevice(),STREAM_DEFAULT);
+#if LAXIONU1BACK
+	dst[0] = acDeviceGetOutput(acGridGetDevice(), AC_edotb_sum__mod__axionu1back);
+	dst[1] = acDeviceGetOutput(acGridGetDevice(), AC_rhoe__mod__axionu1back);
+	dst[2] = acDeviceGetOutput(acGridGetDevice(), AC_rhob__mod__axionu1back);
+#endif
 #if LAXIONSU2BACK
 	dst[0] = acDeviceGetOutput(acGridGetDevice(), AC_grand_sum);
 	dst[1] = acDeviceGetOutput(acGridGetDevice(), AC_dgrant_sum);

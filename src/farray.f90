@@ -13,8 +13,8 @@ module FArrayManager
 !
   use Cparam, only: mvar,maux,mglobal,maux_com,mscratch,lgpu
   use Cdata, only: nvar,naux,nscratch,nglobal,naux_com,datadir,lroot,lwrite_aux,lreloading, &
-                   n_odevars,f_ode,df_ode,lode,f_ode_diagnostics
-  use HDF5_IO
+                   n_odevars,f_ode,df_ode,lode,f_ode_diagnostics,variable_substepped
+  use HDF5_IO, only: index_reset, index_append
   use Messages
 !
   implicit none
@@ -124,7 +124,9 @@ module FArrayManager
   contains
 
 !***********************************************************************
-    subroutine farray_register_pde(varname,ivar,vector,array,ierr)
+    subroutine farray_register_pde(varname,ivar,vector,array,ierr,lsubstepped)
+
+      use General, only: loptest
 !
 !  Register a PDE variable in the f array.
 !
@@ -132,10 +134,20 @@ module FArrayManager
       integer, intent(out)  :: ivar
       integer, optional, intent(in) :: vector, array
       integer, optional, intent(out) :: ierr
+      logical, optional, intent(in) :: lsubstepped
 !
       integer, parameter :: vartype = iFARRAY_TYPE_PDE
+      integer :: i
 !
       call farray_register_variable(varname,ivar,vartype,vector=vector,array=array,ierr=ierr)
+      if(loptest(lsubstepped)) then
+        variable_substepped(ivar) = .true.
+        if (present(array)) then
+          do i = 1,array-1
+            variable_substepped(ivar+i) = .true.
+          enddo
+        endif
+      endif
 !
     endsubroutine farray_register_pde
 !***********************************************************************
@@ -464,11 +476,11 @@ module FArrayManager
 !
     endsubroutine farray_index_append
 !***********************************************************************
-    subroutine farray_index_reset()
+    subroutine farray_index_reset
 !
 ! 14-oct-18/PAB: coded
 !
-      call index_reset()
+      call index_reset
 !
     endsubroutine farray_index_reset
 !***********************************************************************
@@ -992,12 +1004,15 @@ module FArrayManager
 !***********************************************************************
     function farray_index_by_name_ode(varname,component) result(indx)
 
+      use General, only: keep_compiler_quiet
+
       integer :: indx
       character (len=*), intent(IN) :: varname
       integer, optional, intent(OUT):: component
 
       type (ode_vars_list), pointer :: item
 !
+      call keep_compiler_quiet(component)
       item=>find_by_name_ode(varname)
       if (associated(item)) then
         indx=item%ivar(1)%p
@@ -1104,7 +1119,7 @@ module FArrayManager
 !
     endsubroutine new_odeitem_atstart
 !***********************************************************************
-    subroutine farray_clean_up()
+    subroutine farray_clean_up
 !
 !  Free any memory allocated for farrays, so G95 doesn't warn about still
 !  allocated memory.

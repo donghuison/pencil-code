@@ -72,27 +72,34 @@ clean_src()
   rmdir $dir >/dev/null 2>&1
 }
 
+clean_astaroth()
+{
+  #must be called before delete_links since we need src/astaroth/Makefile to exist
+  dir="$1"
+  if [ -d "$dir/Makefile" ]; then
+    make -C "$dir" cleann
+  fi
+}
+
 prune_dir()
 {
-  this=$1
+  this=$1 #only used for the printed message
   clean_objects="*.o *.so *.a *.mod *.x *.inc .build-history .buildinfo .buildtime tmp"
   clean_links="start.csh start_run.csh run.csh getconf.csh Makefile src/.cvsignore"
   clean_files="pc_commands.log COMPLETED ERROR LOCK STOP FULLSTOP src/Makefile src/mpicomm_double.f90 src/revision.txt src/.current-precision src/.config-files src/.moduleinfo"
   src_dir="src"
 
-  (
-  cd "$this"
   if [ -d $src_dir ] || [ `ls -1 $clean_links $clean_files 2>/dev/null | wc -l` -ge 1 ]; then
     if [ "$this" = '.' ] || [ -z "$this" ] ; then
       echo "Cleaning up run directory..."
     else
       echo "Cleaning up run directory: '$this'"
     fi
+    clean_astaroth "$src_dir/astaroth"
     delete_links "$clean_links"
     delete_files "$clean_files"
     clean_src "$src_dir" "$clean_objects"
   fi
-  )
 }
 
 enter_subdirs()
@@ -133,7 +140,10 @@ if [ -d "$start_dir" ]; then
   if [ "$1" = "-R" ]; then
     enter_subdirs "" "$start_dir"
   else
+    (
+    cd $start_dir
     prune_dir "$start_dir"
+    )
   fi
 else
   echo "No such directory: '$start_dir'"

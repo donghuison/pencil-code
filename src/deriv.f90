@@ -99,7 +99,7 @@ module Deriv
 !  21-feb-07/axel: added 1/r and 1/pomega factors for non-coord basis
 !  20-sep-13/ccyang: added optional argument ignoredx
 !
-      real, dimension(mx,my,mz,mfarray), intent(in) :: f
+      real, contiguous, dimension(:,:,:,:), intent(in) :: f
       real, dimension(nx), intent(out) :: df
       integer, intent(in) :: j, k
       logical, intent(in), optional :: ignoredx
@@ -486,7 +486,7 @@ module Deriv
 !
       use General, only: loptest
 
-      real, dimension (mx,my,mz,mfarray), intent(in) :: f
+      real, contiguous, dimension(:,:,:,:), intent(in) :: f
       real, dimension (nx), intent(out) :: df2
       integer, intent(in) :: j,k
       logical, intent(in), optional :: lwo_line_elem
@@ -692,7 +692,7 @@ module Deriv
 !
 !  10-feb-06/anders: adapted from der5
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (nx) :: df
       integer :: j,k
       logical, optional :: ignoredx
@@ -776,7 +776,7 @@ module Deriv
 !   9-dec-03/nils: adapted from der6
 !  10-feb-06/anders: corrected sign and factor
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (nx) :: df
       integer :: j,k
       logical, optional :: ignoredx,upwind
@@ -863,7 +863,7 @@ module Deriv
 !
 !  29-oct-04/anders: adapted from der6
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (nx) :: df,fac
       integer :: j,k
       logical, optional :: ignoredx
@@ -933,7 +933,7 @@ module Deriv
 !
     endsubroutine der5
 !***********************************************************************
-    subroutine der6_main(f,k,df,j,ignoredx,upwind)
+    subroutine der6_main(f,k,df,j,ignoredx,upwind,lexp)
 !
 !  Calculate 6th derivative of a scalar, get scalar.
 !  Used for hyperdiffusion that affects small wave numbers as little as
@@ -948,11 +948,11 @@ module Deriv
 !
       use General, only: loptest
 
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (nx) :: df,fac
       integer :: j,k
-      logical, optional :: ignoredx,upwind
-      logical :: igndx,upwnd
+      logical, optional :: ignoredx,upwind,lexp
+      logical :: igndx,upwnd,lexponentiate
       real :: facs
 !
       intent(in)  :: f,k,j,ignoredx,upwind
@@ -962,14 +962,13 @@ module Deriv
 !debug                          der_call_count(k,icount_der6,j,1) + 1 !DERCOUNT
 !
       igndx=loptest(ignoredx)
+      lexponentiate = loptest(lexp)
+      upwnd = loptest(upwind)
 !
-      if (present(upwind)) then
+      if (upwnd) then
         if (.not. lequidist(j).and..not.lignore_nonequi) &
           call fatal_error('der6_main','upwind cannot be used with '//&
                            'non-equidistant grid.')
-        upwnd = upwind
-      else
-        upwnd = .false.
       endif
 !
       if (j==1) then
@@ -981,10 +980,18 @@ module Deriv
           else
             fac=dx_1(l1:l2)**6
           endif
-          df=fac*(- 20.0* f(l1:l2,m,n,k) &
-                  + 15.0*(f(l1+1:l2+1,m,n,k)+f(l1-1:l2-1,m,n,k)) &
-                  -  6.0*(f(l1+2:l2+2,m,n,k)+f(l1-2:l2-2,m,n,k)) &
-                  +      (f(l1+3:l2+3,m,n,k)+f(l1-3:l2-3,m,n,k)))
+          if(lexponentiate) then
+            df=fac*(- 20.0* exp(f(l1:l2,m,n,k)) &
+                    + 15.0*(exp(f(l1+1:l2+1,m,n,k))+exp(f(l1-1:l2-1,m,n,k))) &
+                    -  6.0*(exp(f(l1+2:l2+2,m,n,k))+exp(f(l1-2:l2-2,m,n,k))) &
+                    +      (exp(f(l1+3:l2+3,m,n,k))+exp(f(l1-3:l2-3,m,n,k))))
+
+          else
+            df=fac*(- 20.0* f(l1:l2,m,n,k) &
+                    + 15.0*(f(l1+1:l2+1,m,n,k)+f(l1-1:l2-1,m,n,k)) &
+                    -  6.0*(f(l1+2:l2+2,m,n,k)+f(l1-2:l2-2,m,n,k)) &
+                    +      (f(l1+3:l2+3,m,n,k)+f(l1-3:l2-3,m,n,k)))
+          endif
         else
           df=0.
         endif
@@ -997,10 +1004,17 @@ module Deriv
           else
             facs=dy_1(m)**6
           endif
-          df=facs*(- 20.0* f(l1:l2,m  ,n,k) &
-                   + 15.0*(f(l1:l2,m+1,n,k)+f(l1:l2,m-1,n,k)) &
-                   -  6.0*(f(l1:l2,m+2,n,k)+f(l1:l2,m-2,n,k)) &
-                   +      (f(l1:l2,m+3,n,k)+f(l1:l2,m-3,n,k)))
+          if(lexponentiate) then
+            df=facs*(- 20.0* exp(f(l1:l2,m  ,n,k)) &
+                     + 15.0*(exp(f(l1:l2,m+1,n,k))+exp(f(l1:l2,m-1,n,k))) &
+                     -  6.0*(exp(f(l1:l2,m+2,n,k))+exp(f(l1:l2,m-2,n,k))) &
+                     +      (exp(f(l1:l2,m+3,n,k))+exp(f(l1:l2,m-3,n,k))))
+          else
+            df=facs*(- 20.0* f(l1:l2,m  ,n,k) &
+                     + 15.0*(f(l1:l2,m+1,n,k)+f(l1:l2,m-1,n,k)) &
+                     -  6.0*(f(l1:l2,m+2,n,k)+f(l1:l2,m-2,n,k)) &
+                     +      (f(l1:l2,m+3,n,k)+f(l1:l2,m-3,n,k)))
+          endif
           if ((.not.igndx) .and. (.not.upwnd)) then
             if (lspherical_coords) df = df * r1_mn**6
             if (lcylindrical_coords) df = df * rcyl_mn1**6
@@ -1024,15 +1038,29 @@ module Deriv
           endif
 
           if (lcoarse_mn) then
-            df=facs*(- 20.0* f(l1:l2,m,n,k) &
-                     + 15.0*(f(l1:l2,m,ninds(+1,m,n),k)+f(l1:l2,m,ninds(-1,m,n),k)) &
-                     -  6.0*(f(l1:l2,m,ninds(+2,m,n),k)+f(l1:l2,m,ninds(-2,m,n),k)) &
-                     +      (f(l1:l2,m,ninds(+3,m,n),k)+f(l1:l2,m,ninds(-3,m,n),k)))
+            if (lexponentiate) then
+              df=facs*(- 20.0* exp(f(l1:l2,m,n,k)) &
+                       + 15.0*(exp(f(l1:l2,m,ninds(+1,m,n),k))+exp(f(l1:l2,m,ninds(-1,m,n),k))) &
+                       -  6.0*(exp(f(l1:l2,m,ninds(+2,m,n),k))+exp(f(l1:l2,m,ninds(-2,m,n),k))) &
+                       +      (exp(f(l1:l2,m,ninds(+3,m,n),k))+exp(f(l1:l2,m,ninds(-3,m,n),k))))
+            else
+              df=facs*(- 20.0* f(l1:l2,m,n,k) &
+                       + 15.0*(f(l1:l2,m,ninds(+1,m,n),k)+f(l1:l2,m,ninds(-1,m,n),k)) &
+                       -  6.0*(f(l1:l2,m,ninds(+2,m,n),k)+f(l1:l2,m,ninds(-2,m,n),k)) &
+                       +      (f(l1:l2,m,ninds(+3,m,n),k)+f(l1:l2,m,ninds(-3,m,n),k)))
+            endif
           else
-            df=facs*(- 20.0* f(l1:l2,m,n  ,k) &
-                     + 15.0*(f(l1:l2,m,n+1,k)+f(l1:l2,m,n-1,k)) &
-                     -  6.0*(f(l1:l2,m,n+2,k)+f(l1:l2,m,n-2,k)) &
-                     +      (f(l1:l2,m,n+3,k)+f(l1:l2,m,n-3,k)))
+            if (lexponentiate) then
+              df=facs*(- 20.0* exp(f(l1:l2,m,n  ,k)) &
+                       + 15.0*(exp(f(l1:l2,m,n+1,k))+exp(f(l1:l2,m,n-1,k))) &
+                       -  6.0*(exp(f(l1:l2,m,n+2,k))+exp(f(l1:l2,m,n-2,k))) &
+                       +      (exp(f(l1:l2,m,n+3,k))+exp(f(l1:l2,m,n-3,k))))
+            else
+              df=facs*(- 20.0* f(l1:l2,m,n  ,k) &
+                       + 15.0*(f(l1:l2,m,n+1,k)+f(l1:l2,m,n-1,k)) &
+                       -  6.0*(f(l1:l2,m,n+2,k)+f(l1:l2,m,n-2,k)) &
+                       +      (f(l1:l2,m,n+3,k)+f(l1:l2,m,n-3,k)))
+            endif
           endif
           if ((.not.igndx) .and. (.not.upwnd) .and. lspherical_coords) &
             df = df * (r1_mn * sin1th(m))**6
@@ -1051,7 +1079,7 @@ module Deriv
       intent(in) :: f,k,j
       intent(out) :: delfk,delfkp1,delfkm1
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (nx) :: delfk,delfkp1,delfkm1,fac
       real, dimension (nx,-1:1) :: delf
       real, dimension (0:nx+1) :: delfx
@@ -1352,7 +1380,7 @@ module Deriv
 !
       use General, only: loptest
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (nx) :: df,fac
       integer :: i,j,k
       logical, optional :: lwo_line_elem
@@ -1760,7 +1788,7 @@ module Deriv
 !
 !  05-dec-06/anders: adapted from derij
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (nx) :: df,fac
       integer :: i,j,k
 !
@@ -1959,7 +1987,7 @@ module Deriv
 !
 !  02-apr-17/wlyra: adapted from der5i1j
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (nx) :: df,fac
       integer :: i,j,k
 !
@@ -2220,7 +2248,7 @@ module Deriv
 !
 !  02-apr-17/wlyra: coded
 !
-      real, dimension (mx,my,mz,mfarray),intent(in) :: f
+      real, contiguous, dimension(:,:,:,:),intent(in) :: f
       real, dimension (nx) :: fac
       integer,intent(in) :: k
       real, dimension(nx), intent(out) :: df
@@ -2586,7 +2614,7 @@ module Deriv
     endsubroutine der2i2j2k
 !***********************************************************************
     subroutine der3i3j(f,k,df,i,j)
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (nx), intent(out) :: df
       real, dimension (nx) :: fac
       integer, intent(in) :: k,i,j
@@ -2743,7 +2771,7 @@ module Deriv
 !***********************************************************************
     subroutine der3i2j1k(f,ik,df,i,j,k)
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (nx), intent(out) :: df
       real, dimension (nx) :: fac
       integer, intent(in) :: ik,i,j,k
@@ -4333,7 +4361,7 @@ module Deriv
 !***********************************************************************
     subroutine der4i1j1k(f,ik,df,i,j,k)
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (nx), intent(out) :: df
       real, dimension (nx) :: fac
       integer, intent(in) :: ik,i,j,k
@@ -5144,7 +5172,7 @@ module Deriv
 !
 !  Useful for advecting non-logarithmic variables
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (nx,3) :: uu
       real, dimension (nx) :: df
       integer :: j,k,l
@@ -5215,7 +5243,7 @@ module Deriv
 !
 !   7-jul-08/arne: coded.
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (:,:) :: df
       real :: fac
       integer :: pos,k,sgn,j
@@ -5275,7 +5303,7 @@ module Deriv
 !
 !  15-oct-09/Natalia: coded.
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real  :: df
       real :: fac
       integer :: pos,lll,mmm,nnn,k,sgn,j
@@ -5503,7 +5531,7 @@ module Deriv
 !
       use General, only: keep_compiler_quiet
 !
-      real, dimension(mx,my,mz,mfarray), intent(IN):: f
+      real, contiguous, dimension(:,:,:,:), intent(IN):: f
       real, dimension(my,mz)           , intent(IN):: inh
       real                             , intent(IN):: fac
       integer                          , intent(IN):: topbot

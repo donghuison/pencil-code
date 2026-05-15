@@ -50,7 +50,7 @@
 module Mpicomm
 !
   use Cdata
-  use General, only: find_proc, ioptest,loptest
+  use General, only: find_proc, ioptest, loptest, idiv
   use Yinyang
 !
   implicit none
@@ -58,13 +58,14 @@ module Mpicomm
   include 'mpif.h'
   include 'mpicomm.h'
 !
-  interface mpisend_cmplx
-    module procedure mpisend_cmplx_arr3
-  endinterface
+  !interface mpisend_cmplx
+  !  module procedure mpisend_cmplx_arr3
+  !endinterface
 !
-  interface mpirecv_cmplx
-    module procedure mpirecv_cmplx_arr3
-  endinterface
+  !This interface is on comment in mpicomm.h
+  !interface mpirecv_cmplx
+  !  module procedure mpirecv_cmplx_arr3
+  !endinterface
 !
 !  interface mpigather_and_out
 !    module procedure mpigather_and_out_real
@@ -73,8 +74,9 @@ module Mpicomm
 !
   integer(kind=MPI_OFFSET_KIND) :: size_of_int = 0, size_of_real = 0, size_of_double = 0
   logical :: lcommunicate_y=.false.
+  integer(KIND=MPI_ADDRESS_KIND), parameter :: zero_size=0
 !
-  character(LEN=MPI_MAX_PROCESSOR_NAME), dimension(ncpus) :: nodenames
+  !character(LEN=MPI_MAX_PROCESSOR_NAME), dimension(ncpus) :: nodenames
 !
 !  For f-array processor boundaries
 !
@@ -230,8 +232,9 @@ module Mpicomm
 !
       call MPI_GET_PROCESSOR_NAME(ndname, ndnmlen, mpierr)
       ndname = ndname(1:ndnmlen)
-      call MPI_ALLGATHER(ndname,MPI_MAX_PROCESSOR_NAME,MPI_CHARACTER,nodenames,MPI_MAX_PROCESSOR_NAME, &
-                         MPI_CHARACTER,MPI_COMM_WORLD,mpierr)
+      !TP: not used and causes warnings so on comment
+      !call MPI_ALLGATHER(ndname,MPI_MAX_PROCESSOR_NAME,MPI_CHARACTER,nodenames,MPI_MAX_PROCESSOR_NAME, &
+      !                   MPI_CHARACTER,MPI_COMM_WORLD,mpierr)
 !
 !if (lroot) print*, 'Pencil0: nprocs,MPI_COMM_WORLD', nprocs, MPI_COMM_WORLD
 !
@@ -258,6 +261,7 @@ module Mpicomm
 
       if (sizeof_real() < 8) then
         mpi_precision = MPI_REAL
+        MPI_2FLOAT = MPI_2REAL
         MPI_CMPLX = MPI_COMPLEX
         if (lroot) then
           write (*,*) ""
@@ -270,6 +274,7 @@ module Mpicomm
       else
         mpi_precision = MPI_DOUBLE_PRECISION
         MPI_CMPLX = MPI_DOUBLE_COMPLEX
+        MPI_2FLOAT = MPI_2DOUBLE_PRECISION
       endif
 
       call MPI_COMM_DUP(MPI_COMM_PENCIL,MPI_COMM_GRID,mpierr)
@@ -697,45 +702,46 @@ module Mpicomm
 !
     endfunction index_to_iproc_comm
 !***********************************************************************
-    subroutine set_cubed_sphere_neighbors
+!    On comment since not used (to suppress compiler warnings)
+!    subroutine set_cubed_sphere_neighbors
+!!
+!!  Cubed mesh
+!!
+!!  20-dec-15/MR: coded
+!!
+!      integer :: patch_neigh_left, patch_neigh_right, patch_neigh_top, patch_neigh_bot
+!      integer :: ipatch
+!      logical, save :: lcalled=.false.
 !
-!  Cubed mesh
+!      if (lcalled) then
+!        return
+!      else
+!        lcalled=.true.
+!      endif
+!!
+!      if (ipatch<5) then
+!        patch_neigh_right=modulo(ipatch  ,4)+1
+!        patch_neigh_left =modulo(ipatch+2,4)+1
+!        patch_neigh_top  =ZPLUS
+!        patch_neigh_bot  =ZMINUS
+!        if (llast_proc_y)  yuneigh=find_proc(ipx,       0,ipz)+(patch_neigh_right-1)*ncpus
+!        if (lfirst_proc_y) ylneigh=find_proc(ipx,nprocy-1,ipz)+(patch_neigh_left -1)*ncpus
+!        if (ipatch==1 .or. ipatch==3) then
+!          if (llast_proc_z)  zuneigh=find_proc(ipx,ipy,       0)+(patch_neigh_top  -1)*ncpus
+!          if (lfirst_proc_z) zlneigh=find_proc(ipx,ipy,nprocz-1)+(patch_neigh_bot  -1)*ncpus
+!        else
+!          if (llast_proc_z)  zuneigh=find_proc(ipx,       0,ipy)+(patch_neigh_top  -1)*ncpus
+!          if (lfirst_proc_z) zlneigh=find_proc(ipx,nprocy-1,ipy)+(patch_neigh_bot  -1)*ncpus
+!        endif
 !
-!  20-dec-15/MR: coded
-!
-      integer :: patch_neigh_left, patch_neigh_right, patch_neigh_top, patch_neigh_bot
-      integer :: ipatch
-      logical, save :: lcalled=.false.
-
-      if (lcalled) then
-        return
-      else
-        lcalled=.true.
-      endif
-!
-      if (ipatch<5) then
-        patch_neigh_right=modulo(ipatch  ,4)+1
-        patch_neigh_left =modulo(ipatch+2,4)+1
-        patch_neigh_top  =ZPLUS
-        patch_neigh_bot  =ZMINUS
-        if (llast_proc_y)  yuneigh=find_proc(ipx,       0,ipz)+(patch_neigh_right-1)*ncpus
-        if (lfirst_proc_y) ylneigh=find_proc(ipx,nprocy-1,ipz)+(patch_neigh_left -1)*ncpus
-        if (ipatch==1 .or. ipatch==3) then
-          if (llast_proc_z)  zuneigh=find_proc(ipx,ipy,       0)+(patch_neigh_top  -1)*ncpus
-          if (lfirst_proc_z) zlneigh=find_proc(ipx,ipy,nprocz-1)+(patch_neigh_bot  -1)*ncpus
-        else
-          if (llast_proc_z)  zuneigh=find_proc(ipx,       0,ipy)+(patch_neigh_top  -1)*ncpus
-          if (lfirst_proc_z) zlneigh=find_proc(ipx,nprocy-1,ipy)+(patch_neigh_bot  -1)*ncpus
-        endif
-
-print*,'AXEL: patch_neigh_left, patch_neigh_right, patch_neigh_top, patch_neigh_bot=', &
-              patch_neigh_left, patch_neigh_right, patch_neigh_top, patch_neigh_bot
-      elseif (ipatch==5) then
-      elseif (ipatch==6) then
-      endif
-!
-    endsubroutine set_cubed_sphere_neighbors
-!***********************************************************************
+!print*,'AXEL: patch_neigh_left, patch_neigh_right, patch_neigh_top, patch_neigh_bot=', &
+!              patch_neigh_left, patch_neigh_right, patch_neigh_top, patch_neigh_bot
+!      elseif (ipatch==5) then
+!      elseif (ipatch==6) then
+!      endif
+!!
+!    endsubroutine set_cubed_sphere_neighbors
+!!***********************************************************************
     subroutine scatter_snapshot(a,f,indvar1,indvar2)
 !
 !  Scatters a full snapshot (array a) residing in root (w/o ghost zones) to the f-arrays of all ranks
@@ -745,7 +751,7 @@ print*,'AXEL: patch_neigh_left, patch_neigh_right, patch_neigh_top, patch_neigh_
 !  23-oct-23/MR: coded
 !
       real, dimension(:,:,:,:), intent(in):: a
-      real, dimension(mx,my,mz,mfarray), intent(out):: f
+      real, dimension(:,:,:,:), intent(out):: f
       integer, intent(in) :: indvar1,indvar2
 
       integer, dimension(4) :: start_get, start_store
@@ -763,23 +769,58 @@ print*,'AXEL: patch_neigh_left, patch_neigh_right, patch_neigh_top, patch_neigh_
       call MPI_Type_commit(type_get,mpierr)
       call MPI_Type_commit(type_store,mpierr)
 
-      size=nwgrid*size_of_real
-
-      if (lroot) then   ! data tb scattered is on root
-        call MPI_Win_create(a, size, 1, MPI_INFO_NULL, MPI_COMM_WORLD, win, mpierr)
-      else              ! hence other ranks do not declare a window
-        call MPI_Win_create(a, 0, 1, MPI_INFO_NULL, MPI_COMM_WORLD, win, mpierr)
-      endif
+      ! data tb scattered is on root
+      size = merge(nwgrid*size_of_real,zero_size,lroot)
+      call MPI_Win_create(a, size, 1, MPI_INFO_NULL, MPI_COMM_PENCIL, win, mpierr)
 
       call MPI_WIN_FENCE(0, win, mpierr)
-      call MPI_Get(f, 1, type_store, root, 0, 1, type_get, win, mpierr)
+      call MPI_Get(f, 1, type_store, root, zero_size, 1, type_get, win, mpierr)
       call MPI_WIN_FENCE(0, win, mpierr)
 
+      call MPI_WIN_FREE(win,mpierr)
       call MPI_TYPE_FREE(type_get,mpierr)
       call MPI_TYPE_FREE(type_store,mpierr)
-      call MPI_WIN_FREE(win,mpierr)
 
     endsubroutine scatter_snapshot
+!***********************************************************************
+    subroutine fetch_to_process_masked(array,length,mask,ranks,irank)
+!
+! Fetch elements of array selected by mask from rank ranks(imax) to rank irank (default: root);
+! imax is counted according to masked-in elements of array. Uses one-sided MPI communication.
+!
+! 6-may-26/MR: coded
+!
+      integer, intent(in) :: length
+      real, dimension(length), intent(inout) :: array
+      logical, dimension(length), intent(in) :: mask
+      integer, dimension(:), intent(in) :: ranks
+      integer, optional, intent(in) :: irank
+
+      integer :: win,ind,imax
+      integer(KIND=MPI_ADDRESS_KIND) :: winsize,idisp
+      logical :: lamfetcher
+
+      lamfetcher = iproc_world==ioptest(irank,root)
+      winsize = length*size_of_real    !merge(zero_size,length*size_of_real,lamfetcher)
+
+      call MPI_WIN_CREATE(array, winsize, size_of_real, MPI_INFO_NULL, MPI_COMM_PENCIL, win, mpierr)
+      call MPI_WIN_FENCE(MPI_MODE_NOPRECEDE, win, mpierr)
+      if (lamfetcher) then
+        imax=1
+        do ind=1,length
+          if (mask(ind)) then                  ! for each masked-in array element, get the value from rank(imax)
+            if (ranks(imax)/=iproc_world) then ! don't fetch from yourself
+              idisp=ind-1
+              call MPI_Get(array(ind), 1, mpi_precision, ranks(imax), idisp, 1, mpi_precision, win, mpierr)
+            endif
+            imax=imax+1
+          endif
+        enddo
+      endif
+      call MPI_WIN_FENCE(0, win, mpierr)
+      call MPI_WIN_FREE(win,mpierr)
+
+    endsubroutine fetch_to_process_masked
 !***********************************************************************
     subroutine yyinit
 !
@@ -886,13 +927,13 @@ print*,'AXEL: patch_neigh_left, patch_neigh_right, patch_neigh_top, patch_neigh_
         allocate(ubufzo(mx,bufsizes_yz(INZU,ISND),nghost,mcom))
       endif
 
-      if (lfirst_proc_y.and.ipz>=nprocz/3.and.ipz<2*nprocz/3.) then
+      if (lfirst_proc_y.and.ipz>=idiv(nprocz,3).and.ipz<2*nprocz/3.) then
         allocate(lbufyo(mx,bufsizes_yz(INYL,ISND),nghost,mcom))
       else
         allocate(lbufyo(mx,nghost,bufsizes_yz(INYL,ISND),mcom))
       endif
 
-      if (llast_proc_y.and.ipz>=nprocz/3.and.ipz<2*nprocz/3.) then
+      if (llast_proc_y.and.ipz>=idiv(nprocz,3).and.ipz<2*nprocz/3.) then
         allocate(ubufyo(mx,bufsizes_yz(INYU,ISND),nghost,mcom))
       else
         allocate(ubufyo(mx,nghost,bufsizes_yz(INYU,ISND),mcom))
@@ -903,25 +944,25 @@ print*,'AXEL: patch_neigh_left, patch_neigh_right, patch_neigh_top, patch_neigh_
                 ulbufi(mx,bufsizes_yz_corn(1,INUL,IRCV),bufsizes_yz_corn(2,INUL,IRCV),mcom), &
                 uubufi(mx,bufsizes_yz_corn(1,INUU,IRCV),bufsizes_yz_corn(2,INUU,IRCV),mcom))
 
-      if (lfirst_proc_z.or.lfirst_proc_y.and.ipz>=nprocz/3.and.ipz<2*nprocz/3.) then
+      if (lfirst_proc_z.or.lfirst_proc_y.and.ipz>=idiv(nprocz,3).and.ipz<2*nprocz/3.) then
         allocate(llbufo(mx,bufsizes_yz_corn(2,INLL,ISND),bufsizes_yz_corn(1,INLL,ISND),mcom))
       else
         allocate(llbufo(mx,bufsizes_yz_corn(1,INLL,ISND),bufsizes_yz_corn(2,INLL,ISND),mcom))
       endif
 
-      if (lfirst_proc_z.or.llast_proc_y.and.ipz>=nprocz/3.and.ipz<2*nprocz/3.) then
+      if (lfirst_proc_z.or.llast_proc_y.and.ipz>=idiv(nprocz,3).and.ipz<2*nprocz/3.) then
         allocate(ulbufo(mx,bufsizes_yz_corn(2,INUL,ISND),bufsizes_yz_corn(1,INUL,ISND),mcom) )
       else
         allocate(ulbufo(mx,bufsizes_yz_corn(1,INUL,ISND),bufsizes_yz_corn(2,INUL,ISND),mcom) )
       endif
 
-      if (llast_proc_z.or.llast_proc_y.and.ipz>=nprocz/3.and.ipz<2*nprocz/3.) then
+      if (llast_proc_z.or.llast_proc_y.and.ipz>=idiv(nprocz,3).and.ipz<2*nprocz/3.) then
         allocate(uubufo(mx,bufsizes_yz_corn(2,INUU,ISND),bufsizes_yz_corn(1,INUU,ISND),mcom))
       else
         allocate(uubufo(mx,bufsizes_yz_corn(1,INUU,ISND),bufsizes_yz_corn(2,INUU,ISND),mcom))
       endif
 
-      if (llast_proc_z.or.lfirst_proc_y.and.ipz>=nprocz/3.and.ipz<2*nprocz/3.) then
+      if (llast_proc_z.or.lfirst_proc_y.and.ipz>=idiv(nprocz,3).and.ipz<2*nprocz/3.) then
         allocate(lubufo(mx,bufsizes_yz_corn(2,INLU,ISND),bufsizes_yz_corn(1,INLU,ISND),mcom) )
       else
         allocate(lubufo(mx,bufsizes_yz_corn(1,INLU,ISND),bufsizes_yz_corn(2,INLU,ISND),mcom) )
@@ -1203,7 +1244,7 @@ if (llast_proc_z) write(24,'(2(f10.4,1x))') thphprime_strip_y
 !print*, '-----------------'
 endif
 
-          if (ipz>=nprocz/3.and.ipz<2*nprocz/3) then
+          if (ipz>=idiv(nprocz,3).and.ipz<idiv(2*nprocz,3)) then
 !
 !  Transposition of thphprime_strip_y, can perhaps be avoided.
 !
@@ -1292,7 +1333,7 @@ if (llast_proc_z) write(26,'(2(f10.4,1x))') thphprime_strip_y
 !print*, '-----------------'
 endif
 
-          if (ipz>=nprocz/3.and.ipz<2*nprocz/3) then
+          if (ipz>=idiv(nprocz,3).and.ipz<idiv(2*nprocz,3)) then
 !
 !  Transposition of thphprime_strip_y, can perhaps be avoided.
 !
@@ -1546,11 +1587,11 @@ print*, 'noks_all,ngap_all,nstrip_total=', noks_all,ngap_all,nstrip_total
 !  NB nprocz=2*n, n>=1, comms across y-plane parallel in z!
 !
       if (lcommunicate_y) then
-        poleneigh = find_proc(ipx,     ipy,ipz  +nprocz/2)
-        pnbcrn    = find_proc(ipx,       0,ipz-1+nprocz/2)
-        pnfcrn    = find_proc(ipx,       0,ipz+1+nprocz/2)
-        psfcrn    = find_proc(ipx,nprocy-1,ipz+1+nprocz/2)
-        psbcrn    = find_proc(ipx,nprocy-1,ipz-1+nprocz/2)
+        poleneigh = find_proc(ipx,     ipy,ipz  +idiv(nprocz,2))
+        pnbcrn    = find_proc(ipx,       0,ipz-1+idiv(nprocz,2))
+        pnfcrn    = find_proc(ipx,       0,ipz+1+idiv(nprocz,2))
+        psfcrn    = find_proc(ipx,nprocy-1,ipz+1+idiv(nprocz,2))
+        psbcrn    = find_proc(ipx,nprocy-1,ipz-1+idiv(nprocz,2))
         !poleneigh = modulo(ipz  +nprocz/2,nprocz)*nprocxy+       ipy*nprocx+ipx
         !pnbcrn    = modulo(ipz-1+nprocz/2,nprocz)*nprocxy+         0*nprocx+ipx !N rev
         !pnfcrn    = modulo(ipz+1+nprocz/2,nprocz)*nprocxy+         0*nprocx+ipx !N fwd
@@ -1898,7 +1939,7 @@ if (notanumber(ubufyo)) print*, 'ubufyo: iproc=', iproc, iproc_world
 !
       use General, only: transpose_mn, notanumber, copy_kinked_strip_z, copy_kinked_strip_y, reset_triangle, notanumber
 
-      real, dimension(mx,my,mz,mfarray), intent(inout):: f
+      real, dimension(:,:,:,:), intent(inout):: f
       integer, optional,                 intent(in)   :: ivar1_opt, ivar2_opt
 !
       integer :: ivar1, ivar2, j
@@ -2473,7 +2514,7 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 !                      y-ghosts are not needed
 !  20-june-02/nils: adapted from pencil_mpi
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, dimension (:,:,:,:) :: f
       integer, optional :: ivar1_opt, ivar2_opt
 !
       real(KIND=rkind8) :: deltay_dy, frac, c1, c2, c3, c4, c5, c6
@@ -2501,20 +2542,20 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
           c4 = +(frac+2.)*(frac+1.)*frac          *(frac-2.)*(frac-3.)/12.
           c5 = -(frac+2.)*(frac+1.)*frac*(frac-1.)          *(frac-3.)/24.
           c6 = +(frac+2.)*(frac+1.)*frac*(frac-1.)*(frac-2.)          /120.
-          f(1:l1-1,m1:m2,:,ivar1:ivar2) = &
+          f(1:l1-1,m1:m2,:,ivar1:ivar2) = real(&
                c1*cshift(f(l2i:l2,m1:m2,:,ivar1:ivar2),-displs+2,2) &
               +c2*cshift(f(l2i:l2,m1:m2,:,ivar1:ivar2),-displs+1,2) &
               +c3*cshift(f(l2i:l2,m1:m2,:,ivar1:ivar2),-displs  ,2) &
               +c4*cshift(f(l2i:l2,m1:m2,:,ivar1:ivar2),-displs-1,2) &
               +c5*cshift(f(l2i:l2,m1:m2,:,ivar1:ivar2),-displs-2,2) &
-              +c6*cshift(f(l2i:l2,m1:m2,:,ivar1:ivar2),-displs-3,2)
-          f(l2+1:mx,m1:m2,:,ivar1:ivar2) = &
+              +c6*cshift(f(l2i:l2,m1:m2,:,ivar1:ivar2),-displs-3,2))
+          f(l2+1:mx,m1:m2,:,ivar1:ivar2) = real(&
                c1*cshift(f(l1:l1i,m1:m2,:,ivar1:ivar2), displs-2,2) &
               +c2*cshift(f(l1:l1i,m1:m2,:,ivar1:ivar2), displs-1,2) &
               +c3*cshift(f(l1:l1i,m1:m2,:,ivar1:ivar2), displs  ,2) &
               +c4*cshift(f(l1:l1i,m1:m2,:,ivar1:ivar2), displs+1,2) &
               +c5*cshift(f(l1:l1i,m1:m2,:,ivar1:ivar2), displs+2,2) &
-              +c6*cshift(f(l1:l1i,m1:m2,:,ivar1:ivar2), displs+3,2)
+              +c6*cshift(f(l1:l1i,m1:m2,:,ivar1:ivar2), displs+3,2))
         endif
       else
         if (nygrid==1) return ! Periodic boundary conditions already set.
@@ -2686,11 +2727,9 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 !  20-june-02/nils: adapted from pencil_mpi
 !  02-mar-02/ulf: Sliding periodic boundary conditions in x
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, dimension (:,:,:,:) :: f
       integer, optional :: ivar1_opt, ivar2_opt
 !
-!     fa, fb are the buffers we collect recieved data into
-      real, dimension (nghost,4*ny,mz,mcom) :: fa, fb
       integer, dimension (MPI_STATUS_SIZE) :: irecv_stat_fall, irecv_stat_fann
       integer, dimension (MPI_STATUS_SIZE) :: irecv_stat_fal,  irecv_stat_fan
       integer, dimension (MPI_STATUS_SIZE) :: irecv_stat_fbll, irecv_stat_fbnn
@@ -2701,10 +2740,16 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       integer, dimension (MPI_STATUS_SIZE) :: isend_stat_tnb,  isend_stat_tlb
       integer :: ivar1, ivar2, m2long
       real(KIND=rkind8) :: deltay_dy, frac, c1, c2, c3, c4, c5, c6
+
+      !fa, fb are the buffers we collect recieved data into
+      real, save, allocatable, dimension(:,:,:,:) :: fa, fb
 !
       ivar1=1; ivar2=mcom
       if (present(ivar1_opt)) ivar1=ivar1_opt
       if (present(ivar2_opt)) ivar2=ivar2_opt
+
+      if (.not. allocated(fa)) allocate(fa(nghost,4*ny,mz,mcom))
+      if (.not. allocated(fb)) allocate(fb(nghost,4*ny,mz,mcom))
 !
 !  Some special cases have already finished in initiate_shearing.
 !
@@ -2754,22 +2799,22 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 !       m2 long is the position of the last value from fahi in fa
 !
         m2long = 3*ny
-        f(1:l1-1,m1:m2,:,ivar1:ivar2) = &
+        f(1:l1-1,m1:m2,:,ivar1:ivar2) = real(&
              c1*fa(:,m2long-ny-displs+3:m2long-displs+2,:,ivar1:ivar2) &
             +c2*fa(:,m2long-ny-displs+2:m2long-displs+1,:,ivar1:ivar2) &
             +c3*fa(:,m2long-ny-displs+1:m2long-displs-0,:,ivar1:ivar2) &
             +c4*fa(:,m2long-ny-displs-0:m2long-displs-1,:,ivar1:ivar2) &
             +c5*fa(:,m2long-ny-displs-1:m2long-displs-2,:,ivar1:ivar2) &
-            +c6*fa(:,m2long-ny-displs-2:m2long-displs-3,:,ivar1:ivar2)
+            +c6*fa(:,m2long-ny-displs-2:m2long-displs-3,:,ivar1:ivar2))
 !
 !       ny+1 is the beginning of the block of interior cell from fblo in fb
-        f(l2+1:mx,m1:m2,:,ivar1:ivar2)= &
+        f(l2+1:mx,m1:m2,:,ivar1:ivar2)= real(&
              c1*fb(:,ny+1+displs-2:2*ny+displs-2,:,ivar1:ivar2) &
             +c2*fb(:,ny+1+displs-1:2*ny+displs-1,:,ivar1:ivar2) &
             +c3*fb(:,ny+1+displs  :2*ny+displs  ,:,ivar1:ivar2) &
             +c4*fb(:,ny+1+displs+1:2*ny+displs+1,:,ivar1:ivar2) &
             +c5*fb(:,ny+1+displs+2:2*ny+displs+2,:,ivar1:ivar2) &
-            +c6*fb(:,ny+1+displs+3:2*ny+displs+3,:,ivar1:ivar2)
+            +c6*fb(:,ny+1+displs+3:2*ny+displs+3,:,ivar1:ivar2))
 !
 !  Need to wait till buffer is empty before re-using it again.
 !
@@ -3052,6 +3097,7 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 !
       real, dimension(nx,nz), intent(in) :: Qrad_zx,tau_zx
       real, dimension(nx,nz,0:nprocy-1), intent(out) :: Qrad_zx_all,tau_zx_all
+      integer(kind=MPI_INTEGER_KIND), parameter :: count=nx*nz
 !
 !  Identifier
 !
@@ -3059,10 +3105,10 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 !
 !  actual MPI calls
 !
-      call MPI_ALLGATHER(tau_zx,nx*nz,mpi_precision,tau_zx_all,nx*nz,mpi_precision, &
+      call MPI_ALLGATHER(tau_zx,count,mpi_precision,tau_zx_all,count,mpi_precision, &
           MPI_COMM_YBEAM,mpierr)
 !
-      call MPI_ALLGATHER(Qrad_zx,nx*nz,mpi_precision,Qrad_zx_all,nx*nz,mpi_precision, &
+      call MPI_ALLGATHER(Qrad_zx,count,mpi_precision,Qrad_zx_all,count,mpi_precision, &
           MPI_COMM_YBEAM,mpierr)
 !
     endsubroutine radboundary_zx_periodic_ray
@@ -3150,7 +3196,7 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 
       if (present(nonblock)) then
         call MPI_IRECV(bcast_array, 1, mpi_precision, proc_src, &
-                      tag_id, ioptest(comm,MPI_COMM_GRID), stat, nonblock, mpierr)
+                      tag_id, ioptest(comm,MPI_COMM_GRID), nonblock, mpierr)
       else
         call MPI_RECV(bcast_array, 1, mpi_precision, proc_src, &
                       tag_id, ioptest(comm,MPI_COMM_GRID), stat, mpierr)
@@ -3235,33 +3281,34 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 !
     endsubroutine mpirecv_real_arr3
 !***********************************************************************
-    subroutine mpirecv_cmplx_arr3(bcast_array,nbcast_array,proc_src,tag_id,comm,nonblock)
-!
-!  Receive complex array(:,:,:) from other processor.
-!  If present, nonblock is the request id for non-blockin receive.
-!
-!  20-may-06/anders: adapted
-!
-      integer, dimension(3) :: nbcast_array
-      complex, dimension(nbcast_array(1),nbcast_array(2),nbcast_array(3)) :: bcast_array
-      integer :: proc_src, tag_id, num_elements
-      integer, optional :: comm,nonblock
-      integer, dimension(MPI_STATUS_SIZE) :: stat
-!
-      intent(out) :: bcast_array
-!
-      if (any(nbcast_array == 0)) return
-!
-      num_elements = product(nbcast_array)
-      if (present(nonblock)) then
-        call MPI_IRECV(bcast_array, num_elements, MPI_CMPLX, proc_src, &
-                       tag_id, ioptest(comm,MPI_COMM_GRID), nonblock, mpierr)
-      else
-        call MPI_RECV(bcast_array, num_elements, MPI_CMPLX, proc_src, &
-                      tag_id, ioptest(comm,MPI_COMM_GRID), stat, mpierr)
-      endif
-!
-    endsubroutine mpirecv_cmplx_arr3
+!    On comment since not used (to suppress compiler warnings)
+!    subroutine mpirecv_cmplx_arr3(bcast_array,nbcast_array,proc_src,tag_id,comm,nonblock)
+!!
+!!  Receive complex array(:,:,:) from other processor.
+!!  If present, nonblock is the request id for non-blockin receive.
+!!
+!!  20-may-06/anders: adapted
+!!
+!      integer, dimension(3) :: nbcast_array
+!      complex, dimension(nbcast_array(1),nbcast_array(2),nbcast_array(3)) :: bcast_array
+!      integer :: proc_src, tag_id, num_elements
+!      integer, optional :: comm,nonblock
+!      integer, dimension(MPI_STATUS_SIZE) :: stat
+!!
+!      intent(out) :: bcast_array
+!!
+!      if (any(nbcast_array == 0)) return
+!!
+!      num_elements = product(nbcast_array)
+!      if (present(nonblock)) then
+!        call MPI_IRECV(bcast_array, num_elements, MPI_CMPLX, proc_src, &
+!                       tag_id, ioptest(comm,MPI_COMM_GRID), nonblock, mpierr)
+!      else
+!        call MPI_RECV(bcast_array, num_elements, MPI_CMPLX, proc_src, &
+!                      tag_id, ioptest(comm,MPI_COMM_GRID), stat, mpierr)
+!      endif
+!!
+!    endsubroutine mpirecv_cmplx_arr3
 !***********************************************************************
     subroutine mpirecv_real_arr4(bcast_array,nbcast_array,proc_src,tag_id,comm,nonblock)
 !
@@ -3445,24 +3492,25 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 !
     endsubroutine mpisend_real_arr
 !***********************************************************************
-    subroutine mpisend_real_arr_assumed(bcast_array,nbcast_array,offset,proc_rec,tag_id,comm)
-!
-!  Sends nbcast_array elements of real array bcast_array from position offset to other processor.
-!  Avoids compilation error when shapes of bcast_array and actual parameter do not agree.
-!
-!  06-oct-22/MR: coded
-!
-      real, dimension(*) :: bcast_array
-      integer(KIND=ikind8) :: offset
-      integer :: nbcast_array,proc_rec,tag_id
-      integer, optional :: comm
-!
-      if (nbcast_array == 0) return
-!
-      call MPI_SEND(bcast_array(offset), nbcast_array, mpi_precision, proc_rec, &
-                    tag_id, ioptest(comm,MPI_COMM_GRID), mpierr)
-!
-    endsubroutine mpisend_real_arr_assumed
+!    On comment since not used (to suppress compiler warnings)
+!    subroutine mpisend_real_arr_assumed(bcast_array,nbcast_array,offset,proc_rec,tag_id,comm)
+!!
+!!  Sends nbcast_array elements of real array bcast_array from position offset to other processor.
+!!  Avoids compilation error when shapes of bcast_array and actual parameter do not agree.
+!!
+!!  06-oct-22/MR: coded
+!!
+!      real, dimension(*) :: bcast_array
+!      integer(KIND=ikind8) :: offset
+!      integer :: nbcast_array,proc_rec,tag_id
+!      integer, optional :: comm
+!!
+!      if (nbcast_array == 0) return
+!!
+!      call MPI_SEND(bcast_array(offset), nbcast_array, mpi_precision, proc_rec, &
+!                    tag_id, ioptest(comm,MPI_COMM_GRID), mpierr)
+!!
+!    endsubroutine mpisend_real_arr_assumed
 !***********************************************************************
     subroutine mpisend_real_arr_huge(array,len_array,partner,tag,comm)
 !
@@ -3474,7 +3522,7 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       integer :: partner,tag
       integer, optional :: comm
 !
-      integer :: mult,res
+      integer(KIND=ikind8) :: mult,res
 
       if (len_array == 0) return
 
@@ -3499,7 +3547,7 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       integer :: partner,tag
       integer, optional :: comm
 !
-      integer :: mult,res
+      integer(KIND=ikind8) :: mult,res
       integer, dimension(MPI_STATUS_SIZE) :: stat
 
       if (len_array == 0) return
@@ -3515,26 +3563,27 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 
     endsubroutine mpirecv_real_arr_huge
 !***********************************************************************
-    subroutine mpirecv_real_arr_assumed(bcast_array,nbcast_array,offset,proc_rec,tag_id,comm)
-!
-!  Receives nbcast_array elements of real array bcast_array at position offset from other processor.
-!  Avoids compilation error when shapes of bcast_array and actual parameter do not agree.
-!
-!  06-oct-22/MR: coded
-!
-      real, dimension(*) :: bcast_array
-      integer(KIND=ikind8) :: offset
-      integer :: nbcast_array,proc_rec,tag_id
-      integer, optional :: comm
-!
-      integer, dimension(MPI_STATUS_SIZE) :: stat
-!
-      if (nbcast_array == 0) return
-!
-      call MPI_RECV(bcast_array(offset), nbcast_array, mpi_precision, proc_rec, &
-                    tag_id, ioptest(comm,MPI_COMM_GRID), stat, mpierr)
-!
-    endsubroutine mpirecv_real_arr_assumed
+!    On comment since not used (to suppress compiler warnings)
+!    subroutine mpirecv_real_arr_assumed(bcast_array,nbcast_array,offset,proc_rec,tag_id,comm)
+!!
+!!  Receives nbcast_array elements of real array bcast_array at position offset from other processor.
+!!  Avoids compilation error when shapes of bcast_array and actual parameter do not agree.
+!!
+!!  06-oct-22/MR: coded
+!!
+!      real, dimension(*) :: bcast_array
+!      integer(KIND=ikind8) :: offset
+!      integer :: nbcast_array,proc_rec,tag_id
+!      integer, optional :: comm
+!!
+!      integer, dimension(MPI_STATUS_SIZE) :: stat
+!!
+!      if (nbcast_array == 0) return
+!!
+!      call MPI_RECV(bcast_array(offset), nbcast_array, mpi_precision, proc_rec, &
+!                    tag_id, ioptest(comm,MPI_COMM_GRID), stat, mpierr)
+!!
+!    endsubroutine mpirecv_real_arr_assumed
 !***********************************************************************
     subroutine mpisend_real_arr2(bcast_array,nbcast_array,proc_rec,tag_id,comm)
 !
@@ -3580,30 +3629,31 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 !
     endsubroutine mpisend_real_arr3
 !***********************************************************************
-    subroutine mpisend_cmplx_arr3(bcast_array,nbcast_array,proc_rec,tag_id,comm,nonblock)
-!
-!  Send real array(:,:,:) to other processor.
-!  If present, nonblock is the request id for non-blockin send.
-!
-!  20-may-06/anders: adapted
-!
-      integer, dimension(3) :: nbcast_array
-      complex, dimension(nbcast_array(1),nbcast_array(2),nbcast_array(3)) :: bcast_array
-      integer :: proc_rec, tag_id, num_elements
-      integer, optional :: comm,nonblock
-!
-      if (any(nbcast_array == 0)) return
-!
-      num_elements = product(nbcast_array)
-      if (present(nonblock)) then
-        call MPI_ISEND(bcast_array, num_elements, MPI_CMPLX, proc_rec, &
-                       tag_id,ioptest(comm,MPI_COMM_GRID),nonblock, mpierr)
-      else
-        call MPI_SEND(bcast_array, num_elements, MPI_CMPLX, proc_rec, &
-                      tag_id,ioptest(comm,MPI_COMM_GRID),mpierr)
-      endif
-!
-    endsubroutine mpisend_cmplx_arr3
+!    On comment since not used (to suppress compiler warnings)
+!    subroutine mpisend_cmplx_arr3(bcast_array,nbcast_array,proc_rec,tag_id,comm,nonblock)
+!!
+!!  Send real array(:,:,:) to other processor.
+!!  If present, nonblock is the request id for non-blockin send.
+!!
+!!  20-may-06/anders: adapted
+!!
+!      integer, dimension(3) :: nbcast_array
+!      complex, dimension(nbcast_array(1),nbcast_array(2),nbcast_array(3)) :: bcast_array
+!      integer :: proc_rec, tag_id, num_elements
+!      integer, optional :: comm,nonblock
+!!
+!      if (any(nbcast_array == 0)) return
+!!
+!      num_elements = product(nbcast_array)
+!      if (present(nonblock)) then
+!        call MPI_ISEND(bcast_array, num_elements, MPI_CMPLX, proc_rec, &
+!                       tag_id,ioptest(comm,MPI_COMM_GRID),nonblock, mpierr)
+!      else
+!        call MPI_SEND(bcast_array, num_elements, MPI_CMPLX, proc_rec, &
+!                      tag_id,ioptest(comm,MPI_COMM_GRID),mpierr)
+!      endif
+!!
+!    endsubroutine mpisend_cmplx_arr3
 !***********************************************************************
     subroutine mpisend_real_arr4(bcast_array,nbcast_array,proc_rec,tag_id,comm)
 !
@@ -4455,7 +4505,8 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       real, dimension(:,:) :: dest_array
       integer, optional :: proc,comm
 
-      integer :: count1,count2,comm_,np,sizeofreal
+      integer :: count1,count2,comm_,np
+      integer(kind=MPI_ADDRESS_KIND) :: sizeofreal
       integer, dimension(:), allocatable :: sendcounts,displs
       integer :: block, segment
       integer :: src_sz1, src_sz2, dest_sz1, dest_sz2, locrank, i2
@@ -4547,8 +4598,6 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       real, dimension(nreduce) :: fsum_tmp,fsum
       integer, optional :: idir,comm
 !
-      integer :: mpiprocs
-!
       if (nreduce==0) return
 !
       call MPI_ALLREDUCE(fsum_tmp, fsum, nreduce, mpi_precision, MPI_SUM, &
@@ -4566,7 +4615,7 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       real, dimension(nreduce(1),nreduce(2)) :: fsum_tmp,fsum
       integer, optional :: idir,comm
 !
-      integer :: mpiprocs, num_elements
+      integer :: num_elements
 !
       if (any(nreduce==0)) return
 !
@@ -4587,7 +4636,7 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       real, dimension(nreduce(1),nreduce(2),nreduce(3)) :: fsum_tmp,fsum
       integer, optional :: idir
 !
-      integer :: mpiprocs, num_elements
+      integer :: num_elements
 !
       if (any(nreduce==0)) return
 !
@@ -4608,7 +4657,7 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       real, dimension(nreduce(1),nreduce(2),nreduce(3),nreduce(4)) :: fsum_tmp,fsum
       integer, optional :: idir
 !
-      integer :: mpiprocs, num_elements
+      integer :: num_elements
 !
       if (any(nreduce==0)) return
 !
@@ -4629,7 +4678,7 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       real, dimension(nreduce(1),nreduce(2),nreduce(3),nreduce(4),nreduce(5)) :: fsum_tmp,fsum
       integer, optional :: idir
 !
-      integer :: mpiprocs, num_elements
+      integer :: num_elements
 !
       if (any(nreduce==0)) return
 !
@@ -4689,18 +4738,10 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       integer, dimension(nreduce) :: fsum_tmp,fsum
       integer, optional :: idir
 !
-      integer :: mpiprocs
-!
       if (nreduce==0) return
 !
-      if (present(idir)) then
-        mpiprocs=mpigetcomm(idir)
-      else
-        mpiprocs=MPI_COMM_GRID
-      endif
-!
       call MPI_ALLREDUCE(fsum_tmp, fsum, nreduce, MPI_INTEGER, MPI_SUM, &
-                         mpiprocs, mpierr)
+                         get_comm(idir), mpierr)
 !
     endsubroutine mpiallreduce_sum_int_arr
 !***********************************************************************
@@ -4912,6 +4953,56 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 !
     endsubroutine mpireduce_max_arr
 !***********************************************************************
+    subroutine mpireduce_max_arr_inplace(fmax,nreduce,comm)
+!
+!  Calculate total maximum for each array element and return to root.
+!
+      integer :: nreduce
+      real, dimension(nreduce) :: fmax
+      integer, optional :: comm
+!
+      if (nreduce==0) return
+!
+      if (lroot) then
+        call MPI_REDUCE(MPI_IN_PLACE, fmax, nreduce, mpi_precision, MPI_MAX, root, &
+                        ioptest(comm,MPI_COMM_PENCIL), mpierr)
+      else
+        call MPI_REDUCE(fmax, fmax, nreduce, mpi_precision, MPI_MAX, root, &
+                        ioptest(comm,MPI_COMM_PENCIL), mpierr)
+      endif
+!
+    endsubroutine mpireduce_max_arr_inplace
+!***********************************************************************
+    subroutine mpireduce_maxloc_arr(fmax,maxranks,nreduce,comm)
+!
+!  Calculate total maximum for each array element along with its location and return both to root.
+!
+!  27-apr-26/MR: coded
+!
+      integer :: nreduce
+      real, dimension(nreduce) :: fmax
+      integer, dimension(nreduce) :: maxranks
+      integer, optional :: comm
+!
+      real :: fmaxloc(2,nreduce)
+
+      if (nreduce==0) return
+!
+      fmaxloc(1,:)=fmax
+      fmaxloc(2,:)=iproc_world
+
+      if (lroot) then
+        call MPI_REDUCE(MPI_IN_PLACE, fmaxloc, nreduce, MPI_2FLOAT, MPI_MAXLOC, root, &
+                        ioptest(comm,MPI_COMM_PENCIL), mpierr)
+        fmax=fmaxloc(1,:)
+        maxranks=fmaxloc(2,:)
+      else
+        call MPI_REDUCE(fmaxloc, fmaxloc, nreduce, MPI_2FLOAT, MPI_MAXLOC, root, &
+                        ioptest(comm,MPI_COMM_PENCIL), mpierr)
+      endif
+!
+    endsubroutine mpireduce_maxloc_arr
+!***********************************************************************
     subroutine mpireduce_max_arr2(fmax_tmp,fmax,nreduce,comm)
 !
 !  Calculate total maximum for each array element and return to root.
@@ -5056,8 +5147,6 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       real :: fsum_tmp,fsum
       integer, optional :: idir
 !
-      integer :: mpiprocs
-!
       if (nprocs==1) then
         fsum=fsum_tmp
       else
@@ -5067,16 +5156,45 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 !  Sum over y beams and return to the ipy=0 processors (MPI_COMM_YBEAM).
 !  Sum over z beams and return to the ipz=0 processors (MPI_COMM_ZBEAM).
 !
-        if (present(idir)) then
-          mpiprocs=mpigetcomm(idir)
-        else
-          mpiprocs=MPI_COMM_GRID
-        endif
         call MPI_REDUCE(fsum_tmp, fsum, 1, mpi_precision, MPI_SUM, root, &
-                        mpiprocs, mpierr)
+                        get_comm(idir), mpierr)
       endif
 !
     endsubroutine mpireduce_sum_scl
+!***********************************************************************
+    subroutine mpireduce_sum_arr_inplace(fsum,nreduce,idir,comm)
+!
+!  Calculate total sum for each array element and return to root.
+!
+      integer :: nreduce
+      real, dimension(nreduce) :: fsum
+      integer, optional :: idir,comm
+!
+      integer :: mpiprocs
+!
+      intent(in)  :: nreduce
+      intent(inout) :: fsum
+!
+      if (nreduce==0) return
+!
+      if (nprocs==1) then
+        return
+      else
+        if (present(idir)) then
+          mpiprocs=mpigetcomm(idir)
+        else
+          mpiprocs=ioptest(comm,MPI_COMM_GRID)
+        endif
+        if (lroot) then
+          call MPI_REDUCE(MPI_IN_PLACE, fsum, nreduce, mpi_precision, MPI_SUM, root, &
+                          mpiprocs, mpierr)
+        else
+          call MPI_REDUCE(fsum, fsum, nreduce, mpi_precision, MPI_SUM, root, &
+                          mpiprocs, mpierr)
+        endif
+      endif
+!
+    endsubroutine mpireduce_sum_arr_inplace
 !***********************************************************************
     subroutine mpireduce_sum_arr(fsum_tmp,fsum,nreduce,idir,comm)
 !
@@ -5128,11 +5246,7 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       if (nprocs==1) then
         fsum=fsum_tmp
       else
-        if (present(idir)) then
-          mpiprocs=mpigetcomm(idir)
-        else
-          mpiprocs=MPI_COMM_GRID
-        endif
+        mpiprocs = get_comm(idir)
         if (present(inplace)) then
           inplace_opt=inplace
         else
@@ -5174,11 +5288,7 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       if (nprocs==1) then
         fsum=fsum_tmp
       else
-        if (present(idir)) then
-          mpiprocs=mpigetcomm(idir)
-        else
-          mpiprocs=MPI_COMM_GRID
-        endif
+        mpiprocs = get_comm(idir)
         if (present(inplace)) then
           inplace_opt=inplace
         else
@@ -5204,7 +5314,7 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       real, dimension(nreduce(1),nreduce(2),nreduce(3),nreduce(4)) :: fsum_tmp,fsum
       integer, optional :: idir
 !
-      integer :: mpiprocs, num_elements
+      integer :: num_elements
 !
       intent(in)  :: fsum_tmp,nreduce
       intent(out) :: fsum
@@ -5214,14 +5324,9 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       if (nprocs==1) then
         fsum=fsum_tmp
       else
-        if (present(idir)) then
-          mpiprocs=mpigetcomm(idir)
-        else
-          mpiprocs=MPI_COMM_GRID
-        endif
         num_elements = product(nreduce)
         call MPI_REDUCE(fsum_tmp, fsum, num_elements, mpi_precision, MPI_SUM, &
-                        root, mpiprocs, mpierr)
+                        root, get_comm(idir), mpierr)
       endif
 !
     endsubroutine mpireduce_sum_arr4
@@ -5604,7 +5709,7 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 !
           allocate (tmp(nx,ny))
           do n=1,nz
-            do ibox=0,nx/nygrid-1
+            do ibox=0,idiv(nx,nygrid)-1
               iy=ibox*ny
               tmp=transpose(a(iy+1:iy+ny,:,n))
               a(iy+1:iy+ny,:,n)=tmp
@@ -5738,11 +5843,11 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
               ix=ibox*nprocy*ny+px*ny
               send_buf_y=a(ix+1:ix+ny,:,:)
               if (px<ipy) then      ! above diagonal: send first, receive then
-                call MPI_SEND(send_buf_y,sendc_y,mpi_precision,partner,ystag,MPI_COMM_GRID,mpierr)
-                call MPI_RECV(recv_buf_y,recvc_y,mpi_precision,partner,yrtag,MPI_COMM_GRID,stat,mpierr)
+                call MPI_SEND(send_buf_y,sendc_y,mpi_precision,partner,ystag,ioptest(comm,MPI_COMM_GRID),mpierr)
+                call MPI_RECV(recv_buf_y,recvc_y,mpi_precision,partner,yrtag,ioptest(comm,MPI_COMM_GRID),stat,mpierr)
               elseif (px>ipy) then  ! below diagonal: receive first, send then
-                call MPI_RECV(recv_buf_y,recvc_y,mpi_precision,partner,ystag,MPI_COMM_GRID,stat,mpierr)
-                call MPI_SEND(send_buf_y,sendc_y,mpi_precision,partner,yrtag,MPI_COMM_GRID,mpierr)
+                call MPI_RECV(recv_buf_y,recvc_y,mpi_precision,partner,ystag,ioptest(comm,MPI_COMM_GRID),stat,mpierr)
+                call MPI_SEND(send_buf_y,sendc_y,mpi_precision,partner,yrtag,ioptest(comm,MPI_COMM_GRID),mpierr)
               endif
               a(ix+1:ix+ny,:,:)=recv_buf_y
             endif
@@ -7334,8 +7439,7 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       bnz = size (in, 3)
       nbox = bnx*bny*bnz
 !
-      collector = ipx + ipy*nprocx
-      if (present (dest_proc)) collector = collector + dest_proc*nprocxy
+      collector = find_proc(ipx,ipy,ioptest(dest_proc))
 !
       if (iproc == collector) then
         ! collect the data
@@ -7396,8 +7500,7 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       bna = size (in, 4)
       nbox = bnx*bny*bnz*bna
 !
-      collector = ipx + ipy*nprocx
-      if (present (dest_proc)) collector = collector + dest_proc*nprocxy
+      collector = find_proc(ipx,ipy,ioptest(dest_proc))
 !
       if (iproc == collector) then
         ! collect the data
@@ -7438,11 +7541,17 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 !  Globalizes local 4D data first along the x, then along the y-direction to
 !  the destination processor. The local data is supposed to include the ghost
 !  cells. Inner ghost layers are cut away during the combination of the data.
-!  'dest_proc' is the destination iproc number relative to the first processor
-!  in the corresponding xy-plane (Default: 0, equals lfirst_proc_xy).
+!  'dest_proc' is an offset to define the pz-layer relative to the one of the current process.
+!   The collector is always the first process of the the corresponding xy-plane (equals lfirst_proc_xy).
 !  'source_pz' specifies the source pz-layer (Default: ipz).
 !
 !  23-Apr-2012/Bourdin.KIS: adapted from non-torus-type globalize_xy
+!  24-Apr-2026/TP: changed the meaning if dest_proc so this function does not have to assume
+!                  a specific proc mapping. The old one was:
+!                 "'dest_proc' is the destination iproc number relative to the first processor
+!                 in the corresponding xy-plane (Default: 0, equals lfirst_proc_xy)."
+!                 Checked that the single call specifying the parameter would still stay the same
+!                 with the default process mapping.
 !
       real, dimension(:,:,:,:), intent(in) :: in
       real, dimension(:,:,:,:), intent(out), optional :: out
@@ -7455,7 +7564,6 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       integer(KIND=ikind8) :: nbox, nrow
       integer :: x_add, x_sub, y_add, y_sub
       integer, parameter :: xtag=123, ytag=124
-      integer, dimension(MPI_STATUS_SIZE) :: stat
 !
       real, dimension(:,:,:,:), allocatable :: buffer, y_row
 !
@@ -7469,8 +7577,7 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       rny = cny*nprocy + 2*nghost
       nrow = bnx*rny*bnz*bna
 !
-      collector = ipz * nprocxy
-      if (present (dest_proc)) collector = collector + dest_proc
+      collector = find_proc(0,0,ipz + ioptest(dest_proc))
       pz = ioptest(source_pz,ipz)
 !
       if (iproc == collector) then
@@ -7555,11 +7662,16 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 !  Localizes global 4D data first along the y, then along the x-direction to
 !  the destination processor. The global data is supposed to include the outer
 !  ghost layers. The returned data will include inner ghost layers.
-!  'source_proc' is the source iproc number relative to the first processor
-!  in the corresponding xy-plane (Default: 0, equals lfirst_proc_xy).
+!  'dest_proc' is an offset to define the pz-layer relative to the one of the current process.
+!   The broadcaster is always the first process of the the corresponding xy-plane (equals lfirst_proc_xy).
 !  'dest_pz' specifies the destination pz-layer (Default: ipz).
 !
 !  23-Apr-2012/Bourdin.KIS: adapted from non-torus-type localize_xy
+!  24-Apr-2026/TP: Changed the meaning of source_proc to make the function agnostic amout the process mapping function.
+!                  Made sure the existing calls were still correct with the default process mapping
+!                  The old meaning was:
+!                  "'source_proc' is the source iproc number relative to the first processor
+!                  "in the corresponding xy-plane (Default: 0, equals lfirst_proc_xy)."
 !
       real, dimension(:,:,:,:), intent(out) :: out
       real, dimension(:,:,:,:), intent(in), optional :: in
@@ -7571,8 +7683,8 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       integer :: rnx, rny ! x- and y-row box sizes
       integer :: px, py, pz, broadcaster, partner, alloc_err
       integer(KIND=ikind8) :: nbox,nrow
+      integer :: broadcaster_z
       integer, parameter :: xtag=125, ytag=126
-      integer, dimension(MPI_STATUS_SIZE) :: stat
 !
       real, dimension(:,:,:,:), allocatable :: y_row, buffer, extended
 !
@@ -7589,8 +7701,8 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       rny = gny + 2*nghost
       nrow = bnx*rny*bnz*bna
 !
-      broadcaster = ipz * nprocxy
-      if (present (source_proc)) broadcaster = broadcaster + source_proc
+      broadcaster_z = ipz + ioptest(source_proc)
+      broadcaster = find_proc(0,0,broadcaster_z)
       pz = ipz
       if (present (dest_pz)) pz = dest_pz
 !
@@ -7616,7 +7728,7 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
             extended(:,1:nghost,:,:) = 0.0
             extended(:,rny-nghost+1:rny,:,:) = 0.0
           endif
-          call localize_xy(out, extended, broadcaster - ipz * nprocxy, pz)
+          call localize_xy(out, extended, broadcaster_z - ipz, pz)
           return
         endif
         if (cnx * nprocx + 2*nghost /= size (in, 1)) &
@@ -8565,8 +8677,9 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       real, dimension(:,:), intent(out) :: out
 !
       integer, parameter :: inx=nx, iny=ny
-      integer, parameter :: onx=nxgrid, ony=ny/nprocx
-      integer, parameter :: bnx=nx, bny=ny/nprocx ! transfer box sizes
+      integer, parameter :: onx=nxgrid
+      integer, parameter :: bnx=nx
+      integer :: ony,bny
       integer :: ibox, partner, nbox, alloc_err
       integer, parameter :: ltag=104, utag=105
       integer, dimension(MPI_STATUS_SIZE) :: stat
@@ -8575,6 +8688,8 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       integer, optional :: comm
       logical, optional :: lsync
 !
+      ony = idiv(ny,nprocx)
+      bny = ony
       if (nprocx == 1) then
         !$omp workshare
         out = in
@@ -8718,7 +8833,8 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       real, dimension(:,:,:), intent(in) :: in
       real, dimension(:,:,:), intent(out) :: out
 !
-      integer, parameter :: bnx = nx, bny = ny / nprocx
+      integer, parameter :: bnx = nx
+      integer :: bny
       integer, parameter :: ltag = 104, utag = 105
       real, dimension(:,:,:), allocatable :: send_buf, recv_buf
       integer, dimension(MPI_STATUS_SIZE) :: stat
@@ -8728,6 +8844,8 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       integer :: ngc
       integer, optional :: comm
       logical, optional :: lsync
+
+      bny = idiv(ny,nprocx)
 !
 !  No need to remap if nprocx = 1.
 !
@@ -8751,11 +8869,11 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       iny = size(in, 2)
       dim: if (inx == nx .and. iny == ny) then
         onx = nxgrid
-        ony = ny / nprocx
+        ony = idiv(ny,nprocx)
         ngc = 0
       elseif (inx == mx .and. iny == my) then dim
         onx = mxgrid
-        ony = ny / nprocx + 2 * nghost
+        ony = idiv(ny,nprocx) + 2 * nghost
         ngc = nghost
       else dim
         call stop_fatal('remap_to_pencil_xy_3D: input array size mismatch', lfirst_proc_xy)
@@ -8819,9 +8937,10 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       real, dimension(:,:,:,:), intent(out) :: out
 !
       integer, parameter :: inx=nx, iny=ny
-      integer, parameter :: onx=nxgrid, ony=ny/nprocx
+      integer, parameter :: onx=nxgrid
       integer :: inz, ina, onz, ona ! sizes of in and out arrays
-      integer, parameter :: bnx=nx, bny=ny/nprocx ! transfer box sizes
+      integer, parameter :: bnx=nx ! transfer box sizes
+      integer :: ony,bny
       integer :: ibox, partner, nbox, alloc_err
       integer, parameter :: ltag=104, utag=105
       integer, dimension(MPI_STATUS_SIZE) :: stat
@@ -8830,6 +8949,8 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       integer, optional :: comm
       logical, optional :: lsync
 !
+      ony = idiv(ny,nprocx)
+      bny = ony
       if (nprocx == 1) then
         !$omp workshare
         out = in
@@ -8901,9 +9022,10 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       real, dimension(:,:), intent(in) :: in
       real, dimension(:,:), intent(out) :: out
 !
-      integer, parameter :: inx=nxgrid, iny=ny/nprocx
+      integer, parameter :: inx=nxgrid
       integer, parameter :: onx=nx, ony=ny
-      integer, parameter :: bnx=nx, bny=ny/nprocx ! transfer box sizes
+      integer, parameter :: bnx=nx ! transfer box sizes
+      integer :: iny,bny
       integer :: ibox, partner, nbox, alloc_err
       integer, parameter :: ltag=106, utag=107
       integer, dimension(MPI_STATUS_SIZE) :: stat
@@ -8912,6 +9034,8 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       integer, optional :: comm
       logical, optional :: lsync
 !
+      iny = idiv(ny,nprocx)
+      bny = iny
       if (nprocx == 1) then
         !$omp workshare
         out = in
@@ -9058,8 +9182,8 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       real, dimension(:,:,:), intent(in) :: in
       real, dimension(:,:,:), intent(out) :: out
 !
-      integer, parameter :: nypx = ny / nprocx
-      integer, parameter :: bnx = nx, bny = nypx
+      integer, parameter :: bnx = nx
+      integer :: nypx, bny
       integer, parameter :: ltag = 106, utag = 107
       real, dimension(:,:,:), allocatable :: send_buf, recv_buf
       integer, dimension(MPI_STATUS_SIZE) :: stat
@@ -9072,6 +9196,8 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 !
 !  No need to unmap if nprocx = 1.
 !
+      nypx = idiv(ny,nprocx)
+      bny  = nypx
       if (nprocx == 1) then
         !$omp workshare
         out = in
@@ -9159,10 +9285,11 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       real, dimension(:,:,:,:), intent(in) :: in
       real, dimension(:,:,:,:), intent(out) :: out
 !
-      integer, parameter :: inx=nxgrid, iny=ny/nprocx
+      integer, parameter :: inx=nxgrid
       integer, parameter :: onx=nx, ony=ny
       integer :: inz, ina, onz, ona ! sizes of in and out arrays
-      integer, parameter :: bnx=nx, bny=ny/nprocx ! transfer box sizes
+      integer, parameter :: bnx=nx ! transfer box sizes
+      integer :: iny,bny
       integer :: ibox, partner, nbox, alloc_err
       integer, parameter :: ltag=106, utag=107
       integer, dimension(MPI_STATUS_SIZE) :: stat
@@ -9171,6 +9298,8 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
       integer, optional :: comm
       logical, optional :: lsync
 !
+      iny = idiv(ny,nprocx)
+      bny = iny
       if (nprocx == 1) then
         !$omp workshare
         out = in
@@ -10020,16 +10149,17 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 !
 !  25-nov-10/MR: coded
 !
+      use General, only: find_proc_coords
+
       integer,                    intent(in)  :: n1
       real, dimension(n1,nz)    , intent(in)  :: sendbuf
       real, dimension(n1,nzgrid), intent(out) :: recvbuf
       integer, optional,          intent(in)  :: lproc
 !
-      integer :: lpx, lpy
+      integer :: lpx, lpy, lpz
 !
       if (present(lproc)) then
-        lpy = lproc/nprocx
-        lpx = mod(lproc,nprocx)
+        call find_proc_coords(lproc,lpx,lpy,lpz)
       else
         lpy=0; lpx=0
       endif
@@ -10263,9 +10393,9 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 ! global processor number
 !
                        if (ltrans) then
-                          ig = ipz*nprocxy + ipx*nprocx + ipy
+                          ig = find_proc(ipy,ipx,ipz)
                         else
-                          ig = ipz*nprocxy + ipy*nprocx + ipx
+                          ig = find_proc(ipx,ipy,ipz)
                         endif
 !
 ! global lower and upper x index bounds for processor ipx
@@ -10508,9 +10638,10 @@ if (notanumber(ubufyi(:,:,mz+1:,j))) print*, 'ubufyi(mz+1:): iproc,j=', iproc, i
 !
 !  20-dec-15/MR: coded
 !
-        integer, parameter :: nprocz_rd=nprocz/3
+        integer :: nprocz_rd
         integer :: lenred
 
+        nprocz_rd = idiv(nprocz,3)
         if (lcutoff_corners) then
           len_cornstrip_y=nycut-1
           len_cornstrip_z=nzcut-1
@@ -10962,13 +11093,13 @@ endif
       real, dimension(6) :: floatbuf
       logical :: lok
       character(LEN=128) :: messg
-      integer :: ind,j,ll,name_len,nxgrid_foreign,nygrid_foreign,il1,il2,im1,im2,lenx,leny,px,py,tag,peer
+      integer :: ind,j,name_len,nxgrid_foreign,nygrid_foreign,il1,il2,im1,im2,lenx,leny,px,py,peer
 
       if (lforeign) then
 
         frgn_setup%root=ncpus
         frgn_setup%tag=tag_foreign
-        frgn_setup%t_last_recvd=t
+        frgn_setup%t_last_recvd=real(t)
 !print*, 'iproc, iproc_world, MPI_COMM_UNIVERSE, MPI_COMM_WORLD=', iproc, &
 !        iproc_world, MPI_COMM_UNIVERSE, MPI_COMM_WORLD
         if (lroot) then
@@ -11694,7 +11825,7 @@ goto 125!!!
 
       integer :: rank
 
-      call MPI_COMM_SPLIT(MPI_COMM_PENCIL, lwrite_slice_r, iproc, MPI_COMM_RSLICE, mpierr)
+      call MPI_COMM_SPLIT(MPI_COMM_PENCIL, merge(1,0,lwrite_slice_r), iproc, MPI_COMM_RSLICE, mpierr)
       call MPI_COMM_RANK(MPI_COMM_RSLICE,rank,mpierr)
       if (rank==0) root_rslice=iproc
 

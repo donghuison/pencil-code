@@ -132,7 +132,7 @@ module Pscalar
 !
       use SharedVariables, only: put_shared_variable
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
 !
 !  Re-initialize scalar
 !
@@ -166,7 +166,7 @@ module Pscalar
       use Initcond
       use InitialCondition, only: initial_condition_lncc
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       real :: der, prof
 !
       select case (initlncc)
@@ -312,7 +312,7 @@ module Pscalar
 !
       use Sub
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       type (pencil_case) :: p
 !
       intent(in) :: f
@@ -349,8 +349,8 @@ module Pscalar
       use Special, only: special_calc_pscalar
       use Sub
 !
-      real, dimension (mx,my,mz,mfarray) :: f
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous,dimension(:,:,:,:) :: f
+      real, contiguous,dimension(:,:,:,:) :: df
       type (pencil_case) :: p
 !
       real, dimension (nx) :: tmp                        
@@ -564,7 +564,7 @@ module Pscalar
 !
       use Slices_methods, only: assign_slices_scal,process_slices,exp2d
 
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       type (slice_data) :: slices
 
       character(LEN=fmtlen) :: sname
@@ -590,7 +590,7 @@ module Pscalar
 !
 !  Dummy.
 !
-      real, dimension (mx,my,mz,mfarray), intent(IN) :: f
+      real, contiguous,dimension(:,:,:,:), intent(IN) :: f
 !
       call keep_compiler_quiet(f)
 !
@@ -636,7 +636,7 @@ module Pscalar
 !
       use Sub
 !
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous,dimension(:,:,:,:) :: df
       type (pencil_case) :: p
       real :: tensor_pscalar_diff
 !
@@ -671,11 +671,19 @@ module Pscalar
 
     use Syscalls, only: copy_addr
 
-    integer, parameter :: n_pars=0
+    integer, parameter :: n_pars=100
     integer(KIND=ikind8), dimension(n_pars) :: p_par
 
-    !call copy_addr(pscalar_diff,p_par(1))
 
+    call copy_addr(nopscalar,p_par(1)) ! bool
+    call copy_addr(lupw_lncc,p_par(2)) ! bool
+    call copy_addr(ldustdrift,p_par(3)) ! bool
+    call copy_addr(pscalar_diff,p_par(4))
+    call copy_addr(tensor_pscalar_diff,p_par(5))
+    call copy_addr(pscalar_diff_shock,p_par(6))
+    call copy_addr(gradc0,p_par(7)) ! real3
+    call copy_addr(bunit,p_par(8)) ! (nx) (ny) (nz) (3)
+    call copy_addr(hhh,p_par(9)) ! (nx) (ny) (nz) (3)
     endsubroutine pushpars2c
 !***********************************************************************
 endmodule Pscalar

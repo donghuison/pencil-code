@@ -39,7 +39,6 @@ module NeutralVelocity
   real :: nun=0.,csn0=0.,csn20,nun_hyper3=0.
   real :: rnoise_int=impossible,rnoise_ext=impossible
   real :: uun_right=0., uun_left=0., widthuun=.1
-  real, dimension (nx,3,3) :: unij5
   character (len=labellen),dimension(ninit) :: iviscn=''
 !
   namelist /neutralvelocity_init_pars/ &
@@ -164,21 +163,14 @@ module NeutralVelocity
 !
       if (ladvection_velocity.and.lupw_uun) &
         call warning('initialize_neutralvelocity','upwinding advection term not well tested')
-
-      select case (borderuun)
-      case ('zero','0','constant')
 !
 !  Tell the BorderProfiles module if we intend to use border driving, so
 !  that the modules can request the right pencils.
 !
-        call request_border_driving(borderuun)
-      case ('initial-condition')
-        call fatal_error("initialize_neutralvelocity","borderuu = 'initial-condition': set mcount/ncount")
-      case ('nothing')
-        if (lroot.and.ip<=5) print*,"initialize_neutralvelocity: borderuu='nothing'"
-      case default
-        call fatal_error('initialize_neutralvelocity','no such borderuun: '//trim(borderuun))
-      endselect
+      if (borderuun=='initial-condition') &
+        call fatal_error("initialize_neutralvelocity","borderuun = 'initial-condition': set mcount/ncount")
+
+      call request_border_driving((/borderuun/),'initialize_neutralvelocity',iunx,iunz)
 !
 !  Turn off neutral viscosity if zero viscosity
 !
@@ -516,7 +508,7 @@ module NeutralVelocity
 !  Omega to the left), one should choose Omega=-90 for the equator,
 !  for example.
 !
-      if (Omega/=0.) then
+      if (lrotation) then
         if (theta==0) then
           if (lcoriolis_force) then
             if (headtt) print*,'duun_dt: add Coriolis force; Omega=',Omega
@@ -596,6 +588,7 @@ module NeutralVelocity
       if (lupdate_courant_dt.and.dimensionality>0) then
         advec2=advec2+p%advec_csn2
         maxadvec=maxadvec+p%advec_uun
+        !maxadvec=max(maxadvec,p%advec_uun)
       endif
 !
 !  Apply border profiles
@@ -773,9 +766,7 @@ module NeutralVelocity
           ju=j+iuun-1
           call border_driving(f,df,p,f_target(:,j),ju)
         enddo
-      case ('nothing')
       endselect
-!
 !
     endsubroutine set_border_neutralvelocity
 !***********************************************************************
@@ -1071,7 +1062,7 @@ module NeutralVelocity
     subroutine pushpars2c(p_par)
 
     use Syscalls, only: copy_addr
-    use General , only: string_to_enum
+    use General , only: string_to_enum,keep_compiler_quiet
 
     integer, parameter :: n_pars=20
     integer(KIND=ikind8), dimension(n_pars) :: p_par
@@ -1096,6 +1087,10 @@ module NeutralVelocity
     call copy_addr(enum_iviscn,p_par(16)) ! int (ninit)
     call string_to_enum(enum_borderuun,borderuun)
     call copy_addr(enum_borderuun,p_par(17)) ! int
+       
+    call keep_compiler_quiet(ampl_unx)
+    call keep_compiler_quiet(ampl_uny)
+    call keep_compiler_quiet(ampl_unz)
 
     endsubroutine pushpars2c
 !***********************************************************************

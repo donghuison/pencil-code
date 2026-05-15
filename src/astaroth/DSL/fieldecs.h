@@ -17,6 +17,7 @@ Field AC_xx_full__mod__chemistry[chemistry_field_sizes]
 Field AC_diff_full__mod__chemistry[chemistry_field_sizes]
 Field AC_diff_full_add__mod__chemistry[chemistry_field_sizes]
 
+
 #if LDUSTVELOCITY
 const int dust_velocity_size = ndustspec
 #else
@@ -41,6 +42,10 @@ field_order(AC_iuz__mod__cdata-1) Field UUZ
 #define F_UY UUY
 #define F_UZ UUZ
 
+field_order(AC_ivx__mod__cdata-1) Field VX
+field_order(AC_ivy__mod__cdata-1) Field VY
+field_order(AC_ivz__mod__cdata-1) Field VZ
+
 #if LHYDRO
 field_order(AC_itij__mod__hydro != 0 ? AC_itij__mod__hydro+0-1 : -1) Field F_TIJ_0
 field_order(AC_itij__mod__hydro != 0 ? AC_itij__mod__hydro+1-1 : -1) Field F_TIJ_1
@@ -48,6 +53,15 @@ field_order(AC_itij__mod__hydro != 0 ? AC_itij__mod__hydro+2-1 : -1) Field F_TIJ
 field_order(AC_itij__mod__hydro != 0 ? AC_itij__mod__hydro+3-1 : -1) Field F_TIJ_3
 field_order(AC_itij__mod__hydro != 0 ? AC_itij__mod__hydro+4-1 : -1) Field F_TIJ_4
 field_order(AC_itij__mod__hydro != 0 ? AC_itij__mod__hydro+5-1 : -1) Field F_TIJ_5
+#endif
+
+#if LVISCOSITY
+field_order(AC_isij__mod__viscosity != 0 ? AC_isij__mod__viscosity+0-1 : -1) Field F_SIJ_0
+field_order(AC_isij__mod__viscosity != 0 ? AC_isij__mod__viscosity+1-1 : -1) Field F_SIJ_1
+field_order(AC_isij__mod__viscosity != 0 ? AC_isij__mod__viscosity+2-1 : -1) Field F_SIJ_2
+field_order(AC_isij__mod__viscosity != 0 ? AC_isij__mod__viscosity+3-1 : -1) Field F_SIJ_3
+field_order(AC_isij__mod__viscosity != 0 ? AC_isij__mod__viscosity+4-1 : -1) Field F_SIJ_4
+field_order(AC_isij__mod__viscosity != 0 ? AC_isij__mod__viscosity+5-1 : -1) Field F_SIJ_5
 #endif
 
 field_order(AC_ilamra__mod__advective_gauge-1) Field F_LAMRA
@@ -204,7 +218,7 @@ field_order(AC_iyh__mod__cdata-1) Field F_YH
 #define LNTT F_TT
 #define F_LNTT F_TT
 Field F_GLOBAL_HCOND
-Field F_SS_RUN_AVER
+field_order(AC_iss_run_aver__mod__cdata-1) Field F_SS_RUN_AVER
 Field F_ADV_DERX
 Field F_ADV_DERY
 Field F_ADV_DERZ
@@ -234,6 +248,8 @@ const Field3 F_UVEC    = {F_UX,F_UY,F_UZ}
 const Field3 F_UU      = {F_UX,F_UY,F_UZ}
 #define F_UU F_UVEC
 #define UU F_UU
+//TP: if lconservative iux:iuz correspond to momenta say have this define to write easier to read code
+#define MOM UU  
 
 const Field3 F_UNVEC    = {F_UNX,F_UNY,F_UNZ}
 const Field3 F_UUN      = {F_UNX,F_UNY,F_UNZ}
@@ -262,7 +278,9 @@ field_order(AC_ixx_chiral__mod__chiral-1) Field F_XX_CHIRAL
 field_order(AC_iyy_chiral__mod__chiral-1) Field F_YY_CHIRAL
 field_order(AC_izz_chiral__mod__chiral-1) Field F_ZZ_CHIRAL
 
-Field F_SIGMA
+field_order(AC_isigma__mod__alphadisk-1) Field F_SIGMA
+field_order(AC_imdot__mod__alphadisk-1) Field F_MDOT
+field_order(AC_itmid__mod__alphadisk-1) Field F_TMID
 not_implemented(message)
 {
     print("NOT IMPLEMENTED: %s\n",message)
@@ -295,18 +313,6 @@ tini_sqrt_div_separate(real numerator, real a, real b)
 
 #define AC_NGHOST_VAL__mod__cparam NGHOST_VAL
 
-#define AC_mx AC_mlocal.x
-#define AC_my AC_mlocal.y
-#define AC_mz AC_mlocal.z
-
-#define AC_nx AC_nlocal.x
-#define AC_ny AC_nlocal.y
-#define AC_nz AC_nlocal.z
-
-#define AC_nxgrid AC_ngrid.x
-#define AC_nygrid AC_ngrid.y
-#define AC_nzgrid AC_ngrid.z
-
 #define AC_dsx AC_ds.x
 #define AC_dsy AC_ds.y
 #define AC_dsz AC_ds.z
@@ -321,8 +327,9 @@ const real tini = AC_REAL_MIN*5
 Field AC_cp_full__mod__chemistry
 Field AC_lambda_full__mod__chemistry
 Field AC_cv_full__mod__chemistry
-Field AC_tpq_re__mod__gravitational_waves_htxk[6]
-Field AC_tpq_im__mod__gravitational_waves_htxk[6]
+run_const AcPrecision AC_GW_Fourier_precision = AC_REAL_PRECISION
+precision(AC_GW_Fourier_precision) Field AC_tpq_re__mod__gravitational_waves_htxk[6]
+precision(AC_GW_Fourier_precision) Field AC_tpq_im__mod__gravitational_waves_htxk[6]
 Field AC_nonlinear_tpq_re__mod__gravitational_waves_htxk[6]
 Field AC_nonlinear_tpq_im__mod__gravitational_waves_htxk[6]
 
@@ -353,15 +360,11 @@ Field3 BETA_AA
 Field  BETA_RHO
 Field  BETA_SS
 
-Field3 ERROR_UU
-Field3 ERROR_AA
-Field  ERROR_RHO
-Field  ERROR_SS
-
-single_precision Field3 SG_ERROR_UU
-single_precision Field3 SG_ERROR_AA
-single_precision Field  SG_ERROR_RHO
-single_precision Field  SG_ERROR_SS
+run_const AcPrecision AC_error_buffer_precision = AC_REAL_PRECISION
+precision(AC_error_buffer_precision) Field3 ERROR_UU
+precision(AC_error_buffer_precision) Field3 ERROR_AA
+precision(AC_error_buffer_precision) Field  ERROR_RHO
+precision(AC_error_buffer_precision) Field  ERROR_SS
 
 Field SPLIT_DIFFUSION_UPDATE_BUFFER_REAL
 Field SPLIT_DIFFUSION_UPDATE_BUFFER_IMAG
@@ -373,4 +376,7 @@ Field AY_FOURIER_REAL
 Field AY_FOURIER_IMAG
 Field AZ_FOURIER_REAL
 Field AZ_FOURIER_IMAG
+
+Field AC_mu1_full__mod__equationofstate
+
 #include "../stdlib/map.h"

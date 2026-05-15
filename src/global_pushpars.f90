@@ -1,6 +1,6 @@
 module Global_pushpars
+
   use Cdata
-  use Cparam
 
 contains
 !***********************************************************************
@@ -46,10 +46,10 @@ contains
     call copy_addr(ldt_paronly,p_par(24)) ! bool
     call copy_addr(ldt,p_par(25)) ! bool
     call copy_addr(dt,p_par(26))
-    call copy_addr(cdt,p_par(27))
+    call copy_addr(cdt,p_par(27)) ! real dconst
     call copy_addr(cdtc,p_par(28))
     call copy_addr(cdt_poly,p_par(29))
-    call copy_addr(cdtv,p_par(30))
+    call copy_addr(cdtv,p_par(30)) ! real dconst
     call copy_addr(cdtv2,p_par(31))
     call copy_addr(cdtv3,p_par(32))
     call copy_addr(cdtsrc,p_par(33))
@@ -60,7 +60,7 @@ contains
     call copy_addr(lmaximal_cdtv,p_par(41)) ! bool
     call copy_addr(lmaximal_cdt,p_par(42)) ! bool
     call copy_addr(llsode,p_par(43)) ! bool
-    call copy_addr(omega,p_par(44))
+    call copy_addr(Omega,p_par(44)) ! real dconst
     call copy_addr(theta,p_par(45))
     call copy_addr(sshear,p_par(46))
     call copy_addr(ldensity_nolog,p_par(47)) ! bool
@@ -120,7 +120,7 @@ contains
     call copy_addr(iglobal_by_ext,p_par(101)) ! int
     call copy_addr(iglobal_bz_ext,p_par(102)) ! int
     call copy_addr(iglobal_lnrho0,p_par(103)) ! int
-    call copy_addr(headtt,p_par(106)) ! bool
+    call copy_addr(headtt,p_par(106)) ! bool dconst
     call copy_addr(ldiagnos,p_par(107)) ! bool
     call copy_addr(l2davgfirst,p_par(108)) ! bool
     call copy_addr(l1davgfirst,p_par(109)) ! bool
@@ -301,7 +301,7 @@ contains
     call copy_addr(ip,p_par(1223)) ! int
     call copy_addr_dble(m_h,p_par(1224))
     call copy_addr_dble(sigmah_,p_par(1225))
-    call copy_addr(it,p_par(1227)) ! int
+    call copy_addr(it,p_par(1227)) ! int dconst
     call copy_addr(nconformal,p_par(1228))
     call copy_addr(ifcr,p_par(1233)) ! int
     call copy_addr(iecr,p_par(1234)) ! int
@@ -446,10 +446,10 @@ contains
     call copy_addr(iby,p_par(1396)) ! int
     call copy_addr(ibb,p_par(1397)) ! int
     do j = 1,mvar
-        if(bcz12(j,TOP) == 'pot') luses_aa_pot2_top = .true.
-        if(bcz12(j,BOT) == 'pot') luses_aa_pot2_bot = .true.
-        if(bcz12(j,TOP) == 'pwd') luses_aa_pwd_top = .true.
-        if(bcz12(j,BOT) == 'pwd') luses_aa_pwd_bot = .true.
+      if (bcz12(j,TOP) == 'pot') luses_aa_pot2_top = .true.
+      if (bcz12(j,BOT) == 'pot') luses_aa_pot2_bot = .true.
+      if (bcz12(j,TOP) == 'pwd') luses_aa_pwd_top = .true.
+      if (bcz12(j,BOT) == 'pwd') luses_aa_pwd_bot = .true.
     enddo
     call copy_addr(luses_aa_pot2_top,p_par(1398)) ! bool
     call copy_addr(luses_aa_pot2_bot,p_par(1399)) ! bool
@@ -464,6 +464,16 @@ contains
     call copy_addr(llast_proc_x,p_par(1408)) ! bool dconst
     call copy_addr(ijbt,p_par(1409)) ! int
     call copy_addr(ij2t,p_par(1410)) ! int
+    call copy_addr(icp,p_par(1411)) ! int
+    call copy_addr(irr,p_par(1412)) ! int
+    call copy_addr(wav1,p_par(1413))
+    !call copy_addr(necessary,p_par(1414))  ! bool (ny*nz)
+    call copy_addr(imn,p_par(1415))  ! int
+    call copy_addr(lrotation,p_par(1416)) ! bool
+    call copy_addr(ivx,p_par(1417)) ! int
+    call copy_addr(ivy,p_par(1418)) ! int
+    call copy_addr(ivz,p_par(1419)) ! int
+    call copy_addr(tau_aver1,p_par(1420)) 
 
   endsubroutine pushpars2c
 !***********************************************************************

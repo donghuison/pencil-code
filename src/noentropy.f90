@@ -31,6 +31,7 @@ module Energy
   logical, pointer :: lpressuregradient_gas
   logical :: lviscosity_heat=.false.
   logical, pointer :: lffree, lrelativistic_eos, lconservative
+  logical, pointer :: lconservative_pressure_on_rhs
   real, pointer :: profx_ffree(:),profy_ffree(:),profz_ffree(:)
 !
   integer :: idiag_dtc=0        ! DIAG_DOC: $\delta t/[c_{\delta t}\,\delta_x
@@ -79,7 +80,7 @@ module Energy
       use EquationOfState, only: cs0, select_eos_variable, get_gamma_etc
       use SharedVariables, only: get_shared_variable
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
 !
       real :: cp
 !
@@ -140,6 +141,7 @@ module Energy
 !
       if (lhydro.and..not.lhydro_potential.and.iphiuu==0) then
         call get_shared_variable('lconservative', lconservative)
+        call get_shared_variable('lconservative_pressure_on_rhs', lconservative_pressure_on_rhs)
       else
         allocate(lconservative)
         lconservative=.false.
@@ -159,7 +161,7 @@ module Energy
 !
       use EquationOfState, only: cs20
 !
-      real, dimension(mx,my,mz,mfarray), intent(INOUT) :: f
+      real, contiguous,dimension(:,:,:,:), intent(INOUT) :: f
 !
       if (lslope_limit_diff) f(2:mx-2,2:my-2,2:mz-2,iFF_char_c) &
                              = max(f(2:mx-2,2:my-2,2:mz-2,iFF_char_c), w_sldchar_ene*sqrt(cs20))
@@ -170,7 +172,7 @@ module Energy
 !
 !  Initialise energy; called from start.f90.
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
 !
       call keep_compiler_quiet(f)
 !
@@ -182,7 +184,8 @@ module Energy
 !
 !  20-11-04/anders: coded
 !
-      if (lhydro.and.lpressuregradient_gas.and..not.lconservative) lpenc_requested(i_fpres)=.true.
+      if (lhydro.and.lpressuregradient_gas.and..not.(lconservative.and. .not. lconservative_pressure_on_rhs))& 
+              lpenc_requested(i_fpres)=.true.
       if (leos.and.ldensity.and.lhydro.and.ldt) lpenc_requested(i_cs2)=.true.
       if (any(beta_glnrho_scaled /= 0.)) lpenc_requested(i_cs2)=.true.
 !
@@ -252,7 +255,7 @@ module Energy
 !
 !  20-nov-04/anders: coded
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       type (pencil_case) :: p
 !
       integer :: j
@@ -279,6 +282,8 @@ module Energy
               if (ldensity.and.lrelativistic_eos) then
                 !if (.not.lconservative) p%fpres(:,j)=-.75*p%cs2*p%glnrho(:,j)
                 if (.not.lconservative) p%fpres(:,j)=-p%cs2/(1 + p%cs2)*p%glnrho(:,j)
+              else if(lconservative) then
+                p%fpres(:,j)=-p%cs2*p%grho(:,j)
               else
                 p%fpres(:,j)=-p%cs2*p%glnrho(:,j)
               endif
@@ -320,7 +325,7 @@ module Energy
 !
       use EquationOfState, only: cs0
 !
-      real, dimension (mx,my,mz,mfarray), intent(INOUT) :: f
+      real, contiguous,dimension(:,:,:,:), intent(INOUT) :: f
 !
 !    Slope limited diffusion: update characteristic speed
 !    Not staggered yet
@@ -340,7 +345,7 @@ module Energy
 !
 !  Dummy routine.
 !
-      real, dimension (mx,my,mz,mfarray), intent(IN) :: f
+      real, contiguous,dimension(:,:,:,:), intent(IN) :: f
 !
       call keep_compiler_quiet(f)
 
@@ -351,8 +356,8 @@ module Energy
 !  Calculate pressure gradient term for isothermal/polytropic equation
 !  of state.
 !
-      real, dimension (mx,my,mz,mfarray) :: f
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous,dimension(:,:,:,:) :: f
+      real, contiguous,dimension(:,:,:,:) :: df
       type (pencil_case) :: p
 !
       integer :: j
@@ -362,7 +367,7 @@ module Energy
 !
 !  Add isothermal/polytropic pressure term in momentum equation.
 !
-      if (lhydro.and.lpressuregradient_gas.and..not.lconservative &
+      if (lhydro.and.lpressuregradient_gas.and..not.(lconservative .and. .not. lconservative_pressure_on_rhs) &
           .and.(.not.lhydro_potential)) then
 
         df(l1:l2,m,n,iux:iuz)=df(l1:l2,m,n,iux:iuz)+p%fpres
@@ -391,7 +396,7 @@ module Energy
       
       use Diagnostics
 
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       type(pencil_case) :: p
 
       real, dimension(nx) :: ufpres
@@ -424,7 +429,7 @@ module Energy
 !***********************************************************************
     subroutine get_slices_energy(f,slices)
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       type (slice_data) :: slices
 !
       call keep_compiler_quiet(f)
@@ -436,7 +441,7 @@ module Energy
 !
 !  18-feb-10/anders: dummy
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
 !
       call keep_compiler_quiet(f)
 !
@@ -446,7 +451,7 @@ module Energy
 !
 !  Dummy subroutine
 !
-      real, dimension(mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
 !
       call keep_compiler_quiet(f)
 !
@@ -528,8 +533,8 @@ module Energy
 !***********************************************************************
     subroutine energy_after_timestep(f,df,dtsub)
 !
-      real, dimension(mx,my,mz,mfarray) :: f
-      real, dimension(mx,my,mz,mvar) :: df
+      real, contiguous,dimension(:,:,:,:) :: f
+      real, contiguous,dimension(:,:,:,:) :: df
       real :: dtsub
 !
       call keep_compiler_quiet(f,df)
@@ -541,7 +546,7 @@ module Energy
 !
 !  Dummy subroutine
 !
-      real, dimension(mx,my,mz,mfarray), intent(inout) :: f
+      real, contiguous,dimension(:,:,:,:), intent(inout) :: f
 !
       call keep_compiler_quiet(f)
 !
@@ -602,7 +607,6 @@ module Energy
     integer, parameter :: n_pars=2
     integer(KIND=ikind8), dimension(n_pars) :: p_par
 
-      call keep_compiler_quiet(p_par)
       call copy_addr(lviscosity_heat,p_par(1)) ! bool
       call copy_addr(w_sldchar_ene,p_par(2))
 

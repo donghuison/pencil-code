@@ -36,6 +36,7 @@ module Special
 ! input parameters
 !
   real, dimension (ninit) :: amplee=0.0 !, kx_aa=1.0, ky_aa=1.0, kz_aa=1.0
+  real, dimension (nx) :: etaSchw, diffus_etaSchw=0.
   real :: alpf=0., alpfpsi=0.
   real :: ampl_ex=0.0, ampl_ey=0.0, ampl_ez=0.0, ampl_a0=0.0
   real :: kx_ex=0.0, kx_ey=0.0, kx_ez=0.0
@@ -56,6 +57,8 @@ module Special
   logical :: luse_scale_factor_in_sigma=.false., lapply_Gamma_corr=.true.
   logical, pointer :: lohm_evolve, lphi_doublet, lphi_hypercharge
   logical, pointer :: lwaterfall
+  logical, pointer :: lrelativistic_eos
+  logical, pointer :: lsigE_const
   real, pointer :: eta, Hscript, echarge, sigEm_all, sigBm_all
   integer :: iGamma=0, ia0=0, idiva_name=0, ieedot=0, iedotx=0, iedoty=0, iedotz=0
   integer :: idivE=0, isigE=0, isigB=0
@@ -65,6 +68,9 @@ module Special
   logical :: lvectorpotential=.false.
   logical :: lphi_hom=.false., lphi_linear_regime=.false.   !AB: these variables should have been defined in backreaction.
   logical :: lpsi_hom=.false.
+  logical :: ladvance_ee=.true.         !PAR_DOC: can turn off time advance of E.
+  logical :: lohmic_heating_ee=.true.   !PAR_DOC: positive definite part of heating with $J^2/sigE$.
+  logical :: lohmic_heating_justee=.false. !PAR_DOC: positive definite heating with just $E^2*sigE$.
   logical :: lno_noise_ee=.false., lnoncollinear_EB=.false., lnoncollinear_EB_aver=.false.
   logical :: lcollinear_EB=.false., lcollinear_EB_aver=.false.
   logical :: leedot_as_aux=.false., lcurlyA=.true., lsolve_chargedensity=.false.
@@ -97,21 +103,29 @@ module Special
     ldensity_add_je_heating, llorentzforce_ee
 !
   ! run parameters
-  real :: beta_inflation=0., rescale_ee=1., vA_limit=0.
+  real :: beta_inflation=0., rescale_ee=1., vA_limit=0., eta_given=impossible
+  real :: cdt_sigE=1.   !PAR_DOC: time step constraint from 1/sigE
+  real :: sigEmax=impossible       !PAR_DOC: time step constraint from 1/sigE
+  real :: sigE_ceiling=impossible  !PAR_DOC: ceiling
+  real :: sigE_const_value=impossible  !PAR_DOC: constant value if set
   logical :: reinitialize_ee=.false.
+  logical :: lresistive_gauge_ee=.false. !possibility of resistive gauge when ladvance_ee=F.
+  logical :: ldt_disp_current=.true.  !PAR_DOC: invoke timestep constraint from sigE
   character (len=labellen) :: aderiv_scaling='table'
 !
   namelist /special_run_pars/ &
     alpf, llongitudinalE, llorenz_gauge_disp, lphi_hom, lphi_linear_regime, &
     leedot_as_aux, ldivE_as_aux, lsigE_as_aux, lsigB_as_aux, &
-    eta_ee, lcurlyA, beta_inflation, &
+    eta_ee, lcurlyA, beta_inflation, sigEmax, sigE_ceiling, &
     weight_longitudinalE, lswitch_off_divJ, lswitch_off_Gamma, &
     lnoncollinear_EB, lnoncollinear_EB_aver, luse_scale_factor_in_sigma, &
     lcollinear_EB, lcollinear_EB_aver, sigE_prefactor, sigB_prefactor, &
     reinitialize_ee, initee, rescale_ee, lmass_suppression, mass_chi, &
     lallow_bprime_zero, lapply_Gamma_corr, coupl_gy, lpsi_hom, alpfpsi, &
     loverride_c_light, ldensity_add_je_heating, je_heating_factor, &
-    llorentzforce_ee, aderiv_scaling, vA_limit
+    lresistive_gauge_ee, llorentzforce_ee, aderiv_scaling, vA_limit, &
+    lohmic_heating_ee, lohmic_heating_justee, sigE_const_value, &
+    ladvance_ee, eta_given, ldt_disp_current, cdt_sigE
 !
 ! Declare any index variables necessary for main or
 !
@@ -146,6 +160,9 @@ module Special
   integer :: idiag_exm=0        ! DIAG_DOC: $\left<E_x\right>$
   integer :: idiag_eym=0        ! DIAG_DOC: $\left<E_y\right>$
   integer :: idiag_ezm=0        ! DIAG_DOC: $\left<E_z\right>$
+  integer :: idiag_etaSchw=0    ! DIAG_DOC: $1/\left<\sigma_\mathrm{E}\right>$
+  integer :: idiag_dteta=0      ! DIAG_DOC: $dt/cdtv$
+  integer :: idiag_dtsigE=0     ! DIAG_DOC: $dt/cdt\_sigE$
   integer :: idiag_sigEm=0      ! DIAG_DOC: $\left<\sigma_\mathrm{E}\right>$
   integer :: idiag_sigBm=0      ! DIAG_DOC: $\left<\sigma_\mathrm{B}\right>$
   integer :: idiag_sigErms=0    ! DIAG_DOC: $\left<\sigma_\mathrm{E}^2\right>^{1/2}$
@@ -153,7 +170,11 @@ module Special
   integer :: idiag_sigEE2m=0    ! DIAG_DOC: $\left<\sigma_\mathrm{E}\Ev^2\right>$
   integer :: idiag_sigBBEm=0    ! DIAG_DOC: $\left<\sigma_\mathrm{E}\Bv\cdot\Ev\right>$
   integer :: idiag_adphiBm=0    ! DIAG_DOC: $\left<(\alpha/f)<\phi'\Bv\cdot\Ev\right>$
+  integer :: idiag_adphiBrms=0  ! DIAG_DOC: $\left<[(\alpha/f)<\phi'\Bv]\right>^{1/2}$
   integer :: idiag_Johmrms=0    ! DIAG_DOC: $\left<\Jv^2\right>^{1/2}$
+  integer :: idiag_J2sigEm=0    ! DIAG_DOC: $\left<\Jv^2/\sigma_E\right>$
+  integer :: idiag_ujxb1m=0     ! DIAG_DOC: $\left<\uv\cdot(\Jv\times\Bv)_E\right>$
+  integer :: idiag_curlBrms=0   ! DIAG_DOC: $\left<(\mathrm{curl}\Bv)^2\right>^{1/2}$
   integer :: idiag_echarge=0    ! DIAG_DOC: $\left<e_\mathrm{eff}\right>$
   integer :: idiag_ebm=0        ! DIAG_DOC: $\left<\Ev\cdot\Bv\right>$
 !
@@ -181,7 +202,10 @@ module Special
       use FArrayManager
       use Sub, only: register_report_aux
       use SharedVariables, only: put_shared_variable
-
+!
+!  This switch is used to indicate in magnetic.f90 that the displacement
+!  current module is used.
+!
       ldisp_current =.true.
 !
 !  It would have been more consistent to call the indices to the
@@ -221,6 +245,8 @@ module Special
       call put_shared_variable('alpfpsi',alpfpsi)
       call put_shared_variable('lphi_hom',lphi_hom)
       call put_shared_variable('lpsi_hom',lpsi_hom)
+      call put_shared_variable('sigE_ceiling',sigE_ceiling)
+      call put_shared_variable('sigE_const_value',sigE_const_value)
       call put_shared_variable('lphi_linear_regime',lphi_linear_regime)
       call put_shared_variable('sigE_prefactor',sigE_prefactor)
       call put_shared_variable('sigB_prefactor',sigB_prefactor)
@@ -230,6 +256,7 @@ module Special
       call put_shared_variable('lnoncollinear_EB_aver',lnoncollinear_EB_aver)
       call put_shared_variable('lmass_suppression',lmass_suppression)
       call put_shared_variable('lallow_bprime_zero',lallow_bprime_zero)
+      call put_shared_variable('ladvance_ee',ladvance_ee)
       call put_shared_variable('mass_chi',mass_chi)
       call put_shared_variable('llongitudinalE',llongitudinalE)
       call put_shared_variable('coupl_gy',coupl_gy)
@@ -270,6 +297,7 @@ module Special
       if (luse_scale_factor_in_sigma) then
         call get_shared_variable('Hscript', Hscript ,caller='initialize_special')
         call get_shared_variable('echarge', echarge)
+        call get_shared_variable('lsigE_const', lsigE_const)
         call get_shared_variable('sigEm_all', sigEm_all)
         call get_shared_variable('sigBm_all', sigBm_all)
         call get_shared_variable('lohm_evolve', lohm_evolve)
@@ -279,8 +307,9 @@ module Special
         echarge=0.
         sigEm_all=0.
         sigBm_all=0.
-        allocate(lohm_evolve)
+        allocate(lohm_evolve,lsigE_const)
         lohm_evolve=.false.
+        lsigE_const=.false.
       endif
 !
 !  Reinitialize magnetic field using a small selection of perturbations
@@ -311,6 +340,15 @@ module Special
       endif
 !
       if (lphi_hom) weight_longitudinalE=0.
+!
+!  To know whether we are solving the relativistic eos equations we need to get lrelativistic_eos from density.
+!
+      if (ldensity) then
+        call get_shared_variable('lrelativistic_eos',lrelativistic_eos, caller='initialize_backreact_infl')
+      else
+        allocate(lrelativistic_eos)
+        lrelativistic_eos=.false.
+      endif
 !
       call keep_compiler_quiet(f)
 !
@@ -544,6 +582,7 @@ module Special
       real, dimension (mx,my,mz,mfarray) :: f
       type (pencil_case) :: p
 !
+      real, dimension (nx,3) :: tmpv
       real, dimension (nx) :: tmp, mass_suppression_fact
       integer :: i,j,k
 !
@@ -609,7 +648,6 @@ module Special
 !
       if (lnoncollinear_EB .or. lnoncollinear_EB_aver .or. lcollinear_EB .or. lcollinear_EB_aver) then
         if (lnoncollinear_EB) then
-
           p%boost=sqrt((p%e2-p%b2)**2+4.*p%eb**2)
           p%gam_EB=sqrt21*sqrt(1.+(p%e2+p%b2)/p%boost)
           p%eprime=sqrt21*sqrt(p%e2-p%b2+p%boost)
@@ -669,29 +707,73 @@ module Special
           p%sigB=sigBm_all
         endif
 !
+!  Impose a ceiling unless sigE_ceiling is impossible.
+!
+        if (sigE_ceiling/=impossible) p%sigE=min(p%sigE,sigE_ceiling)
+!
+!  Put p%sigE=sigE_const_value when lsigE_const=T.
+!
+        if (lsigE_const) then
+          if (sigE_const_value==impossible) &
+            call fatal_error('calc_pencils_special','sigE_const_value must not be impossible')
+          p%sigE=sigE_const_value
+          p%sigB=0.
+        endif
+!
 !  Now compute current, using any of the 4 expressions above.
 !  This also sets the auxiliary array (l1:l2,m,n,ijx:ijz), if needed.
 !
         if (lohm_evolve) then
           p%jj_ohm=f(l1:l2,m,n,ijx:ijz)
         else
-          do j=1,3
-            if (lhydro) then
-              !p%jj_ohm(:,j)=p%jj_ohm(:,j)+p%sigE*(p%el(:,j)+p%uxb(:,j))+p%sigB*p%bb(:,j)
-              p%jj_ohm(:,j)=p%sigE*(p%el(:,j)+p%uxb(:,j))+p%sigB*p%bb(:,j)
-            else
-              !p%jj_ohm(:,j)=p%jj_ohm(:,j)+p%sigE*p%el(:,j)+p%sigB*p%bb(:,j)
-              p%jj_ohm(:,j)=p%sigE*p%el(:,j)+p%sigB*p%bb(:,j)
-            endif
-
-          enddo
+          if (ladvance_ee) then
+            do j=1,3
+              if (lhydro) then
+                p%jj_ohm(:,j)=p%sigE*(p%el(:,j)+p%uxb(:,j))+p%sigB*p%bb(:,j)
+              else
+                p%jj_ohm(:,j)=p%sigE*p%el(:,j)+p%sigB*p%bb(:,j)
+              endif
+            enddo
+          else
+!
+!  0 = curlB - mu0*J, but ignore mu0 for now.
+!
+            p%jj_ohm=p%curlb
+          endif
 !
 !  This would overwrite f(l1:l2,m,n,ijx:ijz)
 !
           if (ijx/=0) f(l1:l2,m,n,ijx:ijz) = p%jj_ohm
+!
+!  Compute magnetic diffusivity from 1/sigE, unless given.
+!
+          if (eta_given==impossible) then
+            etaSchw=1./p%sigE
+          else
+            etaSchw=eta_given
+          endif
+!
+!  If no time advance of E, we add here the expression without dispacement
+!  current based on Ohm's law, i.e., E = -uxb + J/sigE.
+!  For numerical reasons, we may want to use lresistive_gauge_ee=T (not the default).
+!  In that case, terms such as Ax,xx, Ay,yy, and Az,zz are present.
+!
+          if (.not. ladvance_ee) then
+            if (lnoncollinear_EB .or. lnoncollinear_EB_aver) then
+              call fatal_error('calc_pencils_special','MHD works only for collinear case')
+            else
+              if (lresistive_gauge_ee) then
+                call multsv_mn(-etaSchw,p%del2a,tmpv)
+              else
+                call multsv_mn(etaSchw,p%jj_ohm,tmpv)
+              endif
+              f(l1:l2,m,n,iex:iez)=-p%uxb+tmpv
+            endif
+          endif
         endif
 !
-!XXX  CALL HERE ...
+!  endif from "lnoncollinear_EB, lnoncollinear_EB_aver, lcollinear_EB, lcollinear_EB_aver"
+!
       endif
 !
 !  The line "p%jj=p%jj_ohm", if outside llorentzforce_ee, breaks the samples/Schwinger sample.
@@ -703,7 +785,7 @@ module Special
       endif
 !
 ! edot2
-! XX AB: to be deleted
+! AB: leedot_as_aux is not used; is to be deleted
 !
       if (leedot_as_aux) then
         call dot2_mn(f(l1:l2,m,n,iedotx:iedotz),p%edot2)
@@ -770,6 +852,17 @@ module Special
         endif
       endif
       if (alpf/=0.and..not.lklein_gordon) p%dphi=p%infl_dphi
+!
+!  Total contribution to the timestep
+!
+      if (lfirst.and.ldt.and.ldt_disp_current) then
+        if (ladvance_ee) then
+          dt1_max=max(dt1_max,p%sigE/cdt_sigE)
+        else
+          diffus_etaSchw=etaSchw*dxyz_2
+          maxdiffus=max(maxdiffus,diffus_etaSchw)
+        endif
+      endif
 !
     endsubroutine calc_pencils_special
 !***********************************************************************
@@ -890,8 +983,8 @@ module Special
       real, dimension (mx,my,mz,mvar) :: df
       type (pencil_case) :: p
 !
-      real, dimension (nx,3) :: gtmp, dJdt, del2JJ
-      real, dimension (nx) :: tmp, tmp2, del2a0, constrainteqn, constrainteqn1
+      real, dimension (nx,3) :: gtmp, dJdt
+      real, dimension (nx) :: tmp, tmp2, del2a0
       real :: inflation_factor=0., mfpf=0., fppf=0.
       integer :: j
 !
@@ -937,9 +1030,13 @@ module Special
 
         df(l1:l2,m,n,iax:iaz)=df(l1:l2,m,n,iax:iaz)-p%el
 !
-!  Solve: dE/dt = curlB - ...
+!  Solve: dE/dt = curlB - mu*J
 !
-        df(l1:l2,m,n,iex:iez)=df(l1:l2,m,n,iex:iez)+c_light2*(p%curlb-mu0*p%jj_ohm)
+        if (ladvance_ee) then
+          df(l1:l2,m,n,iex:iez)=df(l1:l2,m,n,iex:iez)+c_light2*(p%curlb-mu0*p%jj_ohm)
+        else
+          df(l1:l2,m,n,iex:iez)=0.
+        endif
 !
 !  Solve for charge density
 !
@@ -991,31 +1088,33 @@ module Special
 !  Use the combined routine multsv_add if both terms are included.
 !  Added possibility of limiter on generating term (dphi*B + gphi x E).
 !
-        if (alpf/=0.) then
-          call calc_helical_term(p,gtmp,p%dphi,p%gphi,lphi_hom)
-          if (ldensity .and. vA_limit>0) then
-            tmp=1./(1.+p%b2*p%rho1/vA_limit**2)
-            call multsv_mn(tmp,gtmp,gtmp)
-          endif
-          df(l1:l2,m,n,iex:iez)=df(l1:l2,m,n,iex:iez)-alpf*gtmp
+        if (ladvance_ee) then
+          if (alpf/=0.) then
+            call calc_helical_term(p,gtmp,p%dphi,p%gphi,lphi_hom)
+            if (ldensity .and. vA_limit>0) then
+              tmp=1./(1.+p%b2*p%rho1/vA_limit**2)
+              call multsv_mn(tmp,gtmp,gtmp)
+            endif
+            df(l1:l2,m,n,iex:iez)=df(l1:l2,m,n,iex:iez)-alpf*gtmp
 !
-          if (llorenz_gauge_disp) then
-            ! if (lphi_hom) then
-            !   df(l1:l2,m,n,idiva_name)=df(l1:l2,m,n,idiva_name)+del2a0
-            ! else
-            if (.not. lphi_hom) then
-              call dot_mn(p%gphi,p%bb,tmp)
-              df(l1:l2,m,n,idiva_name)=df(l1:l2,m,n,idiva_name)+alpf*tmp
+            if (llorenz_gauge_disp) then
+              ! if (lphi_hom) then
+              !   df(l1:l2,m,n,idiva_name)=df(l1:l2,m,n,idiva_name)+del2a0
+              ! else
+              if (.not. lphi_hom) then
+                call dot_mn(p%gphi,p%bb,tmp)
+                df(l1:l2,m,n,idiva_name)=df(l1:l2,m,n,idiva_name)+alpf*tmp
+              endif
             endif
           endif
-        endif
-        if (lwaterfall .and. alpfpsi/=0.) then
-          call calc_helical_term(p,gtmp,p%dpsi,p%gpsi,lpsi_hom)
-          df(l1:l2,m,n,iex:iez)=df(l1:l2,m,n,iex:iez)-alpfpsi*gtmp
-          if (llorenz_gauge_disp) then
-            if (.not. lpsi_hom) then
-              call dot_mn(p%gpsi,p%bb,tmp)
-              df(l1:l2,m,n,idiva_name)=df(l1:l2,m,n,idiva_name)+alpfpsi*tmp
+          if (lwaterfall .and. alpfpsi/=0.) then
+            call calc_helical_term(p,gtmp,p%dpsi,p%gpsi,lpsi_hom)
+            df(l1:l2,m,n,iex:iez)=df(l1:l2,m,n,iex:iez)-alpfpsi*gtmp
+            if (llorenz_gauge_disp) then
+              if (.not. lpsi_hom) then
+                call dot_mn(p%gpsi,p%bb,tmp)
+                df(l1:l2,m,n,idiva_name)=df(l1:l2,m,n,idiva_name)+alpfpsi*tmp
+              endif
             endif
           endif
         endif
@@ -1097,20 +1196,54 @@ module Special
       endif
 !
 !  If ldensity and ldensity_add_je_heating, then compute J.E and add it:
+!  J.E has 2 contribution: we have J=sigE*(E+uxB), so E=-uxB+J/sigE.
+!  We already have the Lorentz for displacement current available.
+!  At early times, sigE is so small that J^2/sigE diverges, so we
+!  therefore allow for the possibility of turning of this option
+!  and heat just with J.E. Another option is sigE*E^2. Default is 
+!  ladvance_ee=T, lohmic_heating_ee=T, lohmic_heating_justee=F.
+!
+!  Summary (ldensity_add_je_heating=T):
+!  ladvance_ee=T, lohmic_heating_ee=T, lohmic_heating_justee=T !E^2*sigE (early times)
+!  ladvance_ee=T, lohmic_heating_ee=T, lohmic_heating_justee=F !J^2/sigE (later times)
+!  ladvance_ee=T, lohmic_heating_ee=F                          !J.E (normally not used)
+!  ladvance_ee=F, lohmic_heating_ee=T                          !J^2/sigE (late times)
+!  ladvance_ee=F, lohmic_heating_ee=F                          !J.E (normally not used)
 !
       if (ldensity .and. ldensity_add_je_heating) then
-        if (ldisp_current) then
-          call dot(p%jj,p%el,tmp)
-          if (je_heating_factor/=1.) tmp=tmp*je_heating_factor
-          df(l1:l2,m,n,ilnrho)=df(l1:l2,m,n,ilnrho)+tmp*p%rho1
+        if (ladvance_ee) then
+          if (lohmic_heating_ee) then
+            if (lohmic_heating_justee) then
+              call dot2_mn(p%el,tmp)
+              tmp=tmp*p%sigE
+            else
+              call dot2_mn(p%jj,tmp)
+              tmp=tmp/p%sigE
+            endif
+          else
+            call dot(p%jj,p%el,tmp)
+          endif
         else
-          call fatal_error('daa_dt','J.E heating not programmed yet')
+          if (lohmic_heating_ee) then
+            call dot2_mn(p%jj,tmp)
+            tmp=tmp/p%sigE
+          else
+            call dot(p%jj,p%el,tmp)
+          endif
         endif
+        if (je_heating_factor/=1.) tmp=tmp*je_heating_factor
+        df(l1:l2,m,n,ilnrho)=df(l1:l2,m,n,ilnrho)+tmp*p%rho1
       endif
 !
 !  Add Lorentz force in displacement current module
 !
-      if (llorentzforce_ee) df(l1:l2,m,n,iux:iuz)=df(l1:l2,m,n,iux:iuz)+p%jxbr
+      if (llorentzforce_ee) then
+        if (lrelativistic_eos) then
+          df(l1:l2,m,n,iux:iuz)=df(l1:l2,m,n,iux:iuz)+.75*p%jxbr
+        else
+          df(l1:l2,m,n,iux:iuz)=df(l1:l2,m,n,iux:iuz)+p%jxbr
+        endif
+      endif
 !
 !  If requested, put divE, sigE, or sigB into f array as auxiliaries.
 !
@@ -1136,8 +1269,9 @@ module Special
       real, dimension(mx,my,mz,mfarray) :: f
       type(pencil_case) :: p
       real, dimension(nx) :: tmp,constrainteqn
-      real :: mfpf=0.,fppf=0.
       real, dimension(nx,3) :: gtmp
+
+      call keep_compiler_quiet(f)
 
       call save_name(get_mfpf(),idiag_mfpf)
       call save_name(get_fppf(),idiag_fppf)
@@ -1146,6 +1280,7 @@ module Special
       call sum_mn_name(p%el(:,1),idiag_exm)
       call sum_mn_name(p%el(:,2),idiag_eym)
       call sum_mn_name(p%el(:,3),idiag_ezm)
+      call sum_mn_name(etaSchw,idiag_etaSchw)
       call sum_mn_name(p%sigE,idiag_sigEm)
       call sum_mn_name(p%sigB,idiag_sigBm)
       call sum_mn_name(p%eb,idiag_ebm)
@@ -1153,15 +1288,34 @@ module Special
       if (idiag_sigBrms/=0) call sum_mn_name(p%sigB**2,idiag_sigBrms,lsqrt=.true.)
       if (idiag_sigEE2m/=0) call sum_mn_name(p%sigE*p%e2,idiag_sigEE2m)
       if (idiag_sigBBEm/=0) call sum_mn_name(p%sigB*p%eb,idiag_sigBBEm)
-      if (idiag_adphiBm/=0) then
+      if (idiag_adphiBm/=0 .or. idiag_adphiBrms/=0) then
         if (alpf/=0.) call calc_helical_term(p,gtmp,p%dphi,p%gphi,lphi_hom)
-        call dot(alpf*gtmp,p%el,tmp)
-        call sum_mn_name(tmp,idiag_adphiBm)
+        if (idiag_adphiBm/=0) then
+          call dot(alpf*gtmp,p%el,tmp)
+          call sum_mn_name(tmp,idiag_adphiBm)
+        endif
+        if (idiag_adphiBrms/=0) then
+          call dot2_mn(alpf*gtmp,tmp)
+          call sum_mn_name(tmp,idiag_adphiBrms,lsqrt=.true.)
+        endif
       endif
-      if (idiag_Johmrms/=0) then
+      if (idiag_Johmrms/=0 .or. idiag_J2sigEm/=0) then
         call dot2_mn(p%jj_ohm,tmp)
         call sum_mn_name(tmp,idiag_Johmrms,lsqrt=.true.)
+        call sum_mn_name(etaSchw*tmp,idiag_J2sigEm)
       endif
+      if (idiag_curlBrms/=0) then
+        call dot2_mn(p%curlb,tmp)
+        call sum_mn_name(tmp,idiag_curlBrms,lsqrt=.true.)
+      endif
+!
+!  Calculate <u.(jxb)>.
+!
+      if (idiag_ujxb1m/=0) then
+        call dot(p%uu,p%jxb,tmp)
+        call sum_mn_name(tmp,idiag_ujxb1m)
+      endif
+!
       call save_name(echarge,idiag_echarge)
       call sum_mn_name(p%e2,idiag_erms,lsqrt=.true.)
       call sum_mn_name(p%edot2,idiag_edotrms,lsqrt=.true.)
@@ -1185,6 +1339,13 @@ module Special
         call sum_mn_name(constrainteqn,idiag_constrainteqn)
       endif
 !
+!  Fractional timestep constraints.
+!
+      call max_mn_name(p%sigE/cdt_sigE,idiag_dtsigE,l_dt=.true.)
+      call max_mn_name(diffus_etaSchw/cdtv,idiag_dteta,l_dt=.true.)
+!
+!  Diagnostics.
+!
       call calc_1d_diagnostics_special(p)
 !
     endsubroutine calc_diagnostics_special
@@ -1199,9 +1360,6 @@ module Special
       use Diagnostics
 !
       type(pencil_case) :: p
-!
-      real, dimension(nx) :: fres2, tmp1, Rmmz, bdel2a, jdel2a
-      real, dimension(nx,3) :: tmp2
 !
 !  1d-averages. Happens at every it1d timesteps, NOT at every it1.
 !
@@ -1276,8 +1434,11 @@ module Special
         idiag_mfpf=0; idiag_fppf=0; idiag_afact=0
         idiag_rhoerms=0; idiag_divErms=0; idiag_divJrms=0
         idiag_rhoem=0; idiag_count_eb0=0; idiag_divEm=0; idiag_divJm=0; idiag_constrainteqn=0
-        idiag_ebm=0; idiag_sigEm=0; idiag_sigBm=0; idiag_sigErms=0; idiag_sigBrms=0
-        idiag_Johmrms=0; idiag_adphiBm=0; idiag_sigEE2m=0; idiag_sigBBEm=0
+        idiag_dteta=0; idiag_dtsigE=0; idiag_etaSchw=0
+        idiag_sigEm=0; idiag_sigBm=0; idiag_sigErms=0; idiag_sigBrms=0
+        idiag_ebm=0; idiag_Johmrms=0; idiag_J2sigEm=0; idiag_curlBrms=0
+        idiag_adphiBm=0; idiag_adphiBrms=0; idiag_ujxb1m=0
+        idiag_sigEE2m=0; idiag_sigBBEm=0
         idiag_eprimerms=0; idiag_bprimerms=0; idiag_jprimerms=0; idiag_gam_EBrms=0; 
         idiag_boostprms=0; idiag_echarge=0; idiag_e2mx=0; idiag_e2mz=0
         cformv=''
@@ -1309,6 +1470,9 @@ module Special
         call parse_name(iname,cname(iname),cform(iname),'divJm',idiag_divJm)
         call parse_name(iname,cname(iname),cform(iname),'rhoem',idiag_rhoem)
         call parse_name(iname,cname(iname),cform(iname),'count_eb0',idiag_count_eb0)
+        call parse_name(iname,cname(iname),cform(iname),'etaSchw',idiag_etaSchw)
+        call parse_name(iname,cname(iname),cform(iname),'dtsigE',idiag_dtsigE)
+        call parse_name(iname,cname(iname),cform(iname),'dteta',idiag_dteta)
         call parse_name(iname,cname(iname),cform(iname),'sigEm',idiag_sigEm)
         call parse_name(iname,cname(iname),cform(iname),'sigBm',idiag_sigBm)
         call parse_name(iname,cname(iname),cform(iname),'ebm',idiag_ebm)
@@ -1317,7 +1481,11 @@ module Special
         call parse_name(iname,cname(iname),cform(iname),'sigEE2m',idiag_sigEE2m)
         call parse_name(iname,cname(iname),cform(iname),'sigBBEm',idiag_sigBBEm)
         call parse_name(iname,cname(iname),cform(iname),'adphiBm',idiag_adphiBm)
+        call parse_name(iname,cname(iname),cform(iname),'ujxb1m',idiag_ujxb1m)
+        call parse_name(iname,cname(iname),cform(iname),'adphiBrms',idiag_adphiBrms)
         call parse_name(iname,cname(iname),cform(iname),'Johmrms',idiag_Johmrms)
+        call parse_name(iname,cname(iname),cform(iname),'J2sigEm',idiag_J2sigEm)
+        call parse_name(iname,cname(iname),cform(iname),'curlBrms',idiag_curlBrms)
         call parse_name(iname,cname(iname),cform(iname),'echarge',idiag_echarge)
         call parse_name(iname,cname(iname),cform(iname),'mfpf',idiag_mfpf)
         call parse_name(iname,cname(iname),cform(iname),'fppf',idiag_fppf)
@@ -1356,13 +1524,25 @@ module Special
 !***********************************************************************
     subroutine special_after_boundary(f)
 !
-!  Possibility to modify the f array after the boundaries are
-!  communicated.
+!  Possibility to modify the f array after the boundaries are communicated.
 !
 !  06-jul-06/tony: coded
 !
+      use Mpicomm, only: mpibcast_real
+!
       real, dimension (mx,my,mz,mfarray), intent(inout) :: f
-      real, dimension (nx) :: tmp
+      logical :: lmessage_sigE_quenching_activated=.true.
+!
+!  Possibility of limiting sigE by reducing the prefactor
+!
+      if (sigEmax/=impossible .and. lroot) then
+        sigE_prefactor=1./(1.+sigEm_all/sigEmax)
+        if (lmessage_sigE_quenching_activated .and. sigE_prefactor<1.) then
+          print*,'sigE quenching activated'
+          lmessage_sigE_quenching_activated=.false.
+        endif
+      endif
+      call mpibcast_real(sigE_prefactor)
 !
       call keep_compiler_quiet(f)
 !
@@ -1378,8 +1558,6 @@ module Special
 !
       real, dimension (mx,my,mz,mvar+maux) :: f
       type (slice_data) :: slices
-!
-      integer :: inamev
 !
 !  Loop over slices
 !
@@ -1399,8 +1577,6 @@ module Special
 
       use Gpu, only: update_on_gpu
 
-      real :: lgt1, lgt2, lgf1, lgf2, lgf, lgt_current
-      integer :: it_file
       real, save :: Hp_old=0.,appa_old=0.
       integer, save :: Hp_index_on_gpu=-1
       integer, save :: appa_index_on_gpu=-1
@@ -1468,7 +1644,7 @@ module Special
       call copy_addr(lmass_suppression,p_par(25)) ! bool
       call copy_addr(beta_inflation,p_par(26))
       call copy_addr(c_light2,p_par(27))
-      call copy_addr(idiag_bcurlem,p_par(28)) ! int
+      call copy_addr(idiag_BcurlEm,p_par(28)) ! int
       call copy_addr(idiag_adphibm,p_par(29)) ! int
       call copy_addr(idiag_johmrms,p_par(30)) ! int
       call copy_addr(lapply_gamma_corr,p_par(31)) ! bool
@@ -1486,6 +1662,15 @@ module Special
       call copy_addr(je_heating_factor,p_par(46))
       call copy_addr(va_limit,p_par(47))
 
+    call copy_addr(lohmic_heating_ee,p_par(48)) ! bool
+    call copy_addr(ladvance_ee,p_par(49)) ! bool
+    call copy_addr(lohmic_heating_justee,p_par(50)) ! bool
+    call copy_addr(eta_given,p_par(51))
+    call copy_addr(cdt_sige,p_par(52))
+    call copy_addr(ldt_disp_current,p_par(53)) ! bool
+    call copy_addr(sige_ceiling,p_par(54))
+    call copy_addr(sige_const_value,p_par(55))
+    call copy_addr(lresistive_gauge_ee,p_par(56)) ! bool
     endsubroutine pushpars2c
 !***********************************************************************
 !

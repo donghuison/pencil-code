@@ -9,7 +9,6 @@ option(DOUBLE_PRECISION       "Generates double precision code."                
 option(USE_HIP                "Use HIP as the underlying GPGPU library instead of CUDA"    OFF)
 option(USE_OMP                "Enables use of openmp"                                      ON)
 option(USE_DARDEL             "Target machine is Dardel(PDC, Stockholm"                    OFF)
-option(PACKED_DATA_TRANSFERS  "Enables kernel for packed data transfers"                   OFF)
 option(SINGLEPASS_INTEGRATION "Enables single pass integration"                            OFF)
 option(RUNTIME_COMPILATION    "Enables runtime compilation"                                OFF)
 option(TRANSPILATION          "Tmp flag to make interface compatible with transpiled code" OFF)
@@ -40,6 +39,7 @@ if(CPU_BUILD)
 else()
 	add_definitions(-DAC_CPU_BUILD=0)
 endif()
+
 
 ## Build type
 if (NOT CMAKE_BUILD_TYPE)
@@ -124,9 +124,10 @@ add_definitions(-DAC_MPI_ENABLED=1)
 add_definitions(-DAC_DEFAULT_CONFIG="${CMAKE_SOURCE_DIR}/config/astaroth.conf")
 
 ## Includes
-include_directories(./submodule/include)                                  # Library headers
+include_directories($ENV{AC_HOME}/include) #Library headers
+include_directories($ENV{AC_HOME}/stdlib) #Astaroth C++ stdlib
 include_directories(./submodule/build/acc-runtime/api)
-include_directories(./submodule/acc-runtime/api)
+include_directories($ENV{AC_HOME}/acc-runtime/api)
 
 link_directories(./submodule/build/src/core)
 
@@ -158,20 +159,17 @@ else()
   add_definitions(-DTRAINING=0)
 endif()
 
-if (PACKED_DATA_TRANSFERS)
-  add_compile_options(-DPACKED_DATA_TRANSFERS=1)
-  add_library(astaroth_${PREC} SHARED gpu_astaroth.cc loadStore.cc)
+if (TRAINING)	
+  add_library(astaroth_${PREC} SHARED gpu_astaroth.cc torch.cc)
+  include_directories(${TORCHFORT_PATH}/include/)
+  link_directories(${TORCHFORT_PATH}/lib/)
+  target_link_libraries(astaroth_${PREC} ${TORCHFORT_PATH}/lib/libtorchfort.so)
 else()
-
-  if (TRAINING)	
-    add_library(astaroth_${PREC} SHARED gpu_astaroth.cc torch.cc)
-    include_directories(/opt/torchfort/include/)
-    link_directories(/opt/torchfort/lib/)
-    target_link_libraries(astaroth_${PREC} /opt/torchfort/lib/libtorchfort.so)
-  else()
-    add_library(astaroth_${PREC} SHARED gpu_astaroth.cc)
-  endif()
-
+  add_library(astaroth_${PREC} SHARED gpu_astaroth.cc)
 endif()
 
 target_link_libraries(astaroth_${PREC} astaroth_core)
+target_compile_definitions(astaroth_${PREC} PRIVATE
+   ORIGINAL_BUILD_PATH="${CMAKE_CURRENT_SOURCE_DIR}"
+   ACC_COMPILER_PATH="${CMAKE_CURRENT_SOURCE_DIR}/submodule/build/acc-runtime/acc/acc"
+)

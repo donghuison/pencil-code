@@ -1,3 +1,110 @@
+! vi: syntax=fortran
+!
+!***********************************************************************
+    function gen_in_snapname(stem,ext) result(filename)
+!
+!  Constructs filename for snapshot to be read from stem and extension ext. Appends '.bck'
+!  in order to read the backup file in case the wanted file is absent, but the backup file exists.
+!  Fatal error if neither exists.
+!
+!  12-apr-26/MR: coded
+!
+      use File_Io, only: file_exists
+
+      character(LEN=*) :: stem,ext
+      character(LEN=fnlen) :: filename
+
+      if (stem(1:3)=='VAR'.and.trim(ext)=='dat') then
+        filename = trim(stem)
+      else
+        filename = trim(stem)//'.'//trim(ext)
+      endif
+
+      if (.not.file_exists(trim(directory_snap)//'/'//trim(filename))) then
+        if (lbackup_snap) then
+          if (.not.file_exists(trim(directory_snap)//'/'//trim(filename)//'.bck')) then
+            call fatal_error('gen_filename','neither snapshot file '//trim(filename)//' nor '// trim(filename)//'.bck exists')
+          else
+            filename=trim(filename)//'.bck'
+          endif
+        endif
+      endif
+
+    endfunction gen_in_snapname
+!***********************************************************************
+    subroutine wdim_default_grid(file)
+!
+!  Write dimension to file.
+!
+!  02-Nov-2018/PABourdin: redesigned
+!
+      use HDF5_IO, only: output_dim
+
+      character (len=*), intent(in) :: file
+!
+      if (.not.(IO_strategy=="HDF5" .and. file=='dim.dat')) &
+        call output_dim (file, mx, my, mz, mxgrid, mygrid, mzgrid, mvar, maux, mglobal)
+!
+    endsubroutine wdim_default_grid
+!***********************************************************************
+    subroutine wdim_default(file, mx_out, my_out, mz_out, mxgrid_out, mygrid_out, mzgrid_out)
+!
+!  Write dimension to file.
+!
+!  02-Nov-2018/PABourdin: redesigned
+!
+      use HDF5_IO, only: output_dim
+
+      character(len=*), intent(in) :: file
+      integer, intent(in) :: mx_out, my_out, mz_out, mxgrid_out, mygrid_out, mzgrid_out
+!
+      call output_dim (file, mx_out, my_out, mz_out, mxgrid_out, mygrid_out, mzgrid_out, mvar, maux, mglobal)
+!
+    endsubroutine wdim_default
+!***********************************************************************
+    subroutine wdim(file, mx_out, my_out, mz_out, mxgrid_out, mygrid_out, mzgrid_out, mvar_out, maux_out)
+!
+!  Write dimension to file.
+!
+!   8-sep-01/axel: adapted to take my_out,mz_out
+!   4-oct-16/MR: added optional parameters mvar_out,maux_out
+!  02-Nov-2018/PABourdin: redesigned, moved to IO modules
+!
+      use HDF5_IO, only: output_dim
+
+      character (len=*), intent(in) :: file
+      integer, intent(in) :: mx_out, my_out, mz_out, mxgrid_out, mygrid_out, mzgrid_out, mvar_out, maux_out
+!
+      call output_dim (file, mx_out, my_out, mz_out, mxgrid_out, mygrid_out, mzgrid_out, mvar_out, maux_out, mglobal)
+!
+    endsubroutine wdim
+!***********************************************************************
+    function read_precision() result(res)
+!
+!  Returns precision as stored in data/proc*/dim.dat.
+!
+!  29-apr-26/MR: coded
+!
+      use HDF5_IO, only: input_dim
+      use Mpicomm, only: mpibcast
+
+      character :: res
+
+      integer ::  mx_in,my_in,mz_in,mvar_in,maux_in,mglobal_in,nghost_in,nprocx_in,nprocy_in,nprocz_in
+!
+!  Root reads global dim.dat.
+!
+!     2026-May-04/Kishore: added local below to fix samples/backwards-compatible.
+!     2026-May-04/Kishore: which has only `data/proc0/dim.dat`. I haven't tested
+!     2026-May-04/Kishore: the effect with, e.g., io_collect.
+!
+      call input_dim('.', mx_in, my_in, mz_in, mvar_in, maux_in, mglobal_in, &
+                     res, nghost_in, nprocx_in, nprocy_in, nprocz_in, &
+                     local=.not.lcollective_IO)
+
+      call mpibcast(res)
+
+    endfunction read_precision
 !***********************************************************************
     subroutine rproc_bounds(file)
 !
@@ -27,7 +134,7 @@
         if (lread_from_other_prec) then
           if (kind(x)==rkind4) then
             call input_proc_bounds(procx_boundsdb,procy_boundsdb,procz_boundsdb)
-            procx_bounds=procx_boundsdb; procy_bounds=procy_boundsdb; procz_bounds=procz_boundsdb
+            procx_bounds=real(procx_boundsdb); procy_bounds=real(procy_boundsdb); procz_bounds=real(procz_boundsdb)
           elseif (kind(x)==rkind8) then
             call input_proc_bounds(procx_boundssg,procy_boundssg,procz_boundssg)
             procx_bounds=procx_boundssg; procy_bounds=procy_boundssg; procz_bounds=procz_boundssg
@@ -204,5 +311,24 @@
       call mpibcast(f_ode,n_odevars)
   
     endsubroutine input_ode
+!***********************************************************************
+    subroutine read_profile(fname, type, a, np, lhas_ghost)
+!
+!  Read a profile from a file (taken from stratification, for example).
+!
+!  15-may-15/MR: coded as wrapper for input_profile
+!                avoids use HDF5_IO in physics modules.
+!
+      use HDF5_IO, only: input_profile
+!
+      character (len=*), intent(in) :: fname
+      character, intent(in) :: type
+      integer, intent(in) :: np
+      real, dimension(np), intent(out) :: a
+      logical, optional :: lhas_ghost
+
+      call input_profile(fname, type, a, np, lhas_ghost)
+
+    endsubroutine read_profile
 !***********************************************************************
 

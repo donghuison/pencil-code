@@ -48,7 +48,7 @@ module Dustvelocity
   real, dimension(nx,ndustspec) :: tausd1
   real, dimension(ndustspec) :: md=1.0, mdplus, mdminus, ad=0.
   !$omp threadprivate(md)
-  real, dimension(ndustspec) :: surfd, mi, rhodsad1
+  real, dimension(ndustspec) :: surfd, rhodsad1
   real, dimension(ndustspec) :: tausd=1.0, betad=0.0
   real :: betad0=0.
   real, dimension(ndustspec) :: nud=0.0, nud_hyper3=0.0, nud_shock=0.0, nud_hyper3_mesh=5.0
@@ -208,7 +208,7 @@ module Dustvelocity
       use EquationOfState, only: cs20
       use BorderProfiles, only: request_border_driving
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
 !
       integer :: i, j, k
       real :: gsurften, Eyoung, nu_Poisson, Eyoungred
@@ -493,21 +493,13 @@ module Dustvelocity
       
       if (ldust_pressure.and.dust_pressure_factor==0.0) &
           call fatal_error('initialize_dustvelocity','dust_pressure_factor should not be 0')
-
-      select case (borderuud)
-      case ('zero','0','initial-condition')
 !
 !  Tell the BorderProfiles module if we intend to use border driving, so
 !  that the module can request the right pencils.
 !
-        call request_border_driving(borderuud)
-      case ('nothing')
-        if (lroot.and.ip<=5) print*,"initialize_dustvelocity: borderuud='nothing'"
+      call request_border_driving((/borderuud/),'initialize_dustvelocity',ind(1),ind(ndustspec))
 !
-      case default
-        call fatal_error('initialize_dustvelocity','no such borderuud: '//trim(borderuud))
-      endselect
-!
+      lcoriolisforce_dust = lcoriolisforce_dust .and. lrotation
       if (Omega_pseudo/=0. .and. .not.lshear) &
         call warning('initialize_dustvelocity','pseudo-Coriolis force has only a meaning with background shear')
 !
@@ -586,7 +578,7 @@ module Dustvelocity
       use EquationOfState, only: pressure_gradient,cs20
       use SharedVariables, only: get_shared_variable
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       real, dimension (nx) :: lnrho,rho,cs2,rhod
       real :: eps,cs,eta_glnrho,v_Kepler
       integer :: j,k,l
@@ -996,7 +988,7 @@ module Dustvelocity
       use Sub
       use Deriv, only: der6
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       type (pencil_case) :: p
 !
       real, dimension (nx,3,3) :: tmp_pencil_3x3
@@ -1084,8 +1076,8 @@ module Dustvelocity
 !***********************************************************************
     subroutine short_stopping_time_approximation(f,df,p,k,i)
 !
-      real, dimension(mx,my,mz,mfarray), intent(IN) :: f
-      real, dimension(mx,my,mz,mvar), intent(OUT) :: df
+      real, contiguous,dimension(:,:,:,:), intent(IN) :: f
+      real, contiguous,dimension(:,:,:,:), intent(OUT) :: df
       type (pencil_case), intent(IN) :: p
       integer, intent(IN) :: k,i
 
@@ -1120,7 +1112,7 @@ module Dustvelocity
 !  19-Mar-2026/MR: corrected df(l1:l2,m,n,iudx): it missed the index k and actually has to be 
 !                            df(l1:l2,m,n,iudy) for Omega in z direction.
 !
-      real, dimension(mx,my,mz,mvar), intent(INOUT) :: df
+      real, contiguous,dimension(:,:,:,:), intent(INOUT) :: df
       type(pencil_case), intent(IN) :: p
       integer, intent(IN) :: k,ix
 
@@ -1132,7 +1124,7 @@ module Dustvelocity
 !
     endsubroutine add_pseudo_coriolis_force
 !***********************************************************************
-    subroutine direct_integration_of_motion(f,df,p,k,ix)
+    subroutine direct_integration_of_motion(df,p,k,ix)
 !
 !  Direct integration of the equations of dust motion.
 !
@@ -1140,15 +1132,14 @@ module Dustvelocity
 !
       use Sub
 
-      real, dimension (mx,my,mz,mfarray) :: f
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous,dimension(:,:,:,:) :: df
       type (pencil_case) :: p
       integer, intent(IN) :: k,ix
 
       real, dimension (3) :: fviscd, tmp, tmp2
-      real :: tausg1, mudrhod1, tmp3
+      real :: tausg1, mudrhod1
       real :: c2, s2
-      integer :: i, j, ju
+      integer :: j
 
       if (ladvection_dust) df(ix+nghost,m,n,iudx(k):iudz(k)) = &
                            df(ix+nghost,m,n,iudx(k):iudz(k)) - p%udgud(ix,:,k)
@@ -1157,14 +1148,14 @@ module Dustvelocity
 !  Omega=(-sin_theta, 0, cos_theta)
 !  theta corresponds to latitude
 !
-      if (Omega/=0. .and. lcoriolisforce_dust) then
+      if (lcoriolisforce_dust) then
         if (theta==0) then
-          if (headtt .and. k == 1) print*,'duud_dt: add Coriolis force; Omega=',Omega
+          if (lroot .and. headtt .and. k == 1) print*,'duud_dt: add Coriolis force; Omega=',Omega
           c2=2*Omega
           df(ix+nghost,m,n,iudx(k)) = df(ix+nghost,m,n,iudx(k)) + c2*p%uud(ix,2,k)
           df(ix+nghost,m,n,iudy(k)) = df(ix+nghost,m,n,iudy(k)) - c2*p%uud(ix,1,k)
         else
-          if (headtt .and. k == 1) print*, 'duud_dt: Coriolis force; Omega,theta=',Omega,theta
+          if (lroot .and. headtt .and. k == 1) print*, 'duud_dt: Coriolis force; Omega,theta=',Omega,theta
           c2=2*Omega*cos(theta*pi/180.)
           s2=2*Omega*sin(theta*pi/180.)
           df(ix+nghost,m,n,iudx(k)) = df(ix+nghost,m,n,iudx(k)) + c2*p%uud(ix,2,k)
@@ -1199,7 +1190,7 @@ module Dustvelocity
 !  (the term must be added to the dust equation of motion when measuring
 !  velocities relative to the shear flow modified by the global pressure grad.)
 !
-      if (beta_dPdr_dust/=0.0) df(l1:l2,m,n,iudx(k)) = &
+      if (beta_dPdr_dust/=0.0) df(ix+nghost,m,n,iudx(k)) = &
          df(ix+nghost,m,n,iudx(k)) + p%cs2(ix)*beta_dPdr_dust_scaled
 !
 !  Artificial pressure force
@@ -1332,11 +1323,11 @@ module Dustvelocity
       use Sub, only: identify_bcs
       use Diagnostics, only: max_mn_name
 !
-      real, dimension (mx,my,mz,mfarray) :: f
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous,dimension(:,:,:,:) :: f
+      real, contiguous,dimension(:,:,:,:) :: df
       type (pencil_case) :: p
 !
-      integer :: k,i
+      integer :: k,iix
 !
       intent(in) :: f
       intent(inout) :: p
@@ -1359,26 +1350,20 @@ module Dustvelocity
 !
         call get_stoppingtime(p%uud(:,:,k),p%uu,p%rho,p%cs2,p%rhod(:,k),k)
 !
-        !TP: any operation across a pencil cannot be translated to the GPU
-        if (ldustvelocity_shorttausd .and. any(tausd1(:,k)>=shorttaus1limit)) then
+!  Loop over all x is needed as condition for short stopping time approximation depends on position.
+!
+        do iix=1,nx
+          if (ldustvelocity_shorttausd .and. tausd1(iix,k)>=shorttaus1limit) then
 !
 !  Short stopping time approximation.
 !  Calculated from master equation d(wx-ux)/dt = A + B*(wx-ux) = 0.
 !
-          do i=1,nx
-            call short_stopping_time_approximation(f,df,p,k,i)
-            !p%advec_uud(i,k)=0.   !MR: this should be done, as there is no advection where this appr. is applied
-          enddo                    !    changes results, though
-        else
-          do i=1,nx
-            call direct_integration_of_motion(f,df,p,k,i)
-          enddo
-        endif
-!
-!  Advective timestep contribution (condition could be narrower as even with dustdensity,
-!                                   there is not always advection).
-!
-        if (lupdate_courant_dt.and.(ldustdensity.or.ladvection_dust)) maxadvec=maxadvec+p%advec_uud(:,k) !MR: problematic - why sum?
+            call short_stopping_time_approximation(f,df,p,k,iix)
+            !p%advec_uud(iix,k)=0.   !MR: this should be done, as there is no advection where this appr. is applied
+          else                       !    changes results, though
+            call direct_integration_of_motion(df,p,k,iix)
+          endif
+        enddo
 !
 !  Apply border profile
 !
@@ -1387,6 +1372,11 @@ module Dustvelocity
 !  End loop over dust species
 !
       enddo
+!
+!  Advective timestep contribution (condition could be narrower as even with dustdensity,
+!                                   there is not always advection).
+!
+      if (lupdate_courant_dt.and.(ldustdensity.or.ladvection_dust)) maxadvec=maxadvec+maxval(p%advec_uud,2)  !MR: sum problematic
 
       call calc_diagnostics_dustvelocity(p)
 !
@@ -1467,11 +1457,11 @@ module Dustvelocity
 !
 !  09-may-12/wlad: coded
 !
-      use BorderProfiles,  only: border_driving,set_border_initcond
+      use BorderProfiles, only: border_driving,set_border_initcond
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       type (pencil_case) :: p
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous,dimension(:,:,:,:) :: df
       real, dimension (nx,3) :: f_target
       integer :: j,ju,k
 !
@@ -1494,7 +1484,6 @@ module Dustvelocity
           call border_driving(f,df,p,f_target(:,j),ju)
         enddo
 !
-      case ('nothing')
       endselect
 !
     endsubroutine set_border_dustvelocity
@@ -1751,6 +1740,7 @@ module Dustvelocity
 !
 !  Reset everything in case of reset.
 !
+      call keep_compiler_quiet(lwrite)
       if (lreset) then
         idiag_dtud=0; idiag_dtnud=0; idiag_ud2m=0; idiag_udx2m=0
         idiag_udxm=0; idiag_udym=0; idiag_udzm=0
@@ -1844,7 +1834,7 @@ module Dustvelocity
 !
       use Slices_methods, only: assign_slices_vec
 
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous,dimension(:,:,:,:) :: f
       type (slice_data) :: slices
 !
 !  Loop over slices

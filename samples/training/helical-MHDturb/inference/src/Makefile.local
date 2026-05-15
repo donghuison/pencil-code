@@ -8,7 +8,7 @@ EOS      =   eos_idealgas
 HYDRO    =   hydro
 DENSITY  =   density
 ENTROPY  = noentropy
-MAGNETIC =   magnetic
+MAGNETIC = nomagnetic
 GRAVITY  = nogravity
 FORCING  =   forcing
 
@@ -20,4 +20,3 @@ POWER    =   power_spectrum
 
 TRAINING=training_torchfort
 GPU=gpu_astaroth
-TRANSPILATION=on

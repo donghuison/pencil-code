@@ -10,13 +10,16 @@
 Contains the parameters of the simulation.
 """
 import warnings
-from pencil.util import copy_docstring
+from pencil.util import (
+    copy_docstring,
+    DotDict as _Foo,
+    )
 
 try:
     import f90nml
 
     lnml = True
-except:
+except Exception:
     print(
         "Warning: recommend to add f90nml to library with \
     'pip3 install f90nml' (Python 3) or \
@@ -25,20 +28,10 @@ except:
     lnml = False
 
 
-class Param(object):
+class Param(_Foo):
     """
     Param -- holds the simulation parameters.
     """
-
-    def __init__(self):
-        """
-        Fill members with default values.
-        """
-
-        self.keys = []
-
-    def keys(self):
-        return list(self.__dict__.keys())
 
     def read(
         self,
@@ -46,10 +39,11 @@ class Param(object):
         param1=False,
         param2=False,
         quiet=True,
-        conflicts_quiet=False,
+        conflicts_quiet=True,
         asdict=True,
         nest_dict=True,
         append_units=True,
+        keep_nested=False,
     ):
         """
         read(datadir='data', param1=False, param2=False, quiet=True,
@@ -85,6 +79,9 @@ class Param(object):
         append_units : bool
           Derives dimensional units from standard code units.
 
+        keep_nested: bool
+          Whether to keep the attributes corresponding to individual namelist. If True, self.XXX will contain the entries from XXX_run_pars. Requires nest_dict=True.
+
         Returns
         -------
         Instance of the pencil.read.param.Param class.
@@ -119,77 +116,72 @@ class Param(object):
             super_name_list = list()
             name_list = list()
             param_conflicts = dict()
-            # Nesting parameters with same name under module attributes
-            if nest_dict:
-                for filen in files:
-                    (
-                        param_list,
-                        param_conflicts,
-                        name_list,
-                        super_name_list,
-                    ) = self.__read_nml(
-                        param_list,
-                        filen,
-                        param_conflicts,
-                        name_list,
-                        super_name_list,
-                        nest=True,
-                    )
-            # Parameters with same name will be written by last value
-            else:
-                for filen in files:
-                    (
-                        param_list,
-                        param_conflicts,
-                        name_list,
-                        super_name_list,
-                    ) = self.__read_nml(
-                        param_list, filen, param_conflicts, name_list, super_name_list
-                    )
-            if not param_conflicts:
-                subkey_list = list()
+            # If nest_dict is False, parameters which share names will be overwritten by the last value
+            for filen in files:
+                (
+                    param_list,
+                    param_conflicts,
+                    name_list,
+                    super_name_list,
+                ) = self._read_nml(
+                    param_list,
+                    filen,
+                    param_conflicts,
+                    name_list,
+                    super_name_list,
+                    nest = nest_dict,
+                )
+
+            subkey_list = list() #list of conflicting keys
+            for super_name in super_name_list:
+                if super_name in param_conflicts:
+                    for subkey in param_conflicts[super_name]:
+                        subkey_list.append(subkey)
+
+            if not keep_nested:
+                #Remove namelists with no conflicting keys
                 for super_name in super_name_list:
-                    if super_name in param_conflicts.keys():
-                        for subkey in param_conflicts[super_name].keys():
-                            subkey_list.append(subkey)
-                for super_name in super_name_list:
-                    if not super_name in param_conflicts.keys():
-                        if param_list.__contains__(super_name):
-                            param_list.__delitem__(super_name)
+                    if not super_name in param_conflicts:
+                        if super_name in param_list:
+                            del param_list[super_name]
                         super_name_list.remove(super_name)
+
+                #For remaining namelists, remove non-conflicting keys
                 for super_name in super_name_list:
                     for key in name_list:
                         if not key in subkey_list:
-                            if key in param_list[super_name].keys():
-                                param_list[super_name].__delitem__(key)
-                for key in name_list:
-                    if key in param_list.keys() and key in subkey_list:
-                        param_list.__delitem__(key)
+                            if key in param_list[super_name]:
+                                del param_list[super_name][key]
 
-            # If nesting occurs report conflicts and record nests to retain
-            if not param_conflicts:
-                for key in param_conflicts.keys():
-                    for subkey in param_conflicts[key].keys():
-                        if not conflicts_quiet:
-                            print(
-                                subkey,
-                                "as",
-                                param_conflicts[key][subkey][0],
-                                "in",
-                                key,
-                                "conflicts with",
-                                param_conflicts[key][subkey][2],
-                                "in",
-                                param_conflicts[key][subkey][1],
-                            )
+            #For conflicting keys, remove the ambiguous entry at the root level.
+            for key in name_list:
+                if key in param_list and key in subkey_list:
+                    #If the same key is present in two different namelists, remove it from the root object.
+                    del param_list[key]
+
+            if not conflicts_quiet:
+                # report conflicts and record nests to retain
+                for key in param_conflicts:
+                    for subkey in param_conflicts[key]:
+                        print(
+                            subkey,
+                            "as",
+                            param_conflicts[key][subkey][0],
+                            "in",
+                            key,
+                            "conflicts with",
+                            param_conflicts[key][subkey][2],
+                            "in",
+                            param_conflicts[key][subkey][1],
+                        )
 
             # Construct class Params object attributes
-            for key in param_list.keys():
+            for key in param_list:
                 # Nest only parameters with name conflicts
                 if key in super_name_list:
                     ext_object = _Foo()
                     setattr(self, key, ext_object)
-                    for subkey in param_list[key].keys():
+                    for subkey in param_list[key]:
                         if not quiet:
                             print(subkey, "is nested under", key)
                         setattr(ext_object, subkey, param_list[key][subkey])
@@ -215,11 +207,10 @@ class Param(object):
                     exec(script.replace("\n    ", "\nself.")[198:])
                     del numpy
                 else:
-                    print(
+                    raise RuntimeError(
                         "Param.read: nl2python returned nothing!"
                         + " Is $PENCIL_HOME/bin in the path?"
                     )
-                    return -1
 
         if append_units:
             self.unit_time = self.unit_length / self.unit_velocity
@@ -248,10 +239,6 @@ class Param(object):
                 )
                 self.io_strategy = "dist"
 
-        # IL: updating the list of keys as a list
-        self.keys = list(self.__dict__.keys())
-        return 0
-
     def __param_formatter(self, string_part):
         """
         Formats the parameters from the files.
@@ -277,7 +264,7 @@ class Param(object):
             if "." in string_part:
                 return float(string_part)
             return int(string_part)
-        except:
+        except Exception:
             return re.sub("'", "", string_part)
 
     def __tuple_catch(self, string):
@@ -301,7 +288,7 @@ class Param(object):
             return tuple(string)
         return self.__param_formatter(string)
 
-    def __read_nml(
+    def _read_nml(
         self, params, file_name, param_conflicts, name_list, super_name_list, nest=False
     ):
         """
@@ -309,7 +296,7 @@ class Param(object):
 
         call signature:
 
-        __read_nml(self, file_name, nest=False)
+        _read_nml(self, file_name, nest=False)
 
         Keyword arguments:
 
@@ -324,18 +311,15 @@ class Param(object):
 
         r = re.compile(r"(?:[^,(]|\([^)]*\))+")
 
+        always_denest = ["run", "init"]
         # Contain the nested parameters to be retained
         # Contain the nest names for each parameter set
         if lnml:
             nmlobj = f90nml.read(file_name)
             for super_name_full in nmlobj.keys():
-                super_name = (
-                    super_name_full.rsplit("_pars")[0]
-                    .rsplit("_init")[0]
-                    .rsplit("_run")[0]
-                )
+                super_name = self._clean_namelist_name(super_name_full)
                 if nest:
-                    if not params.__contains__(super_name):
+                    if (super_name not in params) and (super_name not in always_denest):
                         params[super_name] = dict()
                         super_name_list.append(super_name)
                 for name in nmlobj[super_name_full].keys():
@@ -348,7 +332,7 @@ class Param(object):
                     name_list.append(name)
                     if nest:
                         # Save all parameters nested and unnested
-                        if not super_name in ("run", "init"):
+                        if super_name not in always_denest:
                             params[super_name][name] = nmlobj[super_name_full][name]
         else:
             for rawline in open(file_name):
@@ -364,15 +348,9 @@ class Param(object):
                 lastrawline = rawline.rstrip("\n")
                 line = rawline.rstrip("\n")
                 if len(line) > 1 and (line[1] == "&" or line[0] == "&"):
-                    super_name = (
-                        line[2:]
-                        .lower()
-                        .rsplit("_pars")[0]
-                        .rsplit("_init")[0]
-                        .rsplit("_run")[0]
-                    )
+                    super_name = self._clean_namelist_name(line[1:].lower())
                     if nest:
-                        if not params.__contains__(super_name):
+                        if (super_name not in params) and (super_name not in always_denest):
                             params[super_name] = dict()
                             super_name_list.append(super_name)
                 else:
@@ -397,30 +375,30 @@ class Param(object):
                         name_list.append(name)
                         if nest:
                             # Save all parameters nested and unnested
-                            if not super_name in ("run", "init"):
+                            if super_name not in always_denest:
                                 params[super_name][name] = value
-        # If name conflict exists remove unnested copies
-        if len(super_name_list) > 0:
-            if "run" in super_name_list:
-                super_name_list.remove("run")
-            if "init" in super_name_list:
-                super_name_list.remove("init")
-            for super_name in super_name_list:
-                for alt_name in super_name_list:
-                    for name in params[super_name].keys():
-                        if name in params[alt_name].keys():
-                            if not params[alt_name][name] == params[super_name][name]:
-                                if not super_name in param_conflicts.keys():
-                                    param_conflicts[super_name] = dict()
-                                param_conflicts[super_name][name] = (
-                                    params[super_name][name],
-                                    alt_name,
-                                    params[alt_name][name],
-                                )
+
+        #Check for name conflicts
+        for super_name in super_name_list:
+            for alt_name in super_name_list:
+                for name in params[super_name].keys():
+                    if name in params[alt_name].keys():
+                        if not params[alt_name][name] == params[super_name][name]:
+                            if not super_name in param_conflicts.keys():
+                                param_conflicts[super_name] = dict()
+                            param_conflicts[super_name][name] = (
+                                params[super_name][name],
+                                alt_name,
+                                params[alt_name][name],
+                            )
 
         return params, param_conflicts, name_list, super_name_list
 
-class _Foo(object): pass
+    def _clean_namelist_name(self, namelist):
+        name = namelist.removesuffix("_pars")
+        for s in ["_init", "_run"]:
+            name = name.removesuffix(s)
+        return name
 
 @copy_docstring(Param.read)
 def param(*args, **kwargs):

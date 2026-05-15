@@ -103,6 +103,7 @@ module Diagnostics
   endinterface zsum_mn_name_xy_mpar
 !
   real, target, dimension (nrcyl) :: phiavg_norm
+  logical :: lcalculating_phiavg_norm = .false.
   public :: phiavg_norm
   !$omp threadprivate(phiavg_norm)
 
@@ -850,7 +851,7 @@ module Diagnostics
               imax_count=imax_count+1
 !
               if (itype==ilabel_max)            &
-                  vname(iname)=fmax(imax_count)
+                  vname(iname)=-offset_min_calc+fmax(imax_count)
 !
               if (itype==ilabel_max_sqrt)       &
                   vname(iname)=sqrt(fmax(imax_count))
@@ -858,8 +859,13 @@ module Diagnostics
               if (itype==ilabel_max_dt)         &
                   vname(iname)=fmax(imax_count)
 !
+!  added offset_min_calc (zero by default) to compute positive minima
+!  in the presence of a mask, with maps out zero values.
+!  The value of offset_min_calc, which is now an input parameter,
+!  should not be choosen too large.
+!
               if (itype==ilabel_max_neg)        &
-                  vname(iname)=-fmax(imax_count)
+                  vname(iname)=offset_min_calc-fmax(imax_count)
 !
               if (itype==ilabel_max_reciprocal) then
                 if (fmax(imax_count)==0.) then
@@ -1179,6 +1185,7 @@ module Diagnostics
       real, dimension(nrcyl,nz,nprocz,nnamerz) :: fsumrz
       real, dimension(nrcyl) :: norm
       real, dimension(:,:,:,:) :: fnamerz
+      integer  :: l,m,n
 !
 !  Communicate over all processors.
 !  The result is only present on the root processor
@@ -1189,7 +1196,9 @@ module Diagnostics
         if (ipz==0) call mpireduce_sum(phiavg_norm,norm,nrcyl,idir=12)  ! avoid double comm!
         if (lroot) then
           do i=1,nnamerz
-            fnamerz(:,:,:,i)=fsumrz(:,:,:,i)/spread(spread(norm,2,nz),3,nprocz)
+            do l=1,nrcyl; do m=1,nz; do n = 1,nprocz;
+              fnamerz(l,m,n,i)=fsumrz(l,m,n,i)/norm(l)
+            enddo; enddo; enddo
           enddo
 !do i=1,nnamerz
 !if (lroot) print*, 'fnamerz(:,:,:,i)=', i,maxval(abs(fnamerz(:,:,:,i)))
@@ -1226,25 +1235,25 @@ module Diagnostics
         do iname=1,nnamez
           if (itype_name_z(iname)==ilabel_max_dt) fnamez(:,:,iname) = dt*fnamez(:,:,iname)
         enddo
-        if (ltimer) taver = mpiwtime()
+        if (ltimer) taver = real(mpiwtime())
         call output_average(datadir, 'xy', nnamez, cnamez, fnamez, nzgrid, t1ddiagnos, lwrite_avg1d_binary, lroot)
         if (ltimer) print *, 'write_1daverages: write xy in ', mpiwtime() - taver, ' seconds'
       endif
 !
       if (nnamey > 0) then
-        if (ltimer) taver = mpiwtime()
+        if (ltimer) taver = real(mpiwtime())
         call output_average(datadir, 'xz', nnamey, cnamey, fnamey, nygrid, t1ddiagnos, lwrite_avg1d_binary, lroot)
         if (ltimer) print *, 'write_1daverages: write xz in ', mpiwtime() - taver, ' seconds'
       endif
 !
       if (nnamex > 0) then
-        if (ltimer) taver = mpiwtime()
+        if (ltimer) taver = real(mpiwtime())
         call output_average(datadir, 'yz', nnamex, cnamex, fnamex, nxgrid, t1ddiagnos, lwrite_avg1d_binary, lroot)
         if (ltimer) print *, 'write_1daverages: write yz in ', mpiwtime() - taver, ' seconds'
       endif
 !
       if (nnamer > 0) then
-        if (ltimer) taver = mpiwtime()
+        if (ltimer) taver = real(mpiwtime())
         if (lfirst_call) then
           call output_average(datadir, 'phi_z', nnamer, cnamer, fnamer, t1ddiagnos, .false., lroot, rcyl)
           lfirst_call = .false.
@@ -1341,13 +1350,13 @@ module Diagnostics
       ltimer = ip <= 12 .and. lroot
 !
       if (lwrite_yaverages) then
-        if (ltimer) taver = mpiwtime()
+        if (ltimer) taver = real(mpiwtime())
         call output_average_2D('y', nnamexz, cnamexz, fnamexz, t2davgfirst, lfirst_proc_y)
         if (ltimer) print *, 'write_2daverages: write y averages in ', mpiwtime() - taver, ' seconds'
       endif
 !
       if (lwrite_zaverages .and. (.not. lyang .or. lcaproot)) then
-        if (ltimer) taver = mpiwtime()
+        if (ltimer) taver = real(mpiwtime())
         if (lcaproot) then
           ! cap root (Yang)
           call output_average_2D('z', nnamexy, cnamexy, fnamexy_cap, t2davgfirst, lfirst_proc_z)
@@ -1359,7 +1368,7 @@ module Diagnostics
       endif
 !
       if (lwrite_phiaverages) then
-        if (ltimer) taver = mpiwtime()
+        if (ltimer) taver = real(mpiwtime())
         ! normalization is already done in phiaverages_rz
         call output_average(datadir, ch2davg, nrcyl, nnamerz, cnamerz, fnamerz, t2davgfirst, rcyl, drcyl)
 
@@ -1868,7 +1877,7 @@ module Diagnostics
 !
     endsubroutine sum_name_int
 !***********************************************************************
-    subroutine max_mn_name(a,iname,lsqrt,l_dt,lneg,lreciprocal)
+    subroutine max_mn_name(a,iname,lsqrt,l_dt,lneg,lreciprocal,mask)
 !
 !  Successively calculate maximum of a, which is supplied at each call.
 !  Start from zero if lfirstpoint=.true.
@@ -1881,13 +1890,22 @@ module Diagnostics
       real, dimension (nx) :: a
       integer :: iname
       logical, optional :: lsqrt,l_dt,lneg,lreciprocal
+      logical, dimension (nx), optional :: mask
 !
       if (iname==0) return
 !
       if (lfirstpoint) then
-        fname(iname)=maxval(a)
+        if(present(mask)) then
+          fname(iname)=maxval(a,mask)
+        else
+          fname(iname)=maxval(a)
+        endif
       else
-        fname(iname)=max(fname(iname),maxval(a))
+        if(present(mask)) then
+          fname(iname)=max(fname(iname),maxval(a,mask))
+        else
+          fname(iname)=max(fname(iname),maxval(a))
+        endif
       endif
 !
 !  Set corresponding entry in itype_name.
@@ -3050,10 +3068,14 @@ module Diagnostics
 !  As we calculate z-averages, multiply by nzgrid when used.
 !
       if (n==nn(1)) phiavg_norm=phiavg_norm+sum(phiavg_profile,2)
+      lcalculating_phiavg_norm = .true.
 !
     endsubroutine calc_phiavg_profile
 !***********************************************************************
     subroutine diagnostics_init_reduc_pointers
+!
+! Phiavg_norm is the dst on the master thread
+! which the local variable on other threads points to 
 !
       p_phiavg_norm => phiavg_norm
 !
@@ -3061,7 +3083,9 @@ module Diagnostics
 !***********************************************************************
     subroutine diagnostics_diag_reductions
 !
-      p_phiavg_norm = p_phiavg_norm + phiavg_norm
+!  Add to the dst on the master thread
+!
+    if(lcalculating_phiavg_norm) p_phiavg_norm = p_phiavg_norm + phiavg_norm
 !
     endsubroutine diagnostics_diag_reductions
 !***********************************************************************
@@ -3999,7 +4023,7 @@ module Diagnostics
 
     endsubroutine allocate_diagnostic_names
 !***********************************************************************
-    subroutine allocate_diagnostic_arrays()
+    subroutine allocate_diagnostic_arrays
 !
 !  Allocates diagnostic arrays holding the output data
 !  Separate from the name allocations because of multithreading concerns
@@ -4036,13 +4060,22 @@ module Diagnostics
 
     endsubroutine allocate_diagnostic_arrays
 !***********************************************************************
-   subroutine save_diagnostic_controls
+   subroutine save_diagnostic_controls(lsnap_time)
+
+     logical, optional :: lsnap_time
 !
-!  Saves threadprivate variables to shared ones.
+!  Saves the diagnostic controls as they are now at the current time
+!  so the helper thread can read them later when it wakes up
 !
 !  25-aug-23/TP: Coded
 !  19-march-25/TP: moved from Equ to here
 !
+    if(loptest(lsnap_time)) then
+      t_snap_save = t
+      return
+    endif
+
+    t_save  = t 
     l1davgfirst_save = l1davgfirst
     ldiagnos_save = ldiagnos
     l1dphiavg_save = l1dphiavg
@@ -4053,14 +4086,13 @@ module Diagnostics
     l2davg_save = l2davg
     lout_sound_save = lout_sound
     lvideo_save = lvideo
-    t_save  = t ! (diagnostics are for THIS time)
 !
 !  Record times for diagnostic and 2d average output.
 !
-    if (l1davgfirst) t1ddiagnos_save=t ! (1-D averages are for THIS time)
-    if (l2davgfirst) t2davgfirst_save=t ! (2-D averages are for THIS time)
-    if (lvideo     ) tslice_save=t ! (slices are for THIS time)
-    if (lout_sound ) tsound_save=t
+    if (l1davgfirst) t1ddiagnos_save=real(t) ! (1-D averages are for THIS time)
+    if (l2davgfirst) t2davgfirst_save=real(t) ! (2-D averages are for THIS time)
+    if (lvideo     ) tslice_save=real(t) ! (slices are for THIS time)
+    if (lout_sound ) tsound_save=real(t)
     if (ldiagnos) then
       dt_save = dt
       it_save = it
@@ -4075,13 +4107,19 @@ module Diagnostics
 
     endsubroutine save_diagnostic_controls
 !***********************************************************************
-    subroutine restore_diagnostic_controls
+    subroutine restore_diagnostic_controls(lsnap_time)
+
+     logical, optional :: lsnap_time
 !
-!   Restores the diagnostics flags that were saved when calculating diagnostics started.
+!   Restores the diagnostics flags that were saved by master when it asked for diagnostics. 
 !
 !   13-nov-23/TP: Written
 !   19-march-25/TP: moved from Equ to here
 !
+    if(loptest(lsnap_time)) then
+      t = t_snap_save
+      return
+    endif
     l1davgfirst = l1davgfirst_save
     ldiagnos = ldiagnos_save
     l1dphiavg = l1dphiavg_save
@@ -4104,13 +4142,13 @@ module Diagnostics
     appa_target = appa_target_save
 
     if (ldiagnos) then
-      tdiagnos  = t_save
+      tdiagnos  = real(t_save)
       dtdiagnos = dt_save
       itdiagnos = it_save
       eps_rkf_diagnos = eps_rkf_save
     endif
 
-    tspec = tspec_save
+    tspec = real(tspec_save)
     lpencil = lpencil_save
 
     endsubroutine restore_diagnostic_controls

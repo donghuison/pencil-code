@@ -8,7 +8,8 @@
 /* ------------------------------------------------------------------- */
 void FTNIZE(initialize_gpu_c)(REAL* f, FINT* comm_fint, double* t, int* nt, 
 				FINT* lreads_all_vars_from_device_,
-				FINT* lcpu_timestep_on_gpu_
+				FINT* lcpu_timestep_on_gpu_,
+				FINT* lac_sparse_autotuning_
 				)
 {
 }
@@ -29,7 +30,7 @@ void FTNIZE(rhs_gpu_c)(FINT *isubstep, double* t)
 {
 }
 /* ------------------------------------------------------------------- */
-void FTNIZE(before_boundary_gpu_c)(FINT* lrmv, FINT *isubstep, double *t)
+void FTNIZE(before_boundary_gpu_c)(FINT* lrmv, FINT *isubstep, double *t, FINT* lsubstepping_in_time)
 {
 }
 /* ------------------------------------------------------------------- */
@@ -67,11 +68,7 @@ int FTNIZE(update_on_gpu_arr_by_name_c)(char *varname)
   return 0;
 }
 /* ------------------------------------------------------------------- */
-void FTNIZE(test_rhs_c)(REAL* f_in, REAL* df_truth)
-{
-}
-/* ------------------------------------------------------------------- */
-void FTNIZE(gpu_set_dt_c)(double* t)
+void FTNIZE(gpu_prepare_for_first_substep_c)(double* t)
 {
 }
 /* ------------------------------------------------------------------- */
@@ -103,4 +100,27 @@ void FTNIZE(split_update_gpu_c)(void)
 {
 }
 /* ------------------------------------------------------------------- */
-
+void FTNIZE(tf_create_model_c)(const char *model_name, const char *config_file_path, FINT* comm_fint, FINT *lmpicomm)
+{
+}
+/* ------------------------------------------------------------------- */
+void FTNIZE(print_snapshot_c)()
+{
+}
+/* ---------------------------------------------------------------------- */
+void FTNIZE(tf_load_model_c)(const char* model_name, const char* fname)
+{
+}
+/* ---------------------------------------------------------------------- */
+void FTNIZE(tf_load_model_checkpoint_c)(const char* model_name, const char* checkpoint_dir)
+{
+}
+/* ---------------------------------------------------------------------- */
+void FTNIZE(tf_save_model_c)(const char* model_name, const char* fname)
+{
+}
+/* ---------------------------------------------------------------------- */
+void FTNIZE(tf_save_checkpoint_c)(const char* model_name, const char* checkpoint_dir)
+{
+}
+/* ---------------------------------------------------------------------- */

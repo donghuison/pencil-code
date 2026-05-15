@@ -63,7 +63,7 @@ module General
   public :: linspace
   public :: linear_interpolate_2d, linear_interpolate_1d, get_linterp_weights_1D, interpol_tabulated
   public :: chk_time
-  public :: get_species_nr
+  public :: get_species_nr,posindex_to_1Dindex,expand_1Dindex
   public :: get_from_nml_str,get_from_nml_log,get_from_nml_real,get_from_nml_int,convert_nml
   public :: compress_nvidia
   public :: qualify_position_bilin, qualify_position_bicub, &
@@ -77,7 +77,7 @@ module General
     module procedure string_to_enum_1d
     module procedure string_to_enum_2d 
   endinterface
-! 
+  public :: idiv
 !
 !  State and default generator of random numbers.
 !
@@ -140,7 +140,9 @@ module General
     module procedure keep_compiler_quiet_bc
     module procedure keep_compiler_quiet_sl
     module procedure keep_compiler_quiet_i
+    module procedure keep_compiler_quiet_i1
     module procedure keep_compiler_quiet_i1d
+    module procedure keep_compiler_quiet_i1d1
     module procedure keep_compiler_quiet_i81d
     module procedure keep_compiler_quiet_i2d
     module procedure keep_compiler_quiet_i3d
@@ -375,9 +377,7 @@ module General
 !
       integer, intent(in) :: ipx, ipy, ipz
 !
-!     22-Oct-2025/Kishore: is the below condition not always false? It seems to
-!     have been introduced in commit cc57f8d50dbedf5e45cab7a4336e383985d065b4 by
-!     Touko Puro, in a monster checkin with the description "push to remote".
+!     Experimental so guarded with .false. for now
       if (.false..and.all((/nprocx_node,nprocy_node,nprocz_node/)>0)) then
         find_proc = find_proc_node_localty(ipx, ipy, ipz)
       else
@@ -466,9 +466,10 @@ module General
       integer, intent(out) :: ipx, ipy, ipz
       type(int3) :: proc_coords
 
+      !Experimental so guarded by .false.
       if (.false..and.all((/nprocx_node,nprocy_node,nprocz_node/)>0)) then
         call find_proc_coords_node_localty(rank,ipx,ipy,ipz)
-print*, 'rank,ipx,ipy,ipz, find_proc=',rank, ipx,ipy,ipz, find_proc_node_localty(ipx,ipy,ipz)
+!print*, 'rank,ipx,ipy,ipz, find_proc=',rank, ipx,ipy,ipz, find_proc_node_localty(ipx,ipy,ipz)
       else
         if (lmorton_curve) then
           proc_coords = getmortonrank3d(rank,nprocx,nprocy,nprocz)
@@ -495,7 +496,7 @@ print*, 'rank,ipx,ipy,ipz, find_proc=',rank, ipx,ipy,ipz, find_proc_node_localty
 !
 !  6-dec-22/MR: coded
 !
-      use Cdata, only: lprocz_slowest, nprocx_node, nprocy_node, nprocz_node
+      use Cdata, only: nprocx_node, nprocy_node, nprocz_node
 !
       integer :: rank, ipx, ipy, ipz
       integer :: nprocs_per_node,inodex,inodey,inodez
@@ -525,7 +526,7 @@ print*, 'rank,ipx,ipy,ipz, find_proc=',rank, ipx,ipy,ipz, find_proc_node_localty
       use Cdata, only: mm,nn,imn_array,necessary,necessary_imn,lroot,ip, &
                        lyinyang,lcutoff_corners,nycut,nzcut, &
                        lfirst_proc_y, lfirst_proc_z, llast_proc_y, llast_proc_z, &
-                       n2,m2,l2,n2i,m2i,l2i
+                       n2,m2,n2i,m2i
 !
       integer :: imn,m,n
       integer :: min_m1i_m2,max_m2i_m1
@@ -897,7 +898,7 @@ print*, 'rank,ipx,ipy,ipz, find_proc=',rank, ipx,ipy,ipz, find_proc_node_localty
       integer :: k
       integer, parameter :: ia=16807,im=2147483647,iq=127773,ir=2836, &
            mask=123459876
-      real, parameter :: am=1./im
+      real, parameter :: am=1./real(im)
       real :: ran0
 !
       dummy=ieor(dummy,mask)
@@ -935,12 +936,12 @@ print*, 'rank,ipx,ipy,ipz, find_proc=',rank, ipx,ipy,ipz, find_proc_node_localty
 !
       if (present(init) .or. (rstate(1) == 0) .or. (rstate(2) <= 0)) then
         if (present(init)) init1 = init
-        am=nearest(1.0,-1.0)/im
+        am=nearest(1.0,-1.0)/real(im)
         first_call=.false.
         rstate(1)=ieor(777755555,abs(init1))
         rstate(2)=ior(ieor(888889999,abs(init1)),1)
       elseif (first_call) then
-        am=nearest(1.0,-1.0)/im
+        am=real(nearest(1.0,-1.0)/real(im))
         first_call=.false.
       endif
 !
@@ -983,12 +984,12 @@ print*, 'rank,ipx,ipy,ipz, find_proc=',rank, ipx,ipy,ipz, find_proc_node_localty
 !
       if (present(init) .or. (rstate2(1) == 0) .or. (rstate2(2) <= 0)) then
         if (present(init)) init1 = init
-        am=nearest(1.0,-1.0)/im
+        am=nearest(1.0,-1.0)/real(im)
         first_call=.false.
         rstate2(1)=ieor(777755555,abs(init1))
         rstate2(2)=ior(ieor(888889999,abs(init1)),1)
       elseif (first_call) then
-        am=nearest(1.0,-1.0)/im
+        am=nearest(1.0,-1.0)/real(im)
         first_call=.false.
       endif
 !
@@ -1037,7 +1038,7 @@ print*, 'rank,ipx,ipy,ipz, find_proc=',rank, ipx,ipy,ipz, find_proc_node_localty
       integer(ikind), save      :: ix=-1,iy=-1,k
 !
       if (iseed1 <= 0 .or. iy < 0) then   ! Initialize.
-        am=nearest(1.0,-1.0)/im
+        am=real(nearest(1.0,-1.0)/real(im))
         iy=ior(ieor(888889999,abs(iseed1)),1)
         ix=ieor(777755555,abs(iseed1))
         iseed1=abs(iseed1)+1   ! Set iseed1 positive.
@@ -1275,6 +1276,27 @@ print*, 'rank,ipx,ipy,ipz, find_proc=',rank, ipx,ipy,ipz, find_proc_node_localty
 !
     endsubroutine keep_compiler_quiet_i
 !***********************************************************************
+    subroutine keep_compiler_quiet_i1(v1,v2,v3,v4)
+!
+!  Call this to avoid compiler warnings about unused variables.
+!  Optional arguments allow for more variables of the same shape+type.
+!
+!  04-aug-06/wolf: coded
+!
+      integer(KIND=ikind1)  :: v1, v2, v3, v4
+      optional ::     v2, v3, v4
+!
+      if (ALWAYS_FALSE) then
+        write(0,*) 'keep_compiler_quiet_i: Never got here...'
+        print*,                  v1
+        if (present(v2)) print*, v2
+        if (present(v3)) print*, v3
+        if (present(v4)) print*, v4
+        STOP 1
+      endif
+!
+    endsubroutine keep_compiler_quiet_i1
+!***********************************************************************
     subroutine keep_compiler_quiet_i81d(v1,v2,v3,v4)
 !
 !  Call this to avoid compiler warnings about unused variables.
@@ -1316,6 +1338,27 @@ print*, 'rank,ipx,ipy,ipz, find_proc=',rank, ipx,ipy,ipz, find_proc_node_localty
       endif
 !
     endsubroutine keep_compiler_quiet_i1d
+!***********************************************************************
+    subroutine keep_compiler_quiet_i1d1(v1,v2,v3,v4)
+!
+!  Call this to avoid compiler warnings about unused variables.
+!  Optional arguments allow for more variables of the same shape+type.
+!
+!  04-aug-06/wolf: coded
+!
+      integer(KIND=ikind1), dimension(:)  :: v1, v2, v3, v4
+      optional               ::     v2, v3, v4
+!
+      if (ALWAYS_FALSE) then
+        write(0,*) 'keep_compiler_quiet_i1d: Never got here...'
+        print*,                  v1(1)
+        if (present(v2)) print*, v2(1)
+        if (present(v3)) print*, v3(1)
+        if (present(v4)) print*, v4(1)
+        STOP 1
+      endif
+!
+    endsubroutine keep_compiler_quiet_i1d1
 !***********************************************************************
     subroutine keep_compiler_quiet_i2d(v1,v2,v3,v4)
 !
@@ -2084,54 +2127,55 @@ print*, 'rank,ipx,ipy,ipz, find_proc=',rank, ipx,ipy,ipz, find_proc_node_localty
 !
     endsubroutine tridag
 !***********************************************************************
-    subroutine tridag_double(a,b,c,r,u,err)
-!
-!  Solves tridiagonal system.
-!
-!  01-apr-03/tobi: from Numerical Recipes (p42-43).
-!  11-apr-03/axel: double precision version.
-!
-!  | b1 c1 0  ...            | | u1   |   | r1   |
-!  | a2 b2 c2 ...            | | u2   |   | r2   |
-!  | 0  a3 b3 c3             | | u3   | = | r3   |
-!  |          ...            | | ...  |   | ...  |
-!  |          an-1 bn-1 cn-1 | | un-1 |   | rn-1 |
-!  |          0    a_n  b_n  | | un   |   | rn   |
-!
-      implicit none
-      real(KIND=rkind8), dimension(:), intent(in) :: a,b,c,r
-      real(KIND=rkind8), dimension(:), intent(out) :: u
-      real(KIND=rkind8), dimension(size(b)) :: gam
-      logical, intent(out), optional :: err
-      integer :: n,j
-      real(KIND=rkind8) :: bet
-!
-      if (present(err)) err=.false.
-      n=size(b)
-      bet=b(1)
-      if (bet==0.0) then
-        print*,'tridag_double: Error at code stage 1'
-        if (present(err)) err=.true.
-        return
-      endif
-!
-      u(1)=r(1)/bet
-      do j=2,n
-        gam(j)=c(j-1)/bet
-        bet=b(j)-a(j)*gam(j)
-        if (bet==0.0) then
-          print*,'tridag_double: Error at code stage 2'
-          if (present(err)) err=.true.
-          return
-        endif
-        u(j)=(r(j)-a(j)*u(j-1))/bet
-      enddo
-      do j=n-1,1,-1
-        u(j)=u(j)-gam(j+1)*u(j+1)
-      enddo
-!
-    endsubroutine tridag_double
-!***********************************************************************
+!    on comment since not used (to suppress compiler warnings)
+!    subroutine tridag_double(a,b,c,r,u,err)
+!!
+!!  Solves tridiagonal system.
+!!
+!!  01-apr-03/tobi: from Numerical Recipes (p42-43).
+!!  11-apr-03/axel: double precision version.
+!!
+!!  | b1 c1 0  ...            | | u1   |   | r1   |
+!!  | a2 b2 c2 ...            | | u2   |   | r2   |
+!!  | 0  a3 b3 c3             | | u3   | = | r3   |
+!!  |          ...            | | ...  |   | ...  |
+!!  |          an-1 bn-1 cn-1 | | un-1 |   | rn-1 |
+!!  |          0    a_n  b_n  | | un   |   | rn   |
+!!
+!      implicit none
+!      real(KIND=rkind8), dimension(:), intent(in) :: a,b,c,r
+!      real(KIND=rkind8), dimension(:), intent(out) :: u
+!      real(KIND=rkind8), dimension(size(b)) :: gam
+!      logical, intent(out), optional :: err
+!      integer :: n,j
+!      real(KIND=rkind8) :: bet
+!!
+!      if (present(err)) err=.false.
+!      n=size(b)
+!      bet=b(1)
+!      if (bet==0.0) then
+!        print*,'tridag_double: Error at code stage 1'
+!        if (present(err)) err=.true.
+!        return
+!      endif
+!!
+!      u(1)=r(1)/bet
+!      do j=2,n
+!        gam(j)=c(j-1)/bet
+!        bet=b(j)-a(j)*gam(j)
+!        if (bet==0.0) then
+!          print*,'tridag_double: Error at code stage 2'
+!          if (present(err)) err=.true.
+!          return
+!        endif
+!        u(j)=(r(j)-a(j)*u(j-1))/bet
+!      enddo
+!      do j=n-1,1,-1
+!        u(j)=u(j)-gam(j+1)*u(j+1)
+!      enddo
+!!
+!    endsubroutine tridag_double
+!!***********************************************************************
     subroutine pendag(n,a,b,c,d,e,r,u)
 !
 !  01-apr-00/John Crowe (Newcastle): written
@@ -2931,10 +2975,10 @@ print*, 'rank,ipx,ipy,ipz, find_proc=',rank, ipx,ipy,ipz, find_proc_node_localty
 !
       REAL :: Y,P1,P2,P3,P4,P5,R1,R2,R3,R4,R5,R6  &
                ,Q1,Q2,Q3,Q4,Q5,S1,S2,S3,S4,S5,S6
-      DATA P1,P2,P3,P4,P5 /1.D0,-.1098628627D-2,.2734510407D-4, &
-      -.2073370639D-5,.2093887211D-6 /
-      DATA Q1,Q2,Q3,Q4,Q5 /-.1562499995D-1,.1430488765D-3, &
-      -.6911147651D-5,.7621095161D-6,-.9349451520D-7 /
+      DATA P1,P2,P3,P4,P5 /1.D0,-.1098628627E-2,.2734510407E-4, &
+      -.2073370639E-5,.2093887211E-6 /
+      DATA Q1,Q2,Q3,Q4,Q5 /-.1562499995E-1,.1430488765E-3, &
+      -.6911147651E-5,.7621095161E-6,-.9349451520E-7 /
       DATA R1,R2,R3,R4,R5,R6 /57568490574.,-13362590354., &
       651619640.7,-11214424.18,77392.33017,-184.9052456 /
       DATA S1,S2,S3,S4,S5,S6 /57568490411.,1029532985., &
@@ -2970,10 +3014,10 @@ print*, 'rank,ipx,ipy,ipz, find_proc=',rank, ipx,ipy,ipz, find_proc_node_localty
 !     VOL.5, 1962.
       REAL :: Y,P1,P2,P3,P4,P5,P6,R1,R2,R3,R4,R5,R6  &
                ,Q1,Q2,Q3,Q4,Q5,S1,S2,S3,S4,S5,S6
-      DATA P1,P2,P3,P4,P5 /1.D0,.183105D-2,-.3516396496D-4,  &
-      .2457520174D-5,-.240337019D-6 /,P6 /.636619772D0 /
-      DATA Q1,Q2,Q3,Q4,Q5 /.04687499995D0,-.2002690873D-3,   &
-      .8449199096D-5,-.88228987D-6,.105787412D-6 /
+      DATA P1,P2,P3,P4,P5 /1.E0,.183105E-2,-.3516396496E-4,  &
+      .2457520174E-5,-.240337019E-6 /,P6 /.636619772E0 /
+      DATA Q1,Q2,Q3,Q4,Q5 /.04687499995E0,-.2002690873E-3,   &
+      .8449199096E-5,-.88228987E-6,.105787412E-6 /
       DATA R1,R2,R3,R4,R5,R6 /72362614232.,-7895059235., &
       242396853.1,-2972611.439,15704.48260,-30.16036606 /
       DATA S1,S2,S3,S4,S5,S6 /144725228442.,2300535178., &
@@ -3045,14 +3089,14 @@ pmm = sqrt((2*emm + 1) * pmm / (4.d0*PI))
 if (mod(emm,2) /= 0) pmm = -pmm
 
 if (ell == emm) then
-  plegendre = pmm
+  plegendre =real(pmm)
 else
 !
 ! Compute P_(m+1)^m
 !
   pmmp1 = costh * sqrt(2.d0*emm + 3.d0) * pmm
   if (ell == (emm + 1)) then
-    plegendre = pmmp1
+    plegendre = real(pmmp1)
   else
 !
 ! Compute P_l^m (l>m+1)
@@ -3065,7 +3109,7 @@ else
       pmm = pmmp1
       pmmp1 = pll
     enddo
-    plegendre = pll
+    plegendre = real(pll)
   endif
 endif
 
@@ -3564,6 +3608,8 @@ endfunction
 !  10-apr-11/MR: coded
 !  18-nov-13/MR: removed dummy parameter lenf, can be inferred from feld
 !
+      use Cdata, only: lroot
+!
       character (len=*),               intent(in)  :: zeile
       character (len=*), dimension(:), intent(out) :: feld
       character,                       intent(in)  :: tz
@@ -3580,7 +3626,8 @@ endfunction
         ind = index( zeile(inda:), tz )
 !
         if ( inda+ind-1 < lenz .and. parser == lenf ) then
-          print*, 'Parser - Warning: too many substrings!'
+          if (lroot) print*, 'WARNING: parser -- too many substrings in "'//trim(zeile)//'" (>'// &
+                             trim(itoa(lenf))//')!!!'
           return
         endif
 !
@@ -4964,6 +5011,8 @@ endfunction
         rangegen(i-start+1)=i
       enddo
 
+      call keep_compiler_quiet(step)
+
     endfunction rangegen
 !****************************************************************************
     subroutine ranges_dimensional(jrange)
@@ -5368,32 +5417,33 @@ endfunction
 !
     endfunction numeric_precision
 !***********************************************************************
-    function detect_precision_of_binary(file,reclen) result(prec)
+!    On comment since not used (to suppress compiler warnings)
+!    function detect_precision_of_binary(file,reclen) result(prec)
+!!
+!!  only correct for one subrecord only in record.
+!!
+!      character :: prec
+!      character(LEN=*) :: file
+!      integer :: reclen
 !
-!  only correct for one subrecord only in record.
+!      integer :: marker,leng
+!      character :: own_prec
 !
-      character :: prec
-      character(LEN=*) :: file
-      integer :: reclen
-
-      integer :: marker,leng
-      character :: own_prec
-
-      open(87,file=trim(file),access='stream',form='unformatted')
-      read(87) marker
-      close(87)
-
-      own_prec=numeric_precision()
-      if (own_prec=='S') then
-        leng=4*reclen
-        prec='D'
-      else
-        leng=8*reclen
-        prec='S'
-      endif
-      if (marker==leng) prec=own_prec
-
-    endfunction detect_precision_of_binary
+!      open(87,file=trim(file),access='stream',form='unformatted')
+!      read(87) marker
+!      close(87)
+!
+!      own_prec=numeric_precision()
+!      if (own_prec=='S') then
+!        leng=4*reclen
+!        prec='D'
+!      else
+!        leng=8*reclen
+!        prec='S'
+!      endif
+!      if (marker==leng) prec=own_prec
+!
+!    endfunction detect_precision_of_binary
 !***********************************************************************
     subroutine touch_file(file)
 !
@@ -5508,7 +5558,7 @@ endfunction
 !
 ! 4-dec-2015/MR: coded
 !
-      use Cdata, only: l2, n2, m2, cosph, sinph, costh, sinth
+      use Cdata, only:  n2, m2, cosph, sinph, costh, sinth
 
       real, dimension(:,:,:,:), intent(IN) :: f
       integer                 , intent(IN) :: ith1, ith2, iph1, iph2
@@ -5548,7 +5598,7 @@ endfunction
 ! 10-sep-18/MR: added parameters ith_shift_,iph_shift_ for creating slanted strips
 ! 25-oct-18/PABourdin: entry yy_transform_strip_other removed and simplified code
 !
-      use Cdata, only: costh,sinth,cosph,sinph, y, z
+      use Cdata, only: costh,sinth,cosph,sinph
 
       integer,               intent(IN) :: ith1,ith2,iph1,iph2
       real, dimension(:,:,:),intent(OUT):: thphprime
@@ -5596,8 +5646,8 @@ endfunction
             itp = i-ith1+1; jtp = j-iph1+1
           endif
 
-          thphprime(1,itp,jtp) = datan2(dble(sprime),dble(zprime))
-          thphprime(2,itp,jtp) = datan2(dble(yprime),dble(xprime))
+          thphprime(1,itp,jtp) = real(datan2(dble(sprime),dble(zprime)))
+          thphprime(2,itp,jtp) = real(datan2(dble(yprime),dble(xprime)))
           if (thphprime(2,itp,jtp)<0.) thphprime(2,itp,jtp) = thphprime(2,itp,jtp) + twopi
 !
           !thphprime(1,itp,jtp) = ii   !!!
@@ -5619,8 +5669,6 @@ endfunction
 ! 10-sep-18/MR: added parameters ith_shift_,iph_shift_ for creating slanted strips
 ! 25-oct-18/PABourdin: entry yy_transform_strip_other removed and simplified code
 !
-      use Cdata, only: y, z
-
       real, dimension(:),    intent(IN) :: th,ph
       real, dimension(:,:,:),intent(OUT):: thphprime
       integer, optional,     intent(IN) :: iph_shift_, ith_shift_
@@ -5683,7 +5731,6 @@ endfunction
 ! 20-jan-19/MR: coded
 !
       use Cdata, only: iproc, iproc_world
-      use Cdata, only: lyang,lroot
 
       real, dimension(:,:,:,:), intent(IN)   :: source
       real, dimension(:,:,:,:), intent(INOUT):: dest
@@ -6387,56 +6434,57 @@ if (notanumber(source(:,is,js))) print*, 'source(:,is,js): iproc,j=', iproc, ipr
 !
     endfunction linspace
 !***********************************************************************
-    subroutine newton_arr(x,func,add,fmax,dxmax,itmax)
+!    On comment since not used (to suppress compiler warnings)
+!    subroutine newton_arr(x,func,add,fmax,dxmax,itmax)
+!!
+!!  Newton iteration for a 2d-array of decoupled nonlinear equations.
+!!  Not yet tested.
+!!
+!!  12-sep-16/MR: coded
+!!
+!      real, dimension(:,:),           intent(INOUT) :: x
+!      !external :: func
+!      real, dimension(:,:), optional, intent(IN) :: add
+!      real,                 optional, intent(IN) :: fmax, dxmax
+!      integer,              optional, intent(IN) :: itmax
 !
-!  Newton iteration for a 2d-array of decoupled nonlinear equations.
-!  Not yet tested.
+!      interface
+!        pure subroutine func(x,f,df)
+!          real, intent(in) :: x
+!          real, intent(out):: f, df
+!        endsubroutine
+!      endinterface
 !
-!  12-sep-16/MR: coded
+!      real, parameter :: damp=0.1
+!      integer :: itmax_, it, i, j
+!      real :: fmax_, dxmax_, dXi, fXi, dfdXi
+!      logical :: ladd
 !
-      real, dimension(:,:),           intent(INOUT) :: x
-      !external :: func
-      real, dimension(:,:), optional, intent(IN) :: add
-      real,                 optional, intent(IN) :: fmax, dxmax
-      integer,              optional, intent(IN) :: itmax
-
-      interface
-        pure subroutine func(x,f,df)
-          real, intent(in) :: x
-          real, intent(out):: f, df
-        endsubroutine
-      endinterface
-
-      real, parameter :: damp=0.1
-      integer :: itmax_, it, i, j
-      real :: fmax_, dxmax_, dXi, fXi, dfdXi
-      logical :: ladd
-
-      fmax_ =roptest(fmax,1e-5)
-      dxmax_=roptest(dxmax,1e-4)
-      itmax_=ioptest(itmax,1000)
-      ladd  =present(add)
-
-      do i=1,size(x,1); do j=1,size(x,2)
-
-        it=0;  fXi=fmax_
-        do while (abs(fXi)>=fmax_)
-!  
-          call func(x(i,j),fXi,dfdXi)
-          if (ladd) fXi=fXi+add(i,j)
-          dXi=damp*fXi/dfdXi
-          if (dXi<dxmax) exit
-          x(i,j)=x(i,j)-dXi
+!      fmax_ =roptest(fmax,1e-5)
+!      dxmax_=roptest(dxmax,1e-4)
+!      itmax_=ioptest(itmax,1000)
+!      ladd  =present(add)
 !
-          it=it+1
-          if (it>=itmax_) exit
+!      do i=1,size(x,1); do j=1,size(x,2)
 !
-        enddo
-
-      enddo; enddo
-      
-    endsubroutine newton_arr
-!***********************************************************************
+!        it=0;  fXi=fmax_
+!        do while (abs(fXi)>=fmax_)
+!!  
+!          call func(x(i,j),fXi,dfdXi)
+!          if (ladd) fXi=fXi+add(i,j)
+!          dXi=damp*fXi/dfdXi
+!          if (dXi<dxmax) exit
+!          x(i,j)=x(i,j)-dXi
+!!
+!          it=it+1
+!          if (it>=itmax_) exit
+!!
+!        enddo
+!
+!      enddo; enddo
+!      
+!    endsubroutine newton_arr
+!!***********************************************************************
     integer function ld(ix)
 !
 !  Simple dyadic logarithm for integer argument ix without rounding.
@@ -6740,8 +6788,6 @@ if (notanumber(source(:,is,js))) print*, 'source(:,is,js): iproc,j=', iproc, ipr
 !  For each element i of targetgrid, determine the index inds(i) of its nearest left neighbor
 !  in basegrid(baserange(1):baserange(2)) and the two corresponding integration weights weights(i,:).
 !
-      use Cdata, only: iproc
-
       real, dimension(:) :: basegrid, targetgrid
       integer, dimension(2) :: baserange
       real, dimension(:,:) :: weights
@@ -6857,7 +6903,7 @@ if (notanumber(source(:,is,js))) print*, 'source(:,is,js): iproc,j=', iproc, ipr
     real(KIND=rkind16), dimension(size(arr)) :: arrq 
 
     arrq=arr
-    res=sum(arrq)
+    res=real(sum(arrq))
   
     endfunction safe_sum
 !***********************************************************************
@@ -7034,6 +7080,41 @@ iloop:do i=1,size(list2)
 
     endfunction interpol_tabulated
 !***********************************************************************
+    function posindex_to_1Dindex(indx,indy,indz,rank) result(res)
+!
+!  Forms a 1D index into a (nx,ny,nz)-arrary from a triple index.
+!  Optionally, combines with the process rank such that rank and index can be recovered.
+!
+!  21-apr-26/MR: coded
+
+      integer, intent(in) :: indx,indy,indz
+      integer, optional, intent(in) :: rank
+      real :: res
+
+      res = real(nx)*(ny*(indz-1) + indy-1) + indx-1  ! ranges from 0 to nx*ny*nz-1=nw-1
+      if (present(rank)) res = res + nw*rank          ! -> floor(res/nw) = rank
+
+    endfunction posindex_to_1Dindex
+!***********************************************************************
+    subroutine expand_1Dindex(rindex,indx,indy,indz,rank)
+
+      real, intent(in) :: rindex
+      integer, intent(out) :: indx,indy,indz
+      integer, optional, intent(out) :: rank
+
+      integer(KIND=ikind8) :: ind,resid
+
+      ind = int(rindex); resid=ind
+      if (present(rank)) resid = modulo(ind,nw)
+      indx = modulo(resid,int(nx,kind=ikind8))
+      indy = modulo(resid/nx,int(ny,kind=ikind8))
+      indz = resid/nxy
+      if (present(rank)) rank=int(ind/nw)
+
+      indx=indx+1; indy=indy+1; indz=indz+1
+
+    endsubroutine expand_1Dindex
+!***********************************************************************
     subroutine allocate_using_dims_1d(src, dims)
 !
 ! Allocates allocatable arrays usind 1d dimensions
@@ -7107,7 +7188,6 @@ iloop:do i=1,size(list2)
 !
     type(pointer_with_size_info_1d) :: dst
     real, allocatable, dimension(:), target :: src
-    type(single_dim_array_dims) :: dim
 
       if (allocated(src)) then
         dst%data => src
@@ -7124,7 +7204,6 @@ iloop:do i=1,size(list2)
 !
     type(pointer_with_size_info_2d) :: dst
     real, allocatable, dimension(:,:), target :: src
-    type(two_dim_array_dims) :: dim
 
       if (allocated(src)) then
         dst%data => src
@@ -7209,6 +7288,12 @@ iloop:do i=1,size(list2)
 !***********************************************************************
     subroutine string_to_enum_scalar(dst,src_in)
 
+!
+! This function defines a global mapping from possible strings
+! to integers/enums.
+! Needed to replace strings on the rhss,mainly those in case statements, 
+! with integers since integers operate nicer on GPUs.
+!
       use Cdata, only: lroot
 
       integer :: dst
@@ -7232,8 +7317,8 @@ iloop:do i=1,size(list2)
       case('accretor')
         dst = enum_accretor_string
       case('default')
-        dst = enum_default_string      !end gravity
-      case('nothing')                  !begin hydro
+        dst = enum_default_string      
+      case('nothing')                  
         dst = enum_nothing_string
       case('linear')
         dst = enum_linear_string
@@ -7298,7 +7383,7 @@ iloop:do i=1,size(list2)
       case('uumz_profile')
         dst = enum_uumz_profile_string
       case('omega_profile')
-        dst = enum_omega_profile_string     !end hydro
+        dst = enum_omega_profile_string    
       case('zero')
         dst = enum_zero_string
       case('0')
@@ -8067,6 +8152,10 @@ iloop:do i=1,size(list2)
         dst = enum_ultra_slow_roll1_string
       case('reduced_top')
         dst = enum_reduced_top_string
+      case('gmssm')
+        dst = enum_gmssm_string
+      case('damp_mean_uz_prof_bdr')
+        dst = enum_damp_mean_uz_prof_bdr_string
       case('waterfall')
         dst = enum_waterfall_string
       case('imposed-cs2-core')
@@ -8110,6 +8199,20 @@ iloop:do i=1,size(list2)
       enddo
 !
     endsubroutine string_to_enum_2d
+!***********************************************************************
+    integer function idiv(a,b)
+!
+!  This function exists because with the right flags gfortran will complain about divisions like nx/2
+!  being truncated say to 0. It will not if you replace the explicit division with this function.
+!  So if this function appears somewhere in the source code it is a sign gfortran has complained about truncation
+!  with respect to that specific division.
+!
+! 7-Mar-26/TP: coded
+!
+    integer :: a,b
+    idiv = a/b
+!
+    endfunction
 !***********************************************************************
 !$  subroutine signal_wait_single(lflag, lvalue)
 !

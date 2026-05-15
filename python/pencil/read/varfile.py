@@ -233,7 +233,6 @@ class DataCube(object):
             inds = sorted([v for k, v in self._index.items()])
             m = {v: i+1 for i,v in enumerate(inds)}
             self._index = {k:m[v] for k,v in self._index.items()}
-            print(f"{self._index = }") #debug
         else:
             self._index = index.__dict__
 
@@ -610,7 +609,7 @@ class DataCube(object):
 
         try:
             tmp_id = infile.read_record("h")
-        except:
+        except Exception:
             return -1
         block_id = 0
         pers_obj = _Persist()

@@ -46,6 +46,7 @@ bin/pc_complete -text
 bin/pc_config.sh -text
 bin/pc_configtest -text
 bin/pc_copyvar -text
+bin/pc_copyvar_old -text
 bin/pc_cvsup -text
 bin/pc_debug -text
 bin/pc_deprecated_slice_links -text
@@ -549,6 +550,7 @@ doc/HDF5/data_layout_chunked_indexed.txt -text
 doc/HDF5/data_layout_collect-x.txt -text
 doc/HDF5/data_layout_collect-xy.txt -text
 doc/HDF5/data_layout_parallel.txt -text
+doc/HDF5/time-series_layout_chunked.txt -text
 doc/Makefile -text
 doc/README -text
 doc/citations/.gitignore -text
@@ -1084,6 +1086,7 @@ idl/lib/plotting/aspect_pos.pro -text
 idl/lib/plotting/circ_sym.pro -text
 idl/lib/plotting/circ_sym_old.pro -text
 idl/lib/plotting/contourfill.pro -text
+idl/lib/plotting/errbars.pro -text
 idl/lib/plotting/fllevels.pro -text
 idl/lib/plotting/inset_end.pro -text
 idl/lib/plotting/inset_start.pro -text
@@ -1832,6 +1835,18 @@ samples/0d-tests/heating_noionize/run.in -text
 samples/0d-tests/heating_noionize/src/Makefile.local -text
 samples/0d-tests/heating_noionize/src/cparam.local -text
 samples/0d-tests/heating_noionize/start.in -text
+samples/0d-tests/particles-breakup/NEVERLOCK -text
+samples/0d-tests/particles-breakup/README -text
+samples/0d-tests/particles-breakup/plot_res.pro -text
+samples/0d-tests/particles-breakup/print.in -text
+samples/0d-tests/particles-breakup/reference.out -text
+samples/0d-tests/particles-breakup/run.in -text
+samples/0d-tests/particles-breakup/src/Makefile.local -text
+samples/0d-tests/particles-breakup/src/cparam.local -text
+samples/0d-tests/particles-breakup/start.in -text
+samples/0d-tests/particles-breakup/video.in -text
+samples/0d-tests/particles-breakup/xyaver.in -text
+samples/0d-tests/particles-breakup/xzaver.in -text
 samples/0d-tests/reactive_particles/README -text
 samples/0d-tests/reactive_particles/air.dat -text
 samples/0d-tests/reactive_particles/chem.inp -text
@@ -1845,6 +1860,13 @@ samples/0d-tests/reactive_particles/src/cparam.local -text
 samples/0d-tests/reactive_particles/start.in -text
 samples/0d-tests/reactive_particles/tran.dat -text
 samples/0d-tests/reactive_particles/video.in -text
+samples/0d-tests/reheating/README.md -text
+samples/0d-tests/reheating/print.in -text
+samples/0d-tests/reheating/reference.out -text
+samples/0d-tests/reheating/run.in -text
+samples/0d-tests/reheating/src/Makefile.local -text
+samples/0d-tests/reheating/src/cparam.local -text
+samples/0d-tests/reheating/start.in -text
 samples/0d-tests/reionization-saha/parameters.pro -text
 samples/0d-tests/reionization-saha/print.in -text
 samples/0d-tests/reionization-saha/reference.out -text
@@ -1884,6 +1906,15 @@ samples/1d-tests/H2_flamespeed/src/cparam.local -text
 samples/1d-tests/H2_flamespeed/start.in -text
 samples/1d-tests/H2_flamespeed/tran.dat -text
 samples/1d-tests/H2_flamespeed/video.in -text
+samples/1d-tests/Schwinger-MHD/NEVERLOCK -text
+samples/1d-tests/Schwinger-MHD/README.md -text
+samples/1d-tests/Schwinger-MHD/idl/pcomp.pro -text
+samples/1d-tests/Schwinger-MHD/print.in -text
+samples/1d-tests/Schwinger-MHD/reference.out -text
+samples/1d-tests/Schwinger-MHD/run.in -text
+samples/1d-tests/Schwinger-MHD/src/Makefile.local -text
+samples/1d-tests/Schwinger-MHD/src/cparam.local -text
+samples/1d-tests/Schwinger-MHD/start.in -text
 samples/1d-tests/alphadisk/README -text
 samples/1d-tests/alphadisk/print.in -text
 samples/1d-tests/alphadisk/reference.out -text
@@ -3780,6 +3811,7 @@ samples/spherical-convection/run.in -text
 samples/spherical-convection/src/Makefile.local -text
 samples/spherical-convection/src/cparam.local -text
 samples/spherical-convection/start.in -text
+samples/spherical-gdisk-planet-thermo/NEVERLOCK -text
 samples/spherical-gdisk-planet-thermo/README -text
 samples/spherical-gdisk-planet-thermo/print.in -text
 samples/spherical-gdisk-planet-thermo/reference.out -text
@@ -4547,6 +4579,7 @@ src/grid.f90 -text
 src/gsl_wrapper.c -text
 src/hdf5_io.h -text
 src/hdf5_io_parallel.f90 -text
+src/hdf5_io_parallel_chunked.f90 -text
 src/headers_c.h -text
 src/heatflux.f90 -text
 src/heatflux.h -text
@@ -4719,6 +4752,7 @@ src/noopacity.f90 -text
 src/noparticles.f90 -text
 src/noparticles_adaptation.f90 -text
 src/noparticles_adsorbed.f90 -text
+src/noparticles_breakup.f90 -text
 src/noparticles_caustics.f90 -text
 src/noparticles_chemistry.f90 -text
 src/noparticles_coagulation.f90 -text
@@ -4804,6 +4838,8 @@ src/particles_adaptation.f90 -text
 src/particles_adaptation.h -text
 src/particles_adsorbed.f90 -text
 src/particles_adsorbed.h -text
+src/particles_breakup.f90 -text
+src/particles_breakup.h -text
 src/particles_caustics.f90 -text
 src/particles_caustics.h -text
 src/particles_cdata.f90 -text

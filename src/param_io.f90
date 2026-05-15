@@ -108,14 +108,14 @@ module Param_IO
       uxy_spec, bxy_spec, jxbxy_spec, xy_spec, oo_spec, relvel_spec, &
       uxj_spec, vec_spec, ou_spec, oun_spec, ab_spec, azbz_spec, uzs_spec, ub_spec, &
       bb2_spec, jj2_spec, ele_spec, a0_spec, pot_spec, &
-      Lor_spec, EMF_spec, Tra_spec, GWs_spec, GWh_spec, GWm_spec, Str_spec, Stg_spec, &
+      Lor_spec, OmU_spec, EMF_spec, Tra_spec, GWs_spec, GWh_spec, GWm_spec, Str_spec, Stg_spec, &
       Gab_spec, Gan_spec, GBb_spec, &
       GWs_spec_boost, GWh_spec_boost, &
       SCL_spec, VCT_spec, Tpq_spec, TGW_spec, GWd_spec, GWe_spec, GWf_spec, GWg_spec, &
       SCL_spec_boost, VCT_spec_boost, &
       StT_spec, StX_spec, &
       vel_phispec, mag_phispec, &
-      uxj_phispec, vec_phispec, ou_phispec, ab_phispec, EP_spec, hEP_spec, ro_spec, &
+      uxj_phispec, vec_phispec, ou_phispec, ab_phispec, EP_spec, hEP_spec, ro_spec, gph_spec, &
       nd_spec, ud_spec, ux_spec, uy_spec, uz_spec, ucp_spec, &
       TT_spec, ss_spec, cc_spec, cr_spec, mu_spec, sp_spec, ssp_spec, sssp_spec, &
       isaveglobal, lr_spec, r2u_spec, &
@@ -138,7 +138,7 @@ module Param_IO
       lnoghost_strati, ichannel1, ichannel2, tag_foreign, &
       lpoint, mpoint, npoint, lpoint2, mpoint2, npoint2, &
       lfatal_num_vector_369, density_scale_factor, &
-      lsmooth_farray,farray_smooth_width, radius_diag, lread_oldsnap_nocoolprof,&
+      lsmooth_farray,farray_smooth_width, radius_diag, offset_min_calc, lread_oldsnap_nocoolprof,&
       lswap_init_lnrho_uu,thetamin,lsymmgrid
 !
   namelist /run_pars/ &
@@ -158,14 +158,14 @@ module Param_IO
       uxy_spec, bxy_spec, jxbxy_spec, xy_spec, oo_spec, relvel_spec, &
       uxj_spec, vec_spec, ou_spec, oun_spec, ab_spec, azbz_spec, uzs_spec, ub_spec, &
       bb2_spec, jj2_spec, ele_spec, a0_spec, pot_spec, &
-      Lor_spec, EMF_spec, Tra_spec, GWs_spec, GWh_spec, GWm_spec, Str_spec, Stg_spec, &
+      Lor_spec, OmU_spec, EMF_spec, Tra_spec, GWs_spec, GWh_spec, GWm_spec, Str_spec, Stg_spec, &
       Gab_spec, Gan_spec, GBb_spec, &
       GWs_spec_boost, GWh_spec_boost, &
       SCL_spec, VCT_spec, Tpq_spec, TGW_spec, GWd_spec, GWe_spec, GWf_spec, GWg_spec, &
       SCL_spec_boost, VCT_spec_boost, &
       StT_spec, StX_spec, &
       vel_phispec, mag_phispec, &
-      uxj_phispec, vec_phispec, ou_phispec, ab_phispec, EP_spec, hEP_spec, ro_spec, abs_u_spec, &
+      uxj_phispec, vec_phispec, ou_phispec, ab_phispec, EP_spec, hEP_spec, ro_spec, gph_spec, abs_u_spec, &
       nd_spec, ud_spec, ux_spec, uy_spec, uz_spec, ucp_spec, &
       TT_spec, ss_spec, cc_spec, cr_spec, mu_spec, sp_spec, ssp_spec, sssp_spec, &
       isaveglobal, lr_spec, r2u_spec, &
@@ -233,10 +233,12 @@ module Param_IO
       saffman_EEM, saffman_EEM_uc, &
       uu_fft3d, oo_fft3d, bb_fft3d, jj_fft3d, uu_xkyz, oo_xkyz, bb_xkyz, jj_xkyz, &
       uu_kx0z, oo_kx0z, bb_kx0z, jj_kx0z, bb_k00z, ee_k00z, gwT_fft3d, &
-      Em_specflux, Hm_specflux, Hc_specflux, density_scale_factor, radius_diag, &
+      Em_specflux, Hm_specflux, Hc_specflux, density_scale_factor, radius_diag, offset_min_calc, &
       lmorton_curve, lsuppress_parallel_reductions, &
-      lverbose_performance_log, &
-      shared_mem_name, lupdate_cvs, lread_oldsnap_nocoolprof,thetamin
+      shared_mem_name, lupdate_cvs, lread_oldsnap_nocoolprof,thetamin, &
+      lspec_tcrit, tspec_crit_log_interval, &
+      lsnap_tcrit, tsnap_crit_log_interval, &
+      lvid_tcrit, tvid_crit_log_interval
 !
   namelist /IO_pars/ &
       lcollective_IO, IO_strategy
@@ -804,6 +806,7 @@ module Param_IO
         call write_stub ('particles_ads', lparticles_adsorbed)
         call write_stub ('particles_surf', lparticles_surfspec)
         call write_stub ('particles_chem', lparticles_chemistry)
+        call write_stub ('particles_breakup', lparticles_breakup)
 !
         if (.not. lstart) then
           call write_stub ('particles_adapt', lparticles_adaptation)
@@ -1139,6 +1142,9 @@ module Param_IO
        if (ip<14) call information('write_pencil_info','pencil information written to the file pencils.list')
        close(unit)
      endif
+
+     !TP: not sure where to put this
+     call keep_compiler_quiet(niter_poisson)
 !
    endsubroutine write_pencil_info
 !***********************************************************************

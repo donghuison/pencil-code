@@ -8,6 +8,8 @@ module Equ
   use Messages
   use Boundcond
   use Grid, only: calc_pencils_grid, get_grid_mn
+  use Mpicomm, only: MPI_COMM_GRID,MPI_COMM_PENCIL,MPI_COMM_XBEAM,MPI_COMM_YBEAM,MPI_COMM_ZBEAM, &
+                     MPI_COMM_XYPLANE,MPI_COMM_XZPLANE,MPI_COMM_YZPLANE
 
   implicit none
 !
@@ -17,7 +19,7 @@ module Equ
   public :: perform_diagnostics
   public :: calc_all_module_diagnostic_auxiliaries
 !
-  real, public    :: before_boundary_sum_time=0.
+  real, public    :: before_and_after_boundary_sum_time=0.
   real, public    :: time_spent_copying_and_waiting=0.
   real, public    :: radtransfer_sum_time   =0.
   real, public    :: rhs_sum_time=0.
@@ -86,8 +88,8 @@ module Equ
 !      use, intrinsic :: iso_fortran_env
 !$    use General, only: signal_send
 !
-      real, dimension (mx,my,mz,mfarray) :: f
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: f
+      real, contiguous, dimension(:,:,:,:) :: df
       type (pencil_case) :: p
       intent(inout):: f       ! inout due to lshift_datacube_x,
                               ! density floor, or velocity ceiling
@@ -105,19 +107,18 @@ module Equ
       if (headtt.or.ldebug) print*,'pde: ENTER'
       if (headtt) call svn_id( &
            "$Id$")
+
 !
-!  Get the adress of the f-array on the GPU's global memory for use
-!  in offloading, training etc.
+!  Load the values of the dynamically changing parameters to the device
 !
-      if (lgpu) call get_farray_ptr_gpu   !Why here? should be static
       call load_variables_to_gpu 
 !
 !  Initialize counter for calculating and communicating print results.
 !  Do diagnostics only in the first of the itorder substeps.
 !
-      ldiagnos   =lfirst.and.lout
-      l1davgfirst=lfirst.and.l1davg
-      l2davgfirst=lfirst.and.l2davg
+      ldiagnos   =lfirst .and. lout  
+      l1davgfirst=lfirst .and. l1davg
+      l2davgfirst=lfirst .and. l2davg
 
 !
 !  Derived diagnostics switches.
@@ -184,18 +185,19 @@ module Equ
 !  Call "before_boundary" hooks (for f array precalculation)
 !
       call before_boundary_shared(f)
+ !
+ ! If asked test that the CPU implementation is correctly executed on the GPUs
+ !
       if (lgpu .and. ltest_rhs .and. it == it_test_rhs) then
         call test_rhs_gpu(f,p,mass_per_proc,early_finalize,rhs_cpu)
       endif
 
-      if (lgpu) then
-        start_time = mpiwtime()
-        call before_boundary_gpu(f,lrmv,itsub,t)
-        end_time = mpiwtime()
-        before_boundary_sum_time = before_boundary_sum_time + end_time-start_time
-      else
-        call before_boundary_cpu(f)
+      start_time = real(mpiwtime())
+      if (lgpu) then; call before_boundary_gpu(f,lrmv,itsub,t)
+      else;      call before_boundary_cpu(f)
       endif
+      end_time = real(mpiwtime())
+      before_and_after_boundary_sum_time = before_and_after_boundary_sum_time + end_time-start_time
 !
 !  Prepare x-ghost zones; required before f-array communication
 !  AND shock calculation
@@ -265,7 +267,7 @@ module Equ
       if (lupdate_courant_dt) then
         if (dtmax/=0.0) then
           if (lfractional_tstep_advance) then
-            dt1_max=1./(dt_incr*t)
+            dt1_max=real(1./(dt_incr*t))
           else
             dt1_max=1./dtmax
           endif
@@ -293,34 +295,33 @@ module Equ
 !  MR+joern+axel, 8.10.2015
 !
       call timing('pde','before "after_boundary" calls')
+      start_time = real(mpiwtime())
       call after_boundary_shared(f)
       if (.not. lgpu) call after_boundary_cpu(f,df)
+      before_and_after_boundary_sum_time = before_and_after_boundary_sum_time + real(mpiwtime())-start_time
       call timing('pde','after "after_boundary" calls')
 !
       if (lgpu) then
         if (ldiagnostic_output) then
           !wait in case the last diagnostic tasks are not finished
-          start_time = mpiwtime()
+          start_time = real(mpiwtime())
           call copy_farray_from_GPU(f)
-          time_spent_copying_and_waiting = time_spent_copying_and_waiting+mpiwtime()-start_time
+          time_spent_copying_and_waiting = time_spent_copying_and_waiting+real(mpiwtime())-start_time
+          !Save the state of the ODE variables as they were when diagnostics were asked for
           if (lode) f_ode_diagnostics = f_ode
+          !Ask the helper to calculate diagnostics
 !$        lmasterflags(PERF_DIAGS) = .true.
         endif
-        start_time = mpiwtime()
+        start_time = real(mpiwtime())
         call rhs_gpu(f,itsub)
-!TP: should be done after rhs_gpu since if doing testing against cpu want to get the right value of dt
-        if (ldiagnostic_output) then
-!$        call save_diagnostic_controls
-        endif
-        end_time = mpiwtime()
+!  Should be done after rhs_gpu since if doing testing against cpu want to get the right value of dt
+!$      if (ldiagnostic_output) call save_diagnostic_controls
+        end_time = real(mpiwtime())
         rhs_sum_time = rhs_sum_time + end_time-start_time
       else
-        if (ldiagnos.or.l1davgfirst.or.l1dphiavg.or.l2davgfirst) then
-                !if (lroot) print*,'Diagnostic time - CPU=', t
-        endif
-        start_time = mpiwtime()
+        start_time = real(mpiwtime())
         call rhs_cpu(f,df,p,mass_per_proc,early_finalize)
-        end_time = mpiwtime()
+        end_time = real(mpiwtime())
         rhs_sum_time = rhs_sum_time + end_time-start_time
 !
 !  Doing df-related work which cannot be finished inside the main mn-loop.
@@ -401,11 +402,11 @@ module Equ
 
       endif     ! if (.not. lgpu)
 
-      !TP: Update diagnostics controls which is done earlier when multithreading.
+      !    Update diagnostics controls which is done earlier when multithreading.
       !    I believe at least itdiagnos and dtdiagnos could be eliminated but not 
       !    worth the effort right now
-      if (.not. lmultithread .and. lfirst) then
-        tdiagnos  = t
+      if (.not. lsubstepping_in_time .and. .not. lmultithread .and. lfirst) then
+        tdiagnos  = real(t)
         itdiagnos = it
         dtdiagnos = dt
         call finalize_diagnostics
@@ -436,8 +437,10 @@ module Equ
     endsubroutine pde
 !***********************************************************************
     subroutine load_variables_to_gpu
+!
+!  Loads the values of the dynamically changing parameters to the device
+!
       use GPU, only: update_on_gpu
-
       use Special, only: load_variables_to_gpu_special
       use Hydro, only: load_variables_to_gpu_hydro
 
@@ -445,8 +448,9 @@ module Equ
 
       if (lspecial) call load_variables_to_gpu_special
       if (lhydro)   call load_variables_to_gpu_hydro
-      !TP: need to load it on the first substep where it is wrong!
+      !    Need to load it on the first substep where it is wrong!
       !    and the correct one after dt is calculated to be in sync with the CPU
+      !    This because we want to recreate the buggy behaviour in the short-stopping time approximation
       if (lgpu .and. (ldustvelocity .or. ldustdensity) .and. (itsub <= 2)) &
         call update_on_gpu(dt_beta_ts_index,'AC_dt_beta_ts__mod__cdata')
 
@@ -462,7 +466,7 @@ module Equ
     use Slices
     use Diagnostics
 
-    real, dimension (mx,my,mz,mfarray) :: f
+    real, contiguous, dimension(:,:,:,:) :: f
 !
 !  Print diagnostic averages to screen and file.
 !
@@ -485,9 +489,19 @@ module Equ
 !
     endsubroutine write_diagnostics
 !***********************************************************************
+     !subroutine restrict_cores
+      !TP: example code to explicitly set and get cores the thread are running on
+      !    the flexible way to set this is with OMP_PROC_BIND=close,spread, but in case that fails one can be sure by using the code
+      !below
+!!$    if (omp_get_thread_num() /= 0) call set_cpu(core_ids(omp_get_thread_num()+1))
+      !print*,"omp_id,cpu_id,mpi_id: ",omp_get_thread_num(), get_cpu(), iproc
+     !endsubroutine restrict_cores
+!***********************************************************************
     subroutine init_reduc_pointers
 !
-!  Initializes pointers used in diagnostics_reductions
+!  Initializes pointers used in diagnostics_reductions.
+!  Each thread has its own copy of the arrays that also exist on the master.
+!  Thus they update the master's copy (e.g. sum up to it) via these pointers
 !
 !  20-feb-23/MR: Coded
 !
@@ -513,52 +527,52 @@ module Equ
 
     endsubroutine init_reduc_pointers
 !***********************************************************************
-    subroutine diagnostics_reductions
+!$    subroutine diagnostics_reductions
 !
 !  Reduces accumulated diagnostic variables across threads. Only called if using OpenMP
 !
 !  30-mar-23/TP: Coded
 !
-    use Diagnostics
-    use Chemistry, only: chemistry_diags_reductions
-    use Solid_cells, only: sc_diags_reductions
-
-    integer :: imn
-
-      if (ldiagnos .and. allocated(fname)) then
-        do imn=1,size(fname)
-          if (allocated(inds_max_diags)) then
-            if (any(inds_max_diags == imn) .and. fname(imn) /= 0.) &
-              p_fname(imn) = max(p_fname(imn),fname(imn))
-          endif
-          if (allocated(inds_sum_diags)) then
-            if (any(inds_sum_diags == imn)) p_fname(imn) = p_fname(imn) + fname(imn)
-          endif
-        enddo
-      endif
-
-      if (l1davgfirst) then
-        if (allocated(fnamex)) p_fnamex = p_fnamex + fnamex
-        if (allocated(fnamey)) p_fnamey = p_fnamey + fnamey
-        if (allocated(fnamez)) p_fnamez = p_fnamez + fnamez
-        if (allocated(fnamer)) p_fnamer = p_fnamer + fnamer
-      endif
-
-      if (l2davgfirst) then
-        if (allocated(fnamexy)) p_fnamexy = p_fnamexy + fnamexy
-        if (allocated(fnamexz)) p_fnamexz = p_fnamexz + fnamexz
-        if (allocated(fnamerz)) p_fnamerz = p_fnamerz + fnamerz
-      endif
-
-      if (allocated(fname_keep)) p_fname_keep = p_fname_keep + fname_keep
-      if (allocated(fname_sound)) p_fname_sound = p_fname_sound + fname_sound
-      if (allocated(ncountsz)) p_ncountsz = p_ncountsz + ncountsz
-
-      call diagnostics_diag_reductions
-      call chemistry_diags_reductions
-      call sc_diags_reductions
-
-    endsubroutine diagnostics_reductions
+!$    use Diagnostics
+!$    use Chemistry, only: chemistry_diags_reductions
+!$    use Solid_cells, only: sc_diags_reductions
+!$
+!$    integer :: imn
+!$
+!$      if (ldiagnos .and. allocated(fname)) then
+!$        do imn=1,size(fname)
+!$          if (allocated(inds_max_diags)) then
+!$            if (any(inds_max_diags == imn) .and. fname(imn) /= 0.) &
+!$              p_fname(imn) = max(p_fname(imn),fname(imn))
+!$          endif
+!$          if (allocated(inds_sum_diags)) then
+!$            if (any(inds_sum_diags == imn)) p_fname(imn) = p_fname(imn) + fname(imn)
+!$          endif
+!$        enddo
+!$      endif
+!$
+!$      if (l1davgfirst) then
+!$        if (allocated(fnamex)) p_fnamex = p_fnamex + fnamex
+!$        if (allocated(fnamey)) p_fnamey = p_fnamey + fnamey
+!$        if (allocated(fnamez)) p_fnamez = p_fnamez + fnamez
+!$        if (allocated(fnamer)) p_fnamer = p_fnamer + fnamer
+!$      endif
+!$
+!$      if (l2davgfirst) then
+!$        if (allocated(fnamexy)) p_fnamexy = p_fnamexy + fnamexy
+!$        if (allocated(fnamexz)) p_fnamexz = p_fnamexz + fnamexz
+!$        if (allocated(fnamerz)) p_fnamerz = p_fnamerz + fnamerz
+!$      endif
+!$
+!$      if (allocated(fname_keep)) p_fname_keep = p_fname_keep + fname_keep
+!$      if (allocated(fname_sound)) p_fname_sound = p_fname_sound + fname_sound
+!$      if (allocated(ncountsz)) p_ncountsz = p_ncountsz + ncountsz
+!$
+!$      call diagnostics_diag_reductions
+!$      call chemistry_diags_reductions
+!$      call sc_diags_reductions
+!$
+!$    endsubroutine diagnostics_reductions
 !***********************************************************************
     subroutine calc_all_module_diagnostic_auxiliaries(f,p)
 !
@@ -580,7 +594,7 @@ module Equ
 !$    use OMP_lib
 !$    use General, only: get_cpu, set_cpu
 
-      real, dimension (mx,my,mz,mfarray),intent(INOUT) :: f
+      real, contiguous, dimension(:,:,:,:),intent(INOUT) :: f
       type (pencil_case) :: p
 
       integer :: imn
@@ -596,7 +610,7 @@ module Equ
         n=nn(imn)
         m=mm(imn)
 !
-!TP: for the moment calc_all_diagnostic_auxilaries does not support coarse grid
+!  For the moment calc_all_diagnostic_auxilaries does not support coarse grid
 !
 !  Skip points not belonging to coarse grid.
 !
@@ -653,7 +667,7 @@ module Equ
 !$    use OMP_lib
 !$    use General, only: get_cpu, set_cpu
 
-      real, dimension (mx,my,mz,mfarray),intent(INOUT) :: f
+      real, contiguous, dimension(:,:,:,:),intent(INOUT) :: f
       type (pencil_case) :: p
 
       integer :: imn
@@ -661,50 +675,37 @@ module Equ
 !  Parallelization across all helper threads.
 !
       call init_reduc_pointers
-
-      !TP: if equ had an initialization routine this would fit there better
-      if (idiag_Rmesh /= 0 .or. idiag_Rmesh3 /=0 ) ltimestep_diagnostics = .true.
 !
 !  If doing diagnostics together with the GPU lupdate_courant_dt means to calculate some of the timestep diagnostics
 !
-      if (lgpu) then
-        if (idiag_dtv /= 0 .or. &
-            idiag_dtdiffus /= 0 .or. &
-            idiag_dtdiffus2 /= 0 .or. &
-            idiag_dtdiffus3 /= 0) ltimestep_diagnostics = .true.
-        lupdate_courant_dt = lcourant_dt .and. ltimestep_diagnostics
-      endif
+      if (lgpu) lupdate_courant_dt = lcourant_dt .and. ltimestep_diagnostics
 
 !$omp parallel if (.not. lsuppress_parallel_reductions) private(p) num_threads(num_helper_threads) &
 !$omp copyin(t,dxmax_pencil,fname,fnamex,fnamey,fnamez,fnamer,fnamexy,fnamexz,fnamerz,fname_keep,fname_sound,ncountsz,phiavg_norm)
 !$    call restore_diagnostic_controls
-
-      
+!      
 !     TP: on some nvfortan compilers copyin does not seem to be enough to ensure diagnostic arrays are allocated
-!     TP: not sure was the copyin ever sufficient, but not that important since we can always explicitly check
+!         not sure was the copyin ever sufficient, but not that important since we can always explicitly check
 !$    if (.not. allocated(fname)) call allocate_diagnostic_arrays
       if (lchemistry) call chemistry_allocate_rhs_arrays
       lfirstpoint=.true.
-      !TP: example code to explicitly set and get cores the thread are running on
-      !TP: the flexible way to set this is with OMP_PROC_BIND=close,spread, but in case that fails one can be sure by using the code
-      !below
-!!$    if (omp_get_thread_num() /= 0) call set_cpu(core_ids(omp_get_thread_num()+1))
-      !print*,"omp_id,cpu_id,mpi_id: ",omp_get_thread_num(), get_cpu(), iproc
+
+      !call restrict_cores
 
       !$omp do
       do imn=1,nyz
         !Done since with multithreading RHS is not evaluated
         if (lmultithread .and. lupdate_courant_dt) then
-                if (idiag_dtdiffus/=0 .or. idiag_Rmesh /= 0)  maxdiffus    = 0.0
-                maxadvec     = 0.0
-                advec2       = 0.0
-                advec_cs2    = 0.0
-                advec2_hypermesh  = 0.0
+          if (idiag_dtdiffus/=0 .or. idiag_Rmesh /= 0) maxdiffus = 0.0
+          maxadvec     = 0.0
+          advec2       = 0.0
+          advec_cs2    = 0.0
+          advec2_hypermesh  = 0.0
         endif
         n=nn(imn)
         m=mm(imn)
 !
-!TP: for the moment calc_all_module_diagnostics does not support coarse grid
+!  For the moment calc_all_module_diagnostics does not support coarse grid
 !
 !  Skip points not belonging to coarse grid.
 !
@@ -762,30 +763,39 @@ module Equ
 !!$      endif
 !!$    enddo
 !$omp barrier
-
 !$omp end parallel   ! all helper threads
 
       endsubroutine calc_all_module_diagnostics
 !*****************************************************************************
       subroutine calc_all_before_boundary_diagnostics(f)
-
+!
+!  Calculates diagnostic variables that would be normally calculated in before_boundary_cpu
+!  When using the GPUs.
+!  Executed by the helper thread.
+!
         use Density, only: density_before_boundary_diagnostics
 
-        real, dimension (mx,my,mz,mfarray),intent(INOUT) :: f
+        real, contiguous, dimension(:,:,:,:),intent(INOUT) :: f
 
-        !$omp parallel if (.not. lsuppress_parallel_reductions) num_threads(num_helper_threads)
-                call density_before_boundary_diagnostics(f)
+        !$omp parallel if (.not. lsuppress_parallel_reductions) num_threads(num_helper_threads) &
+        !$omp copyin(MPI_COMM_GRID,MPI_COMM_PENCIL,MPI_COMM_XBEAM,MPI_COMM_YBEAM,MPI_COMM_ZBEAM, &
+        !$omp MPI_COMM_XYPLANE,MPI_COMM_XZPLANE,MPI_COMM_YZPLANE)
+
+        call density_before_boundary_diagnostics(f)
         !$omp end parallel
 
       endsubroutine calc_all_before_boundary_diagnostics
 !*****************************************************************************
       subroutine perform_diagnostics(f,p)
+!
+!  Called by the helper to perform the diagnostics when asked for them
+!
 
 !$    use General, only: signal_send
       use Special, only: calc_ode_diagnostics_special
       use EquationofState, only: ioncalc
 
-      real, dimension (mx,my,mz,mfarray),intent(INOUT) :: f
+      real, contiguous, dimension(:,:,:,:),intent(INOUT) :: f
       type (pencil_case) :: p
 
         if (lmultithread .and. (leos_ionization.or.leos_temperature_ionization)) call ioncalc(f)
@@ -795,7 +805,6 @@ module Equ
         call finalize_diagnostics                 ! by diagmaster (MPI comm.)
         call write_diagnostics(f)                 !       ~
 
-!!$      call signal_send(lhelperflags(PERF_DIAGS),.false.)
 !$      lhelperflags(PERF_DIAGS) = .false.
 
       endsubroutine perform_diagnostics
@@ -894,7 +903,7 @@ module Equ
       use Testscalar
       use Viscosity, only: calc_pencils_viscosity
 
-      real, dimension (mx,my,mz,mfarray),intent(INOUT) :: f
+      real, contiguous, dimension(:,:,:,:),intent(INOUT) :: f
       type (pencil_case)                ,intent(INOUT) :: p
 !
 !  The solid cells may have to be updated at the beginning of every
@@ -964,11 +973,11 @@ module Equ
 
     endsubroutine calc_all_pencils
 !***********************************************************************
-    subroutine check_if_necessary(f,lcommunicate)
+    subroutine check_if_have_to_wait_for_communication(f,lcommunicate)
 
       use Mpicomm, only: finalize_isendrcv_bdry
 
-      real, dimension(mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       logical :: lcommunicate
 
       if (lcommunicate) then
@@ -980,9 +989,10 @@ module Equ
         endif
       endif
 
-    endsubroutine check_if_necessary
+    endsubroutine check_if_have_to_wait_for_communication
 !***********************************************************************
     subroutine before_boundary_shared(f)
+!
 !  These before_boundaries are shared between CPU and GPU (that e.g. set parameters are done infrequently enough 
 !  to not take a performance hit from moving buffer between host and device)
 !
@@ -991,10 +1001,11 @@ module Equ
       use Shear, only: shear_before_boundary
       use Interstellar, only: interstellar_before_boundary
 
-      real, dimension(mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
 
       if (linterstellar) call interstellar_before_boundary(f)
       if (lshear)        call shear_before_boundary(f)
+!
     endsubroutine before_boundary_shared
 !***********************************************************************
     subroutine before_boundary_cpu(f)
@@ -1016,7 +1027,7 @@ module Equ
       use Pscalar, only: pscalar_before_boundary
       use Testflow, only: testflow_before_boundary
       use Testfield, only: testfield_before_boundary
-      real, dimension(mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
 !
 !  Calculate the potential of the self gravity. Must be done before
 !  communication in order to be able to take the gradient of the potential
@@ -1049,7 +1060,7 @@ module Equ
       use Mpicomm, only: mpiwtime
       use Radiation, only: radtransfer
 
-      real, intent(INOUT), dimension(mx,my,mz,mfarray) :: f
+      real, intent(INOUT), contiguous, dimension(:,:,:,:) :: f
       real :: start_time,end_time
 
       if (ltraining) call training_after_boundary(f)
@@ -1058,9 +1069,9 @@ module Equ
 !and radiation rays depend on them
 !
       if (lradiation_ray) then
-        start_time = mpiwtime()
+        start_time = real(mpiwtime())
         call radtransfer(f)
-        end_time = mpiwtime()
+        end_time = real(mpiwtime())
         radtransfer_sum_time = radtransfer_sum_time + end_time-start_time
       endif
 
@@ -1086,9 +1097,8 @@ module Equ
       use Special, only: special_after_boundary
       use Chemistry, only: calc_for_chem_mixture
 
-      real, intent(INOUT), dimension(mx,my,mz,mfarray) :: f
-      real, intent(INOUT), dimension(mx,my,mz,mvar)    :: df
-
+      real, intent(INOUT), contiguous, dimension(:,:,:,:) :: f
+      real, intent(INOUT), contiguous, dimension(:,:,:,:)    :: df
 !
 !  Calculate shock profile (simple).
 !
@@ -1122,10 +1132,9 @@ module Equ
 
       use Special, only: prep_rhs_special
 !
-!  Calculation of changing parameters that could happen, e.g. in after_boundary calls 
-!  that we want to happen both on the CPU and GPU should happen here.
+!  The updating of parameters that should be updated both on the CPU and GPU should happen here.
 !
-    if (lspecial) call prep_rhs_special
+      if (lspecial) call prep_rhs_special
 
     endsubroutine prep_rhs
 !***********************************************************************
@@ -1154,6 +1163,203 @@ module Equ
 
     endsubroutine timestep_diagnostics
 !***********************************************************************
+    subroutine calc_time_integrals(f,p)
+!
+!  Calculates time integrals
+!
+      use Hydro,    only: time_integrals_hydro
+      use Magnetic, only: time_integrals_magnetic
+
+      real, contiguous, dimension(:,:,:,:),intent(INOUT) :: f
+      type (pencil_case)                ,intent(IN) :: p
+
+      if (ltime_integrals.and.llast) then
+        if (lhydro)    call time_integrals_hydro(f,p)
+        if (lmagnetic) call time_integrals_magnetic(f,p)
+      endif
+
+    endsubroutine calc_time_integrals
+!***********************************************************************
+    subroutine calc_df_diagnostics(df,p)
+!
+!  Calculates all diagnostics depending on df
+!
+      use Hydro,    only: df_diagnos_hydro
+      use Magnetic, only: df_diagnos_magnetic
+
+      real, contiguous, dimension(:,:,:,:),intent(IN) :: df
+      type (pencil_case)                ,intent(IN) :: p
+
+      if (ldiagnos) then
+        if (lhydro) call df_diagnos_hydro(df,p)
+        if (lmagnetic) call df_diagnos_magnetic(df,p)
+      endif
+
+    endsubroutine calc_df_diagnostics
+!***********************************************************************
+    subroutine calc_all_rhs(f,df,p)
+!
+!  Calculates all rhss
+!
+      use Ascalar
+      use Chiral
+      use Chemistry
+      use Cosmicray
+      use CosmicrayFlux
+      use Density
+      use Dustvelocity
+      use Dustdensity
+      use Energy
+      use EquationOfState
+      use Gravity
+      use Heatflux
+      use Hydro
+      use Lorenz_gauge
+      use Magnetic
+      use NeutralDensity
+      use NeutralVelocity
+      use Particles_main
+      use Pscalar
+      use PointMasses
+      use Polymer
+      use Radiation
+      use Selfgravity
+      use Shear
+      use Solid_Cells, only:  dsolid_dt
+      use Special, only: dspecial_dt
+      use Testfield
+      use Testflow
+      use Testscalar
+      use Training, only: dtraining_dt
+
+      real, contiguous, dimension(:,:,:,:),intent(INOUT) :: f
+      real, contiguous, dimension(:,:,:,:)   ,intent(INOUT) :: df
+      type (pencil_case)                ,intent(INOUT) :: p
+
+!  hydro, density, and entropy evolution
+!  Note that pressure gradient is added in denergy_dt of noentropy to momentum,
+!  even if lentropy=.false.
+!
+        if (.not. lsubstepping_in_time) then
+
+          call duu_dt(f,df,p)
+          call dlnrho_dt(f,df,p)
+          call denergy_dt(f,df,p)
+!
+!  Magnetic field evolution
+!
+          if (lmagnetic) call daa_dt(f,df,p)
+!
+!  Lorenz gauge evolution
+!
+          if (llorenz_gauge) call dlorenz_gauge_dt(f,df,p)
+!
+!  Polymer evolution
+!
+          if (lpolymer) call dpoly_dt(f,df,p)
+!
+!  Testscalar evolution
+!
+          if (ltestscalar) call dcctest_dt(f,df,p)
+!
+!  Testfield evolution
+!
+          if (ltestfield) call daatest_dt(f,df,p)
+!
+!  Testflow evolution
+!
+          if (ltestflow) call duutest_dt(f,df,p)
+!
+!  Passive scalar evolution
+!
+          if (lpscalar) call dlncc_dt(f,df,p)
+!
+!  Supersaturation evolution
+
+          if (lascalar) call dacc_dt(f,df,p)
+!
+!  Dust evolution
+!
+          if (ldustvelocity) call duud_dt(f,df,p)
+          if (ldustdensity) call dndmd_dt(f,df,p)
+!
+!  Neutral evolution
+!
+          if (lneutraldensity) call dlnrhon_dt(f,df,p)
+          if (lneutralvelocity) call duun_dt(f,df,p)
+!
+!  Gravity
+!
+          if (lgrav) call addgravity(df,p)
+!
+!  Self-gravity
+!
+          if (lselfgravity) call addselfgrav(df,p)
+!
+!  Cosmic ray energy density
+!
+          if (lcosmicray) call decr_dt(f,df,p)
+!
+!  Cosmic ray flux
+!
+          if (lcosmicrayflux) call dfcr_dt(f,df,p)
+!
+!  Chirality of left and right handed aminoacids
+!
+          if (lchiral) call dXY_chiral_dt(f,df,p)
+!
+!  Evolution of chemical species
+!
+          if (lchemistry) call dchemistry_dt(f,df,p)
+!
+!  Evolution of heatflux vector
+!
+          if (lheatflux) call dheatflux_dt(f,df,p)
+!
+!  Add radiative cooling and radiative pressure (for ray method)
+!
+          if (lradiation_ray.and.lenergy) call dradiation_dt(f,df,p)
+        endif
+!
+!  Add and extra 'special' physics
+!
+        if (lspecial) call dspecial_dt(f,df,p)
+!
+!  Find diagnostics related to solid cells (e.g. drag and lift).
+!  Integrating to the full result is done after loops over m and n.
+!
+        if (lsolid_cells) call dsolid_dt(f,df,p)
+!
+!  Add shear if present
+!
+        if (lshear) call shearing(f,df,p)
+!
+        if (lparticles) call particles_pde_pencil(f,df,p)
+!
+        if (lpointmasses) call pointmasses_pde_pencil(f,df,p)
+
+        if (ltraining) call dtraining_dt(f,df)
+
+    endsubroutine calc_all_rhs
+!***********************************************************************
+    subroutine calc_phisums(p)
+!
+!  General phiaverage quantities -- useful for debugging.
+!
+
+      use Diagnostics, only: phisum_mn_name_rz
+
+      type (pencil_case)                ,intent(IN) :: p
+
+      if (l2davgfirst) then
+        call phisum_mn_name_rz(p%rcyl_mn,idiag_rcylmphi)
+        call phisum_mn_name_rz(p%phi_mn,idiag_phimphi)
+        call phisum_mn_name_rz(p%z_mn,idiag_zmphi)
+        call phisum_mn_name_rz(p%r_mn,idiag_rmphi)
+      endif
+
+    endsubroutine
+!***********************************************************************
     subroutine rhs_cpu(f,df,p,mass_per_proc,early_finalize)
 !
 !  Calculates rhss of the PDEs.
@@ -1168,7 +1374,6 @@ module Equ
       use Cosmicray
       use CosmicrayFlux
       use Density
-      use Diagnostics
       use Dustvelocity
       use Dustdensity
       use Energy
@@ -1194,10 +1399,10 @@ module Equ
       use Testfield
       use Testflow
       use Testscalar
-      use Training, only: calc_diagnostics_training, div_sgs_stresses
+      use Training, only: calc_diagnostics_training
 
-      real, dimension (mx,my,mz,mfarray),intent(INOUT) :: f
-      real, dimension (mx,my,mz,mvar)   ,intent(OUT  ) :: df
+      real, contiguous, dimension(:,:,:,:),intent(INOUT) :: f
+      real, contiguous, dimension(:,:,:,:)   ,intent(OUT  ) :: df
       type (pencil_case)                ,intent(INOUT) :: p
       real, dimension(1)                ,intent(INOUT) :: mass_per_proc
       logical                           ,intent(IN   ) :: early_finalize
@@ -1207,7 +1412,6 @@ module Equ
 !
       lfirstpoint=.true.
       lcommunicate=.not.early_finalize
-
 !
 !  This call is included in the GPU kernels by transpilation
 !
@@ -1222,7 +1426,7 @@ module Equ
 !
 !  Skip points not belonging to coarse grid.
 !
-        !TP: not active for the GPU
+        ! Not active for the GPU
         !lcoarse_mn=lcoarse.and.mexts(1)<=m.and.m<=mexts(2)
         !if (lcoarse_mn) then
         !  lcoarse_mn=lcoarse_mn.and.ninds(0,m,n)>0
@@ -1243,7 +1447,7 @@ module Equ
 !
 !  Make sure all ghost points are set.
 !
-        call check_if_necessary(f,lcommunicate)
+        call check_if_have_to_wait_for_communication(f,lcommunicate)
         call timing('pde','finished boundconds_z',mnloop=.true.)
 !
 !  For each pencil, accumulate through the different modules
@@ -1272,136 +1476,21 @@ module Equ
 !  NO CALLS MODIFYING PENCIL_CASE PENCILS BEYOND THIS POINT
 !  --------------------------------------------------------
 !
-!  hydro, density, and entropy evolution
-!  Note that pressure gradient is added in denergy_dt of noentropy to momentum,
-!  even if lentropy=.false.
-!
-        call duu_dt(f,df,p)
-        call dlnrho_dt(f,df,p)
-        call denergy_dt(f,df,p)
-!
-!  Magnetic field evolution
-!
-        if (lmagnetic) call daa_dt(f,df,p)
-!
-!  Lorenz gauge evolution
-        if (llorenz_gauge) call dlorenz_gauge_dt(f,df,p)
-!
-!  Polymer evolution
-!
-        if (lpolymer) call dpoly_dt(f,df,p)
-!
-!  Testscalar evolution
-!
-        if (ltestscalar) call dcctest_dt(f,df,p)
-!
-!  Testfield evolution
-!
-        if (ltestfield) call daatest_dt(f,df,p)
-!
-!  Testflow evolution
-!
-        if (ltestflow) call duutest_dt(f,df,p)
-!
-!  Passive scalar evolution
-!
-        if (lpscalar) call dlncc_dt(f,df,p)
-!
-!  Supersaturation evolution
-
-        if (lascalar) call dacc_dt(f,df,p)
-!
-!  Dust evolution
-!
-        if (ldustvelocity) call duud_dt(f,df,p)
-        if (ldustdensity) call dndmd_dt(f,df,p)
-!
-!  Neutral evolution
-!
-        if (lneutraldensity) call dlnrhon_dt(f,df,p)
-        if (lneutralvelocity) call duun_dt(f,df,p)
-!
-!  Gravity
-!
-        if (lgrav) call addgravity(df,p)
-!
-!  Self-gravity
-!
-        if (lselfgravity) call addselfgrav(df,p)
-!
-!  Cosmic ray energy density
-!
-        if (lcosmicray) call decr_dt(f,df,p)
-!
-!  Cosmic ray flux
-!
-        if (lcosmicrayflux) call dfcr_dt(f,df,p)
-!
-!  Chirality of left and right handed aminoacids
-!
-        if (lchiral) call dXY_chiral_dt(f,df,p)
-!
-!  Evolution of chemical species
-!
-        if (lchemistry) call dchemistry_dt(f,df,p)
-!
-!  Evolution of heatflux vector
-!
-        if (lheatflux) call dheatflux_dt(f,df,p)
-!
-!  Continuous forcing diagonstics.
-!
-        if (lforcing_cont) call calc_diagnostics_forcing(p)
-!
-!  Add and extra 'special' physics
-!
-        if (lspecial) call dspecial_dt(f,df,p)
-!
-!  Add radiative cooling and radiative pressure (for ray method)
-!
-        if (lradiation_ray.and.lenergy) call dradiation_dt(f,df,p)
-!
-!  Find diagnostics related to solid cells (e.g. drag and lift).
-!  Integrating to the full result is done after loops over m and n.
-!
-        if (lsolid_cells) call dsolid_dt(f,df,p)
-!
-!  Add shear if present
-!
-        if (lshear) call shearing(f,df,p)
-!
-        if (lparticles) call particles_pde_pencil(f,df,p)
-!
-        if (lpointmasses) call pointmasses_pde_pencil(f,df,p)
-
-        if(ltraining) call div_sgs_stresses(f,df)
-
-        if (ltraining) call calc_diagnostics_training(f)
+        call calc_all_rhs(f,df,p)
 !
 !  Call diagnostics that involves the full right hand side
 !  This must be done at the end of all calls that might modify df.
 !
-        if (ldiagnos) then
-          if (lhydro) call df_diagnos_hydro(df,p)
-          if (lmagnetic) call df_diagnos_magnetic(df,p)
-        endif
+        call calc_df_diagnostics(df,p)
 !
 !  General phiaverage quantities -- useful for debugging.
 !  MR: Results are constant in time, so why here?
 !
-        if (l2davgfirst) then
-          call phisum_mn_name_rz(p%rcyl_mn,idiag_rcylmphi)
-          call phisum_mn_name_rz(p%phi_mn,idiag_phimphi)
-          call phisum_mn_name_rz(p%z_mn,idiag_zmphi)
-          call phisum_mn_name_rz(p%r_mn,idiag_rmphi)
-        endif
+        call calc_phisums(p)
 !
 !  Do the time integrations here, before the pencils are overwritten.
 !
-        if (ltime_integrals.and.llast) then
-          if (lhydro)    call time_integrals_hydro(f,p)
-          if (lmagnetic) call time_integrals_magnetic(f,p)
-        endif
+        call calc_time_integrals(f,p)
 
         call set_dt1_max(p)
         call timestep_diagnostics
@@ -1477,7 +1566,7 @@ module Equ
 !
       use Snapshot
 !
-      real, dimension(mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
 !
       integer, save :: icrash=0
       character (len=10) :: filename
@@ -1517,7 +1606,7 @@ module Equ
       use Sub,       only: find_max_fvec, find_rms_fvec
       use Viscosity, only: dynamical_viscosity
 !
-      real, dimension(mx,my,mz,mfarray), intent(in) :: f
+      real, contiguous, dimension(:,:,:,:), intent(in) :: f
 !
       real :: uc
 !
@@ -1550,7 +1639,7 @@ module Equ
       use Energy, only: impose_energy_floor
       use Hydro, only: impose_velocity_ceiling
 !
-      real, dimension(mx,my,mz,mfarray), intent(inout) :: f
+      real, contiguous, dimension(:,:,:,:), intent(inout) :: f
 !
       call impose_density_floor(f)
       call impose_density_ceiling(f)
@@ -1566,7 +1655,7 @@ module Equ
       use Sub, only: quintic_step
       use Solid_Cells, only: freeze_solid_cells
 
-      real, dimension(mx,my,mz,mvar), intent(inout) :: df
+      real, contiguous, dimension(:,:,:,:), intent(inout) :: df
       type (pencil_case) :: p
 
       logical, dimension(npencils) :: lpenc_loc
@@ -1754,6 +1843,7 @@ module Equ
 
       if (ldensity.or.lviscosity.or.lmagnetic.or.lenergy.or.ldustvelocity.or.ldustdensity) &
           maxadvec=maxadvec+sqrt(advec2_hypermesh)
+
     endsubroutine calc_maxadvec
 !***********************************************************************
     subroutine set_dt1_max(p)
@@ -1874,7 +1964,7 @@ module Equ
       use FarrayManager, only: farray_get_name
 
       character(len=30) :: name
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       type (pencil_case) :: p
       real, dimension(1), intent(inout) :: mass_per_proc
       logical ,intent(in) :: early_finalize
@@ -1893,8 +1983,8 @@ module Equ
           import mfarray
           import mvar
           import pencil_case
-          real, dimension (mx,my,mz,mfarray) :: f
-          real, dimension (mx,my,mz,mvar) :: df
+          real, contiguous, dimension(:,:,:,:) :: f
+          real, contiguous, dimension(:,:,:,:) :: df
           type (pencil_case) :: p
           real, dimension(1), intent(inout) :: mass_per_proc
           logical ,intent(in) :: early_finalize
@@ -1916,8 +2006,8 @@ module Equ
       ldiagnos = .false.
       df_copy = 0.0
       
-
       do itsub = 1,num_substeps
+
         lfirst=(itsub==1)
         llast=(itsub==itorder)
         !df_tmp = 0.0

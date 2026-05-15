@@ -38,7 +38,7 @@ module EquationOfState
   real :: cs2bot=1.0, cs2top=1.0
   real :: Cp_const=impossible
   real :: Pr_number=0.7
-  real :: lnTT0=impossible, TT0=impossible
+  real :: lnTT0=impossible
   logical :: lpres_grad=.false.
 
   contains
@@ -72,6 +72,8 @@ module EquationOfState
 !
       gamma_m1=gamma-1.; gamma1=1./gamma
       rho02 = rho0**2
+
+      call keep_compiler_quiet(f)
 !
     endsubroutine initialize_eos
 !***********************************************************************
@@ -278,6 +280,7 @@ module EquationOfState
 !
       call keep_compiler_quiet(f)
       call keep_compiler_quiet(cs2)
+      call keep_compiler_quiet(cp1tilde)
 !
     endsubroutine pressure_gradient_farray
 !***********************************************************************
@@ -388,6 +391,7 @@ module EquationOfState
 !
       call keep_compiler_quiet(ivars)
       call keep_compiler_quiet(var1,var2)
+      call keep_compiler_quiet(cs2)
 !
     endsubroutine eoscalc_point
 !***********************************************************************
@@ -410,6 +414,7 @@ module EquationOfState
 !
       call keep_compiler_quiet(ivars)
       call keep_compiler_quiet(f)
+      call keep_compiler_quiet(cs2)
 !
     endsubroutine eoscalc_point_f
 !***********************************************************************
@@ -432,6 +437,7 @@ module EquationOfState
 !
       call keep_compiler_quiet(ivars)
       call keep_compiler_quiet(var1,var2)
+      call keep_compiler_quiet(cs2)
 !
     endsubroutine eoscalc_pencil
 !***********************************************************************
@@ -565,7 +571,7 @@ module EquationOfState
 !
       real, pointer :: Flux,FbyK,chi
       real, pointer :: hcond0_kramers, nkramers, chimax_kramers, chimin_kramers
-      logical, pointer :: lmultilayer, lheatc_chiconst, lheatc_kramers, lheatc_Kprof, lheatc_Kconst
+      logical, pointer :: lheatc_chiconst, lheatc_kramers, lheatc_Kprof, lheatc_Kconst
 !
       integer, intent(IN) :: topbot
       real, dimension (mx,my,mz,mfarray) :: f
@@ -693,7 +699,7 @@ module EquationOfState
           pp_xy = pp_xy/(rho_xy*TT_xy) !pp_xy is now P/(rho*T)
           FbyKT_xy = dir*cv*FbyKT_xy !now (+-)cv*F/(K*T)
           do i=ig1,ig2,dir
-            call getdlnrho_z(f(:,:,:,ilnrho),n,i,rho_xy) !rho_xy is now dlnrho
+            call getdlnrho_z(f,ilnrho,n,i,rho_xy) !rho_xy is now dlnrho
             f(:,:,n+i,iss) =   f(:,:,n-i,iss) - pp_xy*rho_xy &
                              - dz2_bound(i)*FbyKT_xy
           enddo
@@ -1012,6 +1018,7 @@ module EquationOfState
       real :: tmp
       integer :: i
 !
+      call keep_compiler_quiet(lone_sided)
       if (ldebug) print*,'bc_ss_temp_z: cs20,cs0=',cs20,cs0
 !
 !  Constant temperature/sound speed for entropy, i.e. antisymmetric
@@ -1814,7 +1821,7 @@ module EquationOfState
       real :: density_scale1, density_scale
 !
       if (density_scale_factor==impossible) then
-        density_scale=density_scale_cgs/unit_length
+        density_scale=real(density_scale_cgs/unit_length)
       else
         density_scale=density_scale_factor
       endif
@@ -1855,59 +1862,62 @@ module EquationOfState
 !
     endsubroutine bc_ism
 !***********************************************************************
-    subroutine write_thermodyn
-!
-      call not_implemented('write_thermodyn','for this EOS')
-!
-    endsubroutine write_thermodyn
-!***********************************************************************
-    subroutine read_thermodyn(input_file)
-!
-      character (len=*), intent(in) :: input_file
-!
-      call not_implemented('read_thermodyn','for this EOS')
-!
-      call keep_compiler_quiet(input_file)
-!
-    endsubroutine read_thermodyn
-!***********************************************************************
-    subroutine read_species(input_file)
-!
-      character (len=*) :: input_file
-!
-      call not_implemented('read_species','for this EOS')
-!
-      call keep_compiler_quiet(input_file)
-!
-    endsubroutine read_species
-!***********************************************************************
-    subroutine find_species_index(species_name,ind_glob,ind_chem,found_specie)
-!
-      integer, intent(out) :: ind_glob
-      integer, intent(inout) :: ind_chem
-      character (len=*), intent(in) :: species_name
-      logical, intent(out) :: found_specie
-!
-      call not_implemented('find_species_index','for this EOS')
-!
-      call keep_compiler_quiet(ind_glob)
-      call keep_compiler_quiet(ind_chem)
-      call keep_compiler_quiet(species_name)
-      call keep_compiler_quiet(found_specie)
-!
-    endsubroutine find_species_index
-!***********************************************************************
-    subroutine find_mass(element_name,MolMass)
-!
-      character (len=*), intent(in) :: element_name
-      real, intent(out) :: MolMass
-!
-      call not_implemented('find_mass','for this EOS')
-!
-      call keep_compiler_quiet(element_name)
-      call keep_compiler_quiet(MolMass)
-!
-    endsubroutine find_mass
+!Unused functions are on comment to suppres compiler warnings
+!    subroutine write_thermodyn
+!!
+!      call not_implemented('write_thermodyn','for this EOS')
+!!
+!    endsubroutine write_thermodyn
+!!!***********************************************************************
+!Unused functions are on comment to suppres compiler warnings
+!    subroutine read_thermodyn(input_file)
+!!
+!      character (len=*), intent(in) :: input_file
+!!
+!      call not_implemented('read_thermodyn','for this EOS')
+!!
+!      call keep_compiler_quiet(input_file)
+!!
+!    endsubroutine read_thermodyn
+!!***********************************************************************
+!Unused functions are on comment to suppres compiler warnings
+!    subroutine read_species(input_file)
+!!
+!      character (len=*) :: input_file
+!!
+!      call not_implemented('read_species','for this EOS')
+!!
+!      call keep_compiler_quiet(input_file)
+!!
+!    endsubroutine read_species
+!!***********************************************************************
+!    subroutine find_species_index(species_name,ind_glob,ind_chem,found_specie)
+!!
+!      integer, intent(out) :: ind_glob
+!      integer, intent(inout) :: ind_chem
+!      character (len=*), intent(in) :: species_name
+!      logical, intent(out) :: found_specie
+!!
+!      call not_implemented('find_species_index','for this EOS')
+!!
+!      call keep_compiler_quiet(ind_glob)
+!      call keep_compiler_quiet(ind_chem)
+!      call keep_compiler_quiet(species_name)
+!      call keep_compiler_quiet(found_specie)
+!!
+!    endsubroutine find_species_index
+!!***********************************************************************
+!    subroutine find_mass(element_name,MolMass)
+!!
+!      character (len=*), intent(in) :: element_name
+!      real, intent(out) :: MolMass
+!!
+!      call not_implemented('find_mass','for this EOS')
+!!
+!      call keep_compiler_quiet(element_name)
+!      call keep_compiler_quiet(MolMass)
+!!
+!    endsubroutine find_mass
 !***********************************************************************
     subroutine get_stratz(z, rho0z, dlnrho0dz, eth0z)
 !
@@ -1948,6 +1958,8 @@ module EquationOfState
     call copy_addr(imass,p_par(8)) ! int
     call copy_addr(cp_const,p_par(9))
 
+    call copy_addr(cs0,p_par(10))
+    call copy_addr(cs2top,p_par(11))
     endsubroutine pushpars2c
 !***********************************************************************
     subroutine eos_before_boundary(f)

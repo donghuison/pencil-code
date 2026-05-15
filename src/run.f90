@@ -50,7 +50,7 @@ module Run_module
     implicit none
 
     integer :: icount, it_last_diagnostic
-    real(KIND=rkind8) :: time1, time_last_diagnostic
+    real(KIND=rkind8) :: time1=0., time_last_diagnostic
     real :: time_doing_diagnostics = 0., time_in_timestep = 0.
 
 contains
@@ -58,14 +58,15 @@ contains
 subroutine helper_loop(f,p)
 !
   use Boundcond, only: update_ghosts
-  use Equ, only: perform_diagnostics
+  use Equ, only: perform_diagnostics, calc_all_module_diagnostic_auxiliaries
   use Diagnostics, only:  restore_diagnostic_controls,allocate_fnames
 !$ use General, only: signal_wait, signal_send
-  use Snapshot, only: perform_powersnap, perform_wsnap_ext, perform_wsnap_down
+  use Snapshot, only: perform_powersnap, perform_wsnap_ext, perform_wsnap_down_ext
   use Mpicomm, only: mpiwtime
   use Sub, only: check_for_nans_globally
 !
-  real, dimension (mx,my,mz,mfarray) :: f
+  real, contiguous, dimension(:,:,:,:) :: f
+  real :: tvar1
   type (pencil_case) :: p
 
   real :: start_time,end_time
@@ -76,7 +77,7 @@ subroutine helper_loop(f,p)
 !$  do while(lhelper_run)
 !$    call signal_wait(lhelper_perf,lhelper_run)
       call check_for_nans_globally(f,'after reading from the GPU')
-      start_time = mpiwtime()
+      start_time = real(mpiwtime())
 !$    if (lhelper_run) call restore_diagnostic_controls
 
 !$    if (lhelper_run) call update_ghosts(f)
@@ -85,14 +86,18 @@ subroutine helper_loop(f,p)
 !$    else
 !$      lhelperflags(PERF_DIAGS) = .false.
 !$    endif
+!$    if (lhelper_run) call restore_diagnostic_controls(lsnap_time=.true.)
 !$    if (lhelper_run .and. lhelperflags(PERF_WSNAP)) then
-!£      call calc_all_module_diagnostic_auxiliaries(f,p)
+!$      call calc_all_module_diagnostic_auxiliaries(f,p)
+        if (ip<=12.and.lroot) tvar1=real(mpiwtime())
         call perform_wsnap_ext(f)
+        if (ip<=12.and.lroot) print*,'wsnap: written snapshot var.dat in ', &
+                                   mpiwtime()-tvar1,' seconds'
 !$    else
 !$      lhelperflags(PERF_WSNAP) = .false.
 !$    endif
 !$    if (lhelper_run .and. lhelperflags(PERF_WSNAP_DOWN)) then
-        call perform_wsnap_down(f)
+        call perform_wsnap_down_ext(f)
 !$    else
 !$      lhelperflags(PERF_WSNAP_DOWN) = .false.
 !$    endif
@@ -102,12 +107,35 @@ subroutine helper_loop(f,p)
 !$      lhelperflags(PERF_POWERSNAP) = .false.
 !$    endif
 !$    call signal_send(lhelper_perf,.false.)
-      end_time = mpiwtime()
+      end_time = real(mpiwtime())
       time_doing_diagnostics = time_doing_diagnostics + end_time-start_time
 
 !$  enddo
 
 endsubroutine helper_loop
+!***********************************************************************
+!$  subroutine signal_helper_and_release_lock
+!
+!$ use General, only: signal_send
+!
+!  At the end of every timeloop two facts concerning the GPU can be true.
+!  1.) The buffers have been copied from the device
+!  2.) Diagnostics are to be performed from them.
+!  If 1.) is true the lock corresponding to the buffers should be freed
+!  Additionally if 2.) is true the signal that wakes up the helper should tell it to perform something.
+!  Otherwise it gets an empty signal and goes back again to sleep immediately
+!
+!$  if (lfarray_copied .and. any(lmasterflags)) then
+!$    lhelperflags = lmasterflags
+!$    lmasterflags = .false.
+!$    call signal_send(lhelper_perf,.true.)
+!$    lfarray_copied = .false.
+!$  else if (lfarray_copied) then
+!$    lfarray_copied = .false.
+!$    call signal_send(lhelper_perf,.false.)
+!$  endif
+
+!$  endsubroutine signal_helper_and_release_lock
 !***********************************************************************
   subroutine reload(f, lreload_file, lreload_always_file)
 
@@ -125,7 +153,7 @@ endsubroutine helper_loop
     use Particles_main,   only: particles_rprint_list, particles_initialize_modules
 !$ use General, only: signal_wait, signal_send
 
-    real, dimension (mx,my,mz,mfarray) :: f
+    real, contiguous, dimension(:,:,:,:) :: f
     logical :: lreload_file, lreload_always_file
     real :: dtmp
 
@@ -136,7 +164,7 @@ endsubroutine helper_loop
 ! If rkf timestep retain the current dt for continuity rather than reset
 ! with option to initialize_timestep to dt0/=0 from run.in if intended.
 !
-!TP: important for synchronization purposes that this happens before anything else
+!   Important for synchronization purposes that this happens before anything else
     if (lgpu) call copy_farray_from_GPU(f)
 ! Free the lock as if reloading never happened
 !$  if (lfarray_copied) call signal_send(lhelper_perf,.false.)
@@ -190,7 +218,7 @@ endsubroutine helper_loop
 ! 5-sep-2024/TP: extracted from timeloop
 !
     use Equ,             only: write_diagnostics
-    use Snapshot,        only: powersnap, powersnap_prepare, wsnap, wsnap_down, output_form
+    use Snapshot,        only: powersnap, wsnap, wsnap_down, output_form
     use Particles_main,  only: write_snapshot_particles
     use PointMasses,     only: pointmasses_write_snapshot
     use Mpicomm,         only: mpiwtime
@@ -201,7 +229,7 @@ endsubroutine helper_loop
     use Streamlines,     only: wtracers
     use Io,              only: output_globals
 
-    real, dimension (mx,my,mz,mfarray), intent(inout) :: f
+    real, contiguous, dimension(:,:,:,:), intent(inout) :: f
     integer :: isave_shift=0
     real :: tvar1
 !
@@ -250,9 +278,9 @@ endsubroutine helper_loop
     if (lsave .or. ((isave /= 0) .and. .not. lnowrite)) then
       if (lsave .or. (mod(it-isave_shift, isave) == 0)) then
         lsave = .false.
-        if (ip<=12.and.lroot) tvar1=mpiwtime()
+        if (.not. lmultithread .and. ip<=12.and.lroot) tvar1=real(mpiwtime())
         call wsnap('var.dat',f, mvar_io,ENUM=.false.,noghost=noghost_for_isave)
-        if (ip<=12.and.lroot) print*,'wsnap: written snapshot var.dat in ', &
+        if (.not. lmultithread .and. ip<=12.and.lroot) print*,'wsnap: written snapshot var.dat in ', &
                                      mpiwtime()-tvar1,' seconds'
         call wsnap_timeavgs('timeavg.dat',ENUM=.false.)
         if (lparticles) call write_snapshot_particles(f,ENUM=.false.)
@@ -299,6 +327,7 @@ endsubroutine helper_loop
   use Filter,          only: rmwig, rmwig_xyaverage
   use Fixed_point,     only: fixed_points_prepare
   use Forcing,         only: addforce
+  use General,         only: touch_file
   use ImplicitPhysics, only: calc_heatcond_ADI
   use IO,              only: output_globals
   use Magnetic,        only: rescaling_magnetic
@@ -308,6 +337,7 @@ endsubroutine helper_loop
                              particles_load_balance, particles_stochastic
   use Signal_handling, only: emergency_stop
   use Sub,             only: control_file_exists, calc_scl_factor
+  use Syscalls,        only: system_cmd
   use Testscalar,      only: rescaling_testscalar
   use Testfield,       only: rescaling_testfield
   use TestPerturb,     only: testperturb_begin, testperturb_finalize
@@ -317,11 +347,11 @@ endsubroutine helper_loop
   use Solid_Cells,     only: time_step_ogrid
   use Streamlines,     only: tracers_prepare
   use Snapshot,        only: powersnap_prepare
-  use GPU,             only: gpu_set_dt
+  use GPU,             only: gpu_prepare_for_first_substep
 !$ use OMP_lib
 !$ use General, only: signal_send, signal_wait
 !
-  real, dimension (mx,my,mz,mfarray) :: f
+  real, contiguous, dimension(:,:,:,:) :: f
   real, dimension (mx,my,mz,mvar) :: df
   type (pencil_case) :: p
 !
@@ -331,20 +361,28 @@ endsubroutine helper_loop
   real(KIND=rkind8) :: time_this_diagnostic
   integer :: it_this_diagnostic
 !
-!TP: Due to df being always limited to a kernel on the Astaroth side we have to know the timestep before we do the rhs
-!    compared to the cpu where it is sufficient to know it after the rhs calculations
-!    so we take the timestep calculated at the start of the last timestep
-!    initially there is no previous timestep so we have a extra call here for there always to be a valid previous timestep
-!    no advancement happens here
+!    Due to df being always limited inside a kernel on the Astaroth side we have to know the timestep before we do the rhs
+!    compared to the cpu where it is sufficient to know it after the rhs calculations.
+!    So, we take the timestep calculated at the start of the last timestep.
+!    Initially there is no previous timestep so we have an extra call here for there always to be a valid previous timestep.
+!    No advancement happens here.
+!    Similarly we setup similar dependencies between outputs of substeps here so there is always an initial value
+!    for these kinds of dependencies.
 !
-  if (lgpu .and. lcourant_dt .and. ldt) call gpu_set_dt()
+  if (lgpu) then
+    call gpu_prepare_for_first_substep()
+  endif
 
-  Time_loop: do while (it<=nt)
+  Time_loop: do while (icount<nt)
 !
 !  Possibility to turn off logspacing for time series output
 !
     if (.not.(lit1_logspacing.and.real(t)<tmax_logspacing)) &
       lout = (mod(it-1,it1) == 0) .and. (it > it1start)
+!
+    if (lspec_tcrit) call check_tspec_crit_log_interval
+    if (lsnap_tcrit) call check_tsnap_crit_log_interval
+    if (lvid_tcrit) call check_tvid_crit_log_interval
 !
     if (lout .or. emergency_stop) then
 !
@@ -389,7 +427,7 @@ endsubroutine helper_loop
     if (lwrite_sound) then
       if ( .not.lout_sound .and. abs( t-tsound - dsound )<= 1.1*dt ) then
         lout_sound = .true.
-        tsound = t
+        tsound = real(t)
       endif
     endif
 !
@@ -492,9 +530,9 @@ endsubroutine helper_loop
 !
 !  Time advance.
 !
-    timer_for_timestep = mpiwtime()
+    timer_for_timestep = real(mpiwtime())
     call time_step(f,df,p)
-    time_in_timestep = time_in_timestep + mpiwtime()-timer_for_timestep
+    time_in_timestep = time_in_timestep + real(mpiwtime())-timer_for_timestep
 !    tdiagnos=t
 !
 !  If overlapping grids are used to get body-confined grid around the solids
@@ -519,7 +557,7 @@ endsubroutine helper_loop
 !
     if (lboussinesq) call boussinesq(f)
 !
-    if (lroot) icount=icount+1  !  reliable loop count even for premature exit
+    icount=icount+1  !  reliable loop count even for premature exit
 !
 !  Update time averages and time integrals.
 !
@@ -538,15 +576,15 @@ endsubroutine helper_loop
 !  limit.
 !
     if (lroot.and.(idiag_walltime/=0.or.max_walltime/=0.0)) then
-      wall_clock_time=mpiwtime()-time1
+      wall_clock_time=real(mpiwtime()-time1)
       if (lout) call save_name(wall_clock_time,idiag_walltime)
     endif
 !
     if (lout.and.lroot.and.idiag_timeperstep/=0) then
       it_this_diagnostic   = it
-      time_this_diagnostic = mpiwtime()
-      time_per_step = (time_this_diagnostic - time_last_diagnostic) &
-                     /(  it_this_diagnostic -   it_last_diagnostic)
+      time_this_diagnostic = real(mpiwtime())
+      time_per_step = real((time_this_diagnostic - time_last_diagnostic) &
+                     /(  it_this_diagnostic -   it_last_diagnostic))
       it_last_diagnostic   =   it_this_diagnostic
       time_last_diagnostic = time_this_diagnostic
       call save_name(time_per_step,idiag_timeperstep)
@@ -559,7 +597,10 @@ endsubroutine helper_loop
 !  and won't be saved!
 !
     if ((it<nt) .and. (dt<dtmin)) then
-      if (lroot) write(*,*) ' Time step has become too short: dt = ', dt
+      if (lroot) then 
+        call system_cmd("echo TIMESTEP BECAME TOO SHORT > TIMESTEP_BECAME_TOO_SHORT")
+        write(*,*) ' Time step has become too short: dt = ', dt
+      endif
       save_lastsnap=.false.
 !$    if (lfarray_copied) call signal_send(lhelper_perf,.true.)
       exit Time_loop
@@ -589,19 +630,7 @@ endsubroutine helper_loop
     it=it+1
     headt=.false.
 
-!if (any(lmasterflags)) then
-!write(60+iproc,*) it, lmasterflags
-!flush(60+iproc)
-!endif
-!$  if (lfarray_copied .and. any(lmasterflags)) then
-!$    lhelperflags = lmasterflags
-!$    lmasterflags = .false.
-!$    call signal_send(lhelper_perf,.true.)
-!$    lfarray_copied = .false.
-!$  else if(lfarray_copied) then
-!$    lfarray_copied = .false.
-!$    call signal_send(lhelper_perf,.false.)
-!$  endif
+!$  call signal_helper_and_release_lock
 
   enddo Time_loop
 
@@ -611,6 +640,228 @@ endsubroutine helper_loop
 !$ lmultithread = .false.
 
   endsubroutine timeloop
+!***********************************************************************
+  subroutine check_tspec_crit_log_interval
+!     
+!  Check whether t>tspec_crit_log_interval.
+!  If so, we set dspec=-tspec_crit_log_interval (i.e., to a negative value)
+!  and also set lspec_tcrit=.false.
+!
+    if (t>tspec_crit_log_interval) then
+      dspec=-tspec_crit_log_interval
+      lspec_tcrit=.false.
+      if (lroot) print*,'Switched dspec=',dspec
+    endif
+!
+  endsubroutine check_tspec_crit_log_interval
+!***********************************************************************
+  subroutine check_tsnap_crit_log_interval
+!     
+!  check whether t>tsnap_crit_log_interval.
+!  If so, we set dsnap=-tsnap_crit_log_interval (i.e., to a negative value)
+!  and also set lsnap_tcrit=.false.
+!
+    if (t>tsnap_crit_log_interval) then
+      dsnap=-tsnap_crit_log_interval
+      lsnap_tcrit=.false.
+      if (lroot) print*,'Switched dsnap=',dsnap
+    endif
+!
+  endsubroutine check_tsnap_crit_log_interval
+!***********************************************************************
+  subroutine check_tvid_crit_log_interval
+!     
+!  check whether t>tvid_crit_log_interval.
+!  If so, we set dvid=-tvid_crit_log_interval (i.e., to a negative value)
+!  and also set lvid_tcrit=.false.
+!
+    if (t>tvid_crit_log_interval) then
+      dvid=-tvid_crit_log_interval
+      lvid_tcrit=.false.
+      if (lroot) print*,'Switched dvid=',dvid
+    endif
+!
+  endsubroutine check_tvid_crit_log_interval
+!***********************************************************************
+  subroutine setup_signal_files
+!     
+  use File_io,         only: file_exists,delete_file
+  use General,         only: touch_file
+  use Syscalls,        only: sizeof_real,directory_exists,system_cmd
+!
+!  Store metadata was the run in double or single precision
+!  We do this instead of e.g. reading it from dim.dat since dim.dat won't exist
+!  if we use HDF5-IO
+!
+    if (lroot) then
+      if (.not. directory_exists('data/allprocs/signals')) &
+          call system_cmd('mkdir data/allprocs/signals')
+      if (file_exists('data/allprocs/signals/SINGLE_PRECISION_RUN')) call delete_file('data/allprocs/signals/SINGLE_PRECISION_RUN')
+      if (file_exists('data/allprocs/signals/DOUBLE_PRECISION_RUN')) call delete_file('data/allprocs/signals/DOUBLE_PRECISION_RUN')
+      if (sizeof_real() < 8) then
+        call touch_file('data/allprocs/signals/SINGLE_PRECISION_RUN')
+      else
+        call touch_file('data/allprocs/signals/DOUBLE_PRECISION_RUN')
+      endif
+      if (file_exists('TIMESTEP_BECAME_TOO_SHORT')) &
+        call delete_file('TIMESTEP_BECAME_TOO_SHORT')
+    endif
+
+  endsubroutine setup_signal_files
+!***********************************************************************
+  subroutine print_metrics(wall_clock_time)
+
+  use Timestep,        only: after_substep_sum_time
+  use Mpicomm,         only: mpiwtick,mpireduce_max_int,mpireduce_sum_int
+  use Equ,             only: rhs_sum_time, before_and_after_boundary_sum_time,&
+                             radtransfer_sum_time,time_spent_copying_and_waiting
+  use Training,        only: training_time, inference_time
+  use Syscalls,        only: memusage
+
+  real, intent(in) :: wall_clock_time
+  integer :: memuse, memory, memcpu
+
+  if (lroot) then
+    print*
+    write(*,'(A,1pG10.3,A,1pG11.4,A)') ' Wall clock time [hours] = ', wall_clock_time/3600.0, &
+                                       ' (+/- ', real(mpiwtick())/3600.0, ')'
+    if (it>1) then
+      if (lparticles) then
+        write(*,'(A,1pG10.3)') ' Wall clock time/timestep/(meshpoint+particle) [microsec] =', &
+                               wall_clock_time/icount/(nw+npar/ncpus)/ncpus/1.0e-6
+      else
+        write(*,'(A,1pG14.7)') ' Wall clock time/timestep/meshpoint [microsec] =', &
+                               wall_clock_time/icount/nw/ncpus/1.0e-6
+        write(*,'(A,1pG14.7)') ' Wall clock time/timestep/local meshpoint [microsec] =', &
+                               wall_clock_time/icount/nw/1.0e-6
+        write(*,'(A,1pG14.7)') ' Rhs wall clock time/timestep/local meshpoint [microsec] =', &
+                               rhs_sum_time/icount/nw/1.0e-6
+
+        !The more extensive results are always outputted for GPU runs and opt-in for CPU runs.
+        !I assume ip=13 would output little enough debug prints to not have an effect
+        !on the measurements
+        if (lgpu .or. ip <= 13) then
+          write(*,'(A,1pG14.7)') &
+            ' After substep wall clock time/timestep/local meshpoint [microsec] =', &
+            after_substep_sum_time/icount/nw/1.0e-6
+          write(*,'(A,1pG14.7)') &
+            ' Before+After boundary wall clock time/timestep/local meshpoint [microsec] =', &
+            before_and_after_boundary_sum_time/icount/nw/1.0e-6
+          write(*,'(A,1pG14.7)') &
+            ' Diagnostics wall clock time/timestep/local meshpoint [microsec] =', &
+            time_doing_diagnostics/icount/nw/1.0e-6
+          write(*,'(A,1pG14.7)') &
+            ' Timestep wall clock time/timestep/local meshpoint [microsec] =', &
+            time_in_timestep/icount/nw/1.0e-6
+          write(*,'(A,1pG14.7)') &
+            ' Timestep (without waiting) wall clock time/timestep/local meshpoint [microsec] =', &
+            (time_in_timestep-time_spent_copying_and_waiting)/icount/nw/1.0e-6
+          write(*,'(A,1pG14.7)') &
+            ' Timestep wall clock time/timestep/meshpoint [microsec] =', &
+            time_in_timestep/icount/nw/ncpus/1.0e-6
+          write(*,'(A,1pG14.7)') &
+            ' Timestep (without waiting) wall clock time/timestep/meshpoint [microsec] =', &
+            (time_in_timestep-time_spent_copying_and_waiting)/icount/nw/ncpus/1.0e-6
+          write(*,'(A,1pG14.7)') &
+            ' Diagnostics wall clock time/timestep/meshpoint [microsec] =', &
+            time_doing_diagnostics/icount/nw/ncpus/1.0e-6
+          write(*,'(A,1pG14.7)') &
+            ' Rhs wall clock time/timestep/meshpoint [microsec] =', &
+            rhs_sum_time/icount/nw/ncpus/1.0e-6
+          write(*,'(A,1pG14.7)') &
+            ' After substep wall clock time/timestep/meshpoint [microsec] =', &
+            after_substep_sum_time/icount/nw/ncpus/1.0e-6
+          write(*,'(A,1pG14.7)') &
+            ' Before+After boundary wall clock time/timestep/meshpoint [microsec] =', &
+            before_and_after_boundary_sum_time/icount/nw/ncpus/1.0e-6
+
+          if (lradiation_ray) then
+            write(*,'(A,1pG14.7)') &
+              ' Radtransfer wall clock time/timestep/meshpoint [microsec] =', &
+              radtransfer_sum_time/icount/nw/ncpus/1.0e-6
+            write(*,'(A,1pG14.7)') &
+              ' Radtransfer wall clock time/timestep/local meshpoint [microsec] =', &
+              radtransfer_sum_time/icount/nw/1.0e-6
+            write(*,'(A,1pG14.7)') &
+              ' Radtransfer+Rhs wall clock time/timestep/meshpoint [microsec] =', &
+              (rhs_sum_time+radtransfer_sum_time)/icount/nw/ncpus/1.0e-6
+          endif
+
+          if (ltraining) then
+            if (training_time>0) write(*,'(A,1pG14.7)') &
+              ' Training wall clock time/timestep/meshpoint [microsec] =', &
+              (training_time)/icount/nw/1.0e-6
+
+            if (inference_time>0) write(*,'(A,1pG14.7)') &
+              ' Inference wall clock time/timestep/meshpoint [microsec] =', &
+              (inference_time)/icount/nw/1.0e-6
+          endif
+        endif
+      endif
+    endif
+  endif
+
+  memuse=memusage()
+  call mpireduce_max_int(memuse,memcpu)
+  call mpireduce_sum_int(memuse,memory)
+  if (lroot) then
+    print'(1x,a,f9.3)', 'Maximum used memory per cpu [MBytes] = ', memcpu/1024.
+    if (memory>1e6) then
+      print'(1x,a,f12.3)', 'Maximum used memory [GBytes] = ', memory/1024.**2
+    else
+      print'(1x,a,f12.3)', 'Maximum used memory [MBytes] = ', memory/1024.
+    endif
+    print*
+  endif
+
+ endsubroutine print_metrics
+!***********************************************************************
+!$  subroutine get_all_core_ids
+
+!$ use OMP_lib
+!$ use, intrinsic :: iso_c_binding
+!$ use General,        only: get_cpu
+!$ use Mpicomm, only: mpibarrier
+
+  !$ call mpibarrier
+  !$omp parallel
+  !$    core_ids(omp_get_thread_num()+1) = get_cpu()
+  !$omp end parallel
+  !$ call mpibarrier
+
+!$ endsubroutine get_all_core_ids
+!***********************************************************************
+!$ subroutine get_core_ids_excluding_the_master
+!
+!TP: remove master id from core ids since no one should run on master core and make sure new core ids indexing start from 1
+!
+!$ use OMP_lib
+!$ use, intrinsic :: iso_c_binding
+!$ use General,        only: get_cpu
+
+!$  integer :: i,j
+!$  integer :: master_core_id
+!$  integer :: helper_core_id
+!$  integer, dimension(max_threads_possible) :: tmp_core_ids
+
+!$ if (omp_get_thread_num() == 1) helper_core_id = get_cpu()
+!$omp barrier
+!$ if (omp_get_thread_num() == 0) then
+!$   master_core_id = get_cpu()
+!$   tmp_core_ids = 0
+!$   tmp_core_ids(1) = helper_core_id
+!$   j = 2
+!$   do i = 1,20
+!$     if (core_ids(i) /= master_core_id .and. core_ids(i) /= helper_core_id) then
+!$       tmp_core_ids(j) = core_ids(i)
+!$       j = j +1
+!$     endif
+!$   enddo
+!$   core_ids = tmp_core_ids
+!$ endif
+!$omp barrier
+
+!$ endsubroutine get_core_ids_excluding_the_master
 !***********************************************************************
   subroutine run_start() bind(C)
 !
@@ -623,19 +874,21 @@ endsubroutine helper_loop
 !
   use Boundcond,       only: update_ghosts, initialize_boundcond
   use Chemistry,       only: chemistry_clean_up
-  use Diagnostics,     only: phiavg_norm, report_undefined_diagnostics, trim_averages,diagnostics_clean_up
-  use Equ,             only: initialize_pencils, debug_imn_arrays, rhs_sum_time, before_boundary_sum_time,&
-                             radtransfer_sum_time,time_spent_copying_and_waiting
+  use Diagnostics,     only: report_undefined_diagnostics, trim_averages,diagnostics_clean_up
+!$ use Diagnostics,    only: phiavg_norm
+  use Equ,             only: initialize_pencils, debug_imn_arrays
   use FArrayManager,   only: farray_clean_up
   use Farray_alloc
   use General,         only: random_seed_wrapper, touch_file, itoa
-!$ use General,        only: signal_init, get_cpu
+!$ use General,        only: signal_init
+  use General,         only: numeric_precision
   use Grid,            only: construct_grid, box_vol, grid_bound_data, set_coorsys_dimmask, &
                              construct_serial_arrays, coarsegrid_interp
   use Gpu,             only: load_farray_to_GPU, initialize_gpu
-  use HDF5_IO,         only: init_hdf5, initialize_hdf5, wdim
+  use HDF5_IO,         only: init_hdf5, initialize_hdf5
   use File_io,         only: file_exists,delete_file
-  use IO,              only: rgrid, wgrid, directory_names, rproc_bounds, wproc_bounds, output_globals, input_globals
+  use IO,              only: wdim, rgrid, wgrid, directory_names, rproc_bounds, wproc_bounds, &
+                             output_globals, input_globals, read_precision, IO_STRATEGY
   use Messages
   use Mpicomm
   use NSCBC,           only: NSCBC_clean_up
@@ -654,8 +907,7 @@ endsubroutine helper_loop
   use Sub,             only: control_file_exists, get_nseed
   use Syscalls,        only: memusage, sizeof_real
   use Timeavg,         only: wsnap_timeavgs
-  use Timestep,        only: initialize_timestep,after_substep_sum_time
-  use Training,        only: training_time, inference_time
+  use Timestep,        only: initialize_timestep
 !
 !$ use OMP_lib
 !$ use, intrinsic :: iso_c_binding
@@ -666,23 +918,22 @@ endsubroutine helper_loop
 
   character(len=fnlen) :: fproc_bounds
   real(KIND=rkind8) :: time2, tvar1
-  real :: wall_clock_time=0.
   integer :: mvar_in
-  integer :: memuse, memory, memcpu
   logical :: suppress_pencil_check=.false.
   logical :: lnoreset_tzero=.false.
   logical :: lprocbounds_exist
   integer, parameter :: num_helper_masters=1
-  integer :: i,j
-  integer :: master_core_id
-  integer :: helper_core_id
-  integer, dimension(max_threads_possible) :: tmp_core_ids
+  integer :: it_save
+!$ integer :: i 
 !
   lrun = .true.
 !
 !  Get processor numbers and define whether we are root.
 !
   call mpicomm_init
+  if (lroot) then
+    time1=real(mpiwtime())
+  endif
 !
 !  Initialize OpenMP use
 !
@@ -729,6 +980,11 @@ endsubroutine helper_loop
   if (rkind16<0) call warning('run','quad precision not supported, switch to double')
   if (rkind16==rkind8) call warning('run','quad precision suppressed')
 !
+  !TP: reading does not work with HDF5 and for HDF5 reading strings has not yet been implemented
+  if (.not.lread_from_other_prec .and. IO_STRATEGY/="HDF5") then
+    if (read_precision() /= numeric_precision()) &
+      call fatal_error("run","trying to run with precision changed")
+  endif
   if (any(downsampl>1) .or. mvar_down>0 .or. maux_down>0) then
 !
 !  If downsampling, calculate local start indices and number of data in
@@ -780,21 +1036,8 @@ endsubroutine helper_loop
     call construct_grid(x,y,z,dx,dy,dz)
     lprocbounds_exist = .false.    ! triggers wproc_bounds later
   endif
-!
-!  Store metadata was the run in double or single precision
-!  We do this instead of e.g. reading it from dim.dat since dim.dat won't exist
-!  if we use HDF5-IO
-!
-    if(lroot) then
-      if (file_exists('data/SINGLE_PRECISION_RUN')) call delete_file('data/SINGLE_PRECISION_RUN')
-      if (file_exists('data/DOUBLE_PRECISION_RUN')) call delete_file('data/DOUBLE_PRECISION_RUN')
-      if(sizeof_real() < 8) then
-        call touch_file('data/SINGLE_PRECISION_RUN')
-      else
-        call touch_file('data/DOUBLE_PRECISION_RUN')
-      endif
-    endif
 
+  call setup_signal_files
 !
 !  Shorthands (global).
 !
@@ -806,7 +1049,6 @@ endsubroutine helper_loop
   call register_modules
   if (lparticles) call particles_register_modules
   call initialize
-!
 !
 !  Inform about verbose level.
 !
@@ -915,8 +1157,8 @@ endsubroutine helper_loop
 !
   f=0.
   if (lroot .and. ldebug) print*, 'memusage before rsnap=', memusage()/1024., 'MBytes'
-  if (lroot) tvar1=mpiwtime()
-  call rsnap('var.dat',f,mvar_in,lread_nogrid)
+  if (lroot) tvar1=real(mpiwtime())
+  call rsnap('var',f,mvar_in,lread_nogrid)
   if (lroot) print*,'rsnap: read snapshot var.dat in ',mpiwtime()-tvar1,' seconds'
 !
 !  If we decided to use a new grid, we need to overwrite the data
@@ -942,7 +1184,7 @@ endsubroutine helper_loop
 !  Set initial time to zero if requested. This is dangerous, however!
 !  One may forget removing this entry after having set this once.
 !  It is therefore safer to say lini_t_eq_zero_once=.true.,
-!  which does the reset once once, unless NORESET_TZERO is removed.
+!  which does the reset only once, unless NORESET_TZERO is removed.
 !
   if (lini_t_eq_zero) t=0.0
 !
@@ -960,7 +1202,7 @@ endsubroutine helper_loop
   if (lwrite_sound) then
     if (tsound<0.0) then
       ! if sound output starts new
-      tsound=t
+      tsound=real(t)
       ! output initial values
       lout_sound=.true.
     endif
@@ -1012,7 +1254,7 @@ endsubroutine helper_loop
 !
 !  Read global variables (if any).
 !
-  if (mglobal/=0 .and. lread_global) call input_globals('global.dat', &
+  if (mglobal/=0 .and. lread_global) call input_globals('global', &
       f(:,:,:,mvar+maux+1:mvar+maux+mglobal),mglobal)
 !
 !  Prepare particles.
@@ -1073,6 +1315,7 @@ endsubroutine helper_loop
 !
 !  Perform pencil_case consistency check if requested.
 !
+  it_save = it 
   it = 1          ! needed for pencil check
   suppress_pencil_check = control_file_exists("NO-PENCIL-CHECK")
   if ( ((lpencil_check .and. .not. suppress_pencil_check) .or. &
@@ -1083,6 +1326,7 @@ endsubroutine helper_loop
       call pencil_consistency_check(f,df,p)
     endif
   endif
+  if(lpersistent_it .and. it_save > 0) it = it_save
 !
 !  Globally catch eventual 'stop_it_if_any' call from single MPI ranks
 !
@@ -1096,34 +1340,17 @@ endsubroutine helper_loop
 !
   call trim_averages
 
-  !$ call mpibarrier
-  !$omp parallel
-  !$    core_ids(omp_get_thread_num()+1) = get_cpu()
-  !$omp end parallel
-  !$ call mpibarrier
+!$ call get_all_core_ids
 
+!  Here we start a paralle section with 2 threads so we can split them into the
+!  master and helper thread later on.
 !$omp parallel num_threads(num_helper_masters+1) &
 !$omp copyin(dxmax_pencil,fname,fnamex,fnamey,fnamez,fnamer,fnamexy,fnamexz,fnamerz,fname_keep,fname_sound,ncountsz,phiavg_norm)
 !
-!TP: remove master id from core ids since no one should run on master core and make sure new core ids indexing start from 1
-!$ if (omp_get_thread_num() == 1) helper_core_id = get_cpu()
-!$omp barrier
-!$ if (omp_get_thread_num() == 0) then
-!$   master_core_id = get_cpu()
-!$   tmp_core_ids = 0
-!$   tmp_core_ids(1) = helper_core_id
-!$   j = 2
-!$   do i = 1,20
-!$     if (core_ids(i) /= master_core_id .and. core_ids(i) /= helper_core_id) then
-!$       tmp_core_ids(j) = core_ids(i)
-!$       j = j +1
-!$     endif
-!$   enddo
-!$   core_ids = tmp_core_ids
-!$ endif
-!$omp barrier
+!$  call get_core_ids_excluding_the_master
 !
-! Ensures that all MPI processes call create_communicators with the same thread.
+! Ensure that helpers across different MPI processes share the same communicator
+! like the masters do
 !
 !$  do i=1,num_helper_masters
 !$omp barrier
@@ -1131,18 +1358,21 @@ endsubroutine helper_loop
 !$  enddo
 !$omp barrier
     call mpibarrier
+!
+! Here the master thread and the helper thread split.
+! The master will go to timeloop and handle the time integration
+! and the helper will go the helper_loop and handle diagnostic, snapshots, etc.
+!
 !$  if (omp_get_thread_num() == 0) then
 !
 !  Start timing for final timing statistics.
 !  Initialize timestep diagnostics during the run (whether used or not,
 !  see idiag_timeperstep).
 !
-!!$print*,"Master core: ",get_cpu(), iproc
+      icount=0
       if (lroot) then
-        icount=0
         it_last_diagnostic=icount
-        time1=mpiwtime()
-        time_last_diagnostic=time1
+        time_last_diagnostic=real(mpiwtime())
       endif
       if (nt>0) call timeloop(f,df,p)
 !$  else
@@ -1151,9 +1381,10 @@ endsubroutine helper_loop
 !$omp barrier
 !$omp end parallel
 !
+  time2=0.
   if (lroot) then
 !
-    time2=mpiwtime()
+    time2=real(mpiwtime())
 !
     print*
     print*, 'Simulation finished after ', icount, ' time-steps'
@@ -1214,95 +1445,7 @@ endsubroutine helper_loop
 !  Print wall clock time and time per step and processor for diagnostic
 !  purposes.
 !
-  if (lroot) then
-    wall_clock_time=time2-time1
-    print*
-    write(*,'(A,1pG10.3,A,1pG11.4,A)') ' Wall clock time [hours] = ', wall_clock_time/3600.0, &
-                                       ' (+/- ', real(mpiwtick())/3600.0, ')'
-    if (it>1) then
-      if (lparticles) then
-        write(*,'(A,1pG10.3)') ' Wall clock time/timestep/(meshpoint+particle) [microsec] =', &
-                               wall_clock_time/icount/(nw+npar/ncpus)/ncpus/1.0e-6
-      else
-        write(*,'(A,1pG14.7)') ' Wall clock time/timestep/meshpoint [microsec] =', &
-                               wall_clock_time/icount/nw/ncpus/1.0e-6
-        write(*,'(A,1pG14.7)') ' Wall clock time/timestep/local meshpoint [microsec] =', &
-                               wall_clock_time/icount/nw/1.0e-6
-        write(*,'(A,1pG14.7)') ' Rhs wall clock time/timestep/local meshpoint [microsec] =', &
-                               rhs_sum_time/icount/nw/1.0e-6
-! 2025-Dec-08/Kishore: Touko, I would suggest using the existing variable `ip` (which
-! controls some other diagnostic outputs as well), rather than introducing a new
-! flag.
-        if (lverbose_performance_log) then
-          write(*,'(A,1pG14.7)') &
-            ' After substep wall clock time/timestep/local meshpoint [microsec] =', &
-            after_substep_sum_time/icount/nw/1.0e-6
-          write(*,'(A,1pG14.7)') &
-            ' Before boundary wall clock time/timestep/local meshpoint [microsec] =', &
-            before_boundary_sum_time/icount/nw/1.0e-6
-          if(lradiation_ray) write(*,'(A,1pG14.7)') &
-            ' Radtransfer wall clock time/timestep/local meshpoint [microsec] =', &
-            radtransfer_sum_time/icount/nw/1.0e-6
-          write(*,'(A,1pG14.7)') &
-            ' Diagnostics wall clock time/timestep/local meshpoint [microsec] =', &
-            time_doing_diagnostics/icount/nw/1.0e-6
-          write(*,'(A,1pG14.7)') &
-            ' Timestep wall clock time/timestep/local meshpoint [microsec] =', &
-            time_in_timestep/icount/nw/1.0e-6
-          write(*,'(A,1pG14.7)') &
-            ' Timestep (without waiting) wall clock time/timestep/local meshpoint [microsec] =', &
-            (time_in_timestep-time_spent_copying_and_waiting)/icount/nw/1.0e-6
-          write(*,'(A,1pG14.7)') &
-            ' Timestep wall clock time/timestep/meshpoint [microsec] =', &
-            time_in_timestep/icount/nw/ncpus/1.0e-6
-          write(*,'(A,1pG14.7)') &
-            ' Timestep (without waiting) wall clock time/timestep/meshpoint [microsec] =', &
-            (time_in_timestep-time_spent_copying_and_waiting)/icount/nw/ncpus/1.0e-6
-          write(*,'(A,1pG14.7)') &
-            ' Diagnostics wall clock time/timestep/meshpoint [microsec] =', &
-            time_doing_diagnostics/icount/nw/ncpus/1.0e-6
-          write(*,'(A,1pG14.7)') &
-            ' Rhs wall clock time/timestep/meshpoint [microsec] =', &
-            rhs_sum_time/icount/nw/ncpus/1.0e-6
-          write(*,'(A,1pG14.7)') &
-            ' After substep wall clock time/timestep/meshpoint [microsec] =', &
-            after_substep_sum_time/icount/nw/ncpus/1.0e-6
-          write(*,'(A,1pG14.7)') &
-            ' Before boundary wall clock time/timestep/meshpoint [microsec] =', &
-            before_boundary_sum_time/icount/nw/ncpus/1.0e-6
-          if(lradiation_ray) write(*,'(A,1pG14.7)') &
-            ' Radtransfer wall clock time/timestep/meshpoint [microsec] =', &
-            radtransfer_sum_time/icount/nw/ncpus/1.0e-6
-          if(lradiation_ray) write(*,'(A,1pG14.7)') &
-            ' Radtransfer+Rhs wall clock time/timestep/meshpoint [microsec] =', &
-            (rhs_sum_time+radtransfer_sum_time)/icount/nw/ncpus/1.0e-6
-
-          if(ltraining.and.training_time>0) write(*,'(A,1pG14.7)') &
-            ' Training wall clock time/timestep/meshpoint [microsec] =', &
-            (training_time)/icount/nw/1.0e-6
-
-          if(ltraining.and.inference_time>0) write(*,'(A,1pG14.7)') &
-            ' Inference wall clock time/timestep/meshpoint [microsec] =', &
-            (inference_time)/icount/nw/1.0e-6
-
-
-        endif
-      endif
-    endif
-  endif
-
-  memuse=memusage()
-  call mpireduce_max_int(memuse,memcpu)
-  call mpireduce_sum_int(memuse,memory)
-  if (lroot) then
-    print'(1x,a,f9.3)', 'Maximum used memory per cpu [MBytes] = ', memcpu/1024.
-    if (memory>1e6) then
-      print'(1x,a,f12.3)', 'Maximum used memory [GBytes] = ', memory/1024.**2
-    else
-      print'(1x,a,f12.3)', 'Maximum used memory [MBytes] = ', memory/1024.
-    endif
-    print*
-  endif
+  call print_metrics(real(time2-time1))
 !
 !  Give all modules the possibility to exit properly.
 !

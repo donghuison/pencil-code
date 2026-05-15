@@ -14,7 +14,7 @@
 ! MAUX CONTRIBUTION 0
 !
 ! PENCILS PROVIDED ugss; Ma2; fpres(3); uglnTT; sglnTT(3); transprhos !,dsdr
-! PENCILS PROVIDED initss; initlnrho; uuadvec_gss; advec_cs2; cool_prof
+! PENCILS PROVIDED initss; initlnrho; uuadvec_gss; advec_cs2; cool_prof 
 !
 !***************************************************************
 module Energy
@@ -170,7 +170,6 @@ module Energy
   logical :: lsmooth_ss_run_aver=.false.
   real :: h_sld_ene=2.0, nlf_sld_ene=1.0, w_sldchar_ene2=0.1
   real :: w_sldchar_ene_r0=1.0, w_sldchar_ene_p=8.0
-  real :: xmid
   logical :: lheat_cool_gravz=.false.
   real :: tau_cool_pp=0.0
   character (len=labellen), dimension(ninit) :: initss='nothing'
@@ -289,6 +288,8 @@ module Energy
                                 ! DIAG_DOC:   \quad(mean entropy)
   integer :: idiag_ss2m=0       ! DIAG_DOC: $\left<(s/c_p)^2\right>$
                                 ! DIAG_DOC:   \quad(mean squared entropy)
+  integer :: idiag_ss_run_averm=0 
+                                ! DIAG_DOC:   \quad(mean of the running average of entropy)
   integer :: idiag_eem=0        ! DIAG_DOC: $\left<e\right>$
   integer :: idiag_ppm=0        ! DIAG_DOC: $\left<p\right>$
   integer :: idiag_ppmax=0      ! DIAG_DOC: $\max(p)$
@@ -695,15 +696,16 @@ module Energy
 !
       use BorderProfiles, only: request_border_driving
       use EquationOfState, only: get_soundspeed, select_eos_variable, get_gamma_etc
-      use Gravity, only: gravz, g0, compute_gravity_star, z1, z2
+      use Gravity, only: gravz, g0, compute_gravity_star, z2
       use Initcond
-      use HDF5_IO, only: input_profile, output_profile
+      use HDF5_IO, only: output_profile
+      use IO, only: read_profile
       use Mpicomm, only: mpibcast_real
       use SharedVariables, only: put_shared_variable, get_shared_variable
       use Sub, only: blob, write_zprof, step, cubic_step
       use File_io, only: file_exists
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
 !
       real, dimension (nzgrid) :: tmpz
       real, dimension (nx) :: tmpz_penc
@@ -754,9 +756,9 @@ module Energy
 !  Kbot and hcond0 are used interchangibly, so if one is
 !  =impossible, set it to the other's value.
 !
-      if (T0_cgs/=0.) T0=T0_cgs/unit_temperature
-      if (ssmask1==0.) ssmask1=ssmask1_cgs/unit_entropy
-      if (ssmask2==0.) ssmask2=ssmask2_cgs/unit_entropy
+      if (T0_cgs/=0.) T0=real(T0_cgs/unit_temperature)
+      if (ssmask1==0.) ssmask1=real(ssmask1_cgs/unit_entropy)
+      if (ssmask2==0.) ssmask2=real(ssmask2_cgs/unit_entropy)
       if (hcond0==impossible) then
         if (Kbot==impossible) then
           hcond0=0.0
@@ -1101,7 +1103,7 @@ module Energy
 !
 !  Read entropy profile (used for cooling to reference profile)
 !
-      if (lcooling_ss_mz .and. lrun) call input_profile('ss_mz', 'z', ss_mz, mz, lhas_ghost=.true.)
+      if (lcooling_ss_mz .and. lrun) call read_profile('ss_mz', 'z', ss_mz, mz, lhas_ghost=.true.)
 !
 !  Initial temperature profile is given in ln(T) in [K] over z in [Mm].
 !
@@ -1118,9 +1120,9 @@ module Energy
 !
         prof_lnT = prof_lnT - alog(real(unit_temperature))
         if (unit_system == 'SI') then
-          prof_z = prof_z * 1.e6 / unit_length
+          prof_z = real(prof_z * 1.e6 / unit_length)
         elseif (unit_system == 'cgs') then
-          prof_z = prof_z * 1.e8 / unit_length
+          prof_z = real(prof_z * 1.e8 / unit_length)
         endif
       endif
 !
@@ -1348,7 +1350,12 @@ module Energy
           call fatal_error('initialize_energy','no such cooling_profile: '//trim(cooling_profile))
         endselect
         profz_cool = cool*profz_cool
-        profz1_cool = cool1*profz1_cool
+
+        !TP: profz1_cool does not a defined value if cooling_profile is not volheat_surfcool
+        !    so will get error when debug flags are enabled if I don't mask this computation
+        if(cooling_profile == 'volheat_surfcool') then
+          profz1_cool = cool1*profz1_cool
+        endif
 
         if (luminosity/=0.0) then
 !
@@ -1532,15 +1539,11 @@ module Energy
 !  Tell the BorderProfiles module if we intend to use border driving, so
 !  that the module can request the right pencils.
 !
-      select case (borderss)
-!
-      case ('zero','0','constant','initial-condition','initial-temperature')
-        call request_border_driving(borderss)
-      case ('nothing')
-        if (lroot.and.ip<=5) print*, "initialize_energy: borderss='nothing'"
-      case default
-        call fatal_error('initialize_energy','no such borderss: '//trim(borderss))
-      endselect
+      if (borderss=='initial-temperature') then
+        call request_border_driving((/'initial-condition'/),'initialize_energy',ilnrho,iss)
+      else
+        call request_border_driving((/borderss/),'initialize_energy',iss)
+      endif
 
       if (lheatc_kramers) then
         call put_shared_variable('hcond0_kramers',hcond0_kramers)
@@ -1629,6 +1632,7 @@ module Energy
 !
         if (lcalc_heat_cool) call not_implemented('initialize_energy','calc_heat_cool for pretend_lnTT=T')
       endif
+
 !
     endsubroutine initialize_energy
 !***********************************************************************
@@ -1641,7 +1645,7 @@ module Energy
 !
       use EquationOfState, only: get_gamma_etc
 !
-      real, dimension(mx,my,mz,mfarray), intent(INOUT) :: f
+      real, contiguous, dimension(:,:,:,:), intent(INOUT) :: f
 !
       real, dimension(mx,my) :: ssmxy
       integer :: n
@@ -1717,7 +1721,7 @@ module Energy
       use InitialCondition, only: initial_condition_ss
       use Sub
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       intent(inout) :: f
 !
       real, dimension (nx) :: tmp,pot
@@ -1725,7 +1729,8 @@ module Energy
       real :: cs2int,ss0,ssint,ztop,ss_ext,pot0,pot_ext
       real, pointer :: fac_cs
       integer, pointer :: isothmid
-      integer :: j,n,m
+      integer :: j,l,n,m
+      real, allocatable, dimension(:,:,:) :: f_lnrho
       logical :: lnothing, save_pretend_lnTT
       real :: gamma,gamma_m1,gamma1,cv,cp,cp1
 !
@@ -1763,7 +1768,12 @@ module Energy
             call blob_radeq(ampl_ss(j),f,iss,radius_ss(j),center1_x(j),center1_y(j),center1_z(j))
           case ('isothermal')
             if (ldensity_nolog) then
-              call isothermal_entropy(log(f(:,:,:,irho)),T0,f(:,:,:,iss))
+              !Done in this cumbersome manner to get rid of large tmp array on the stack
+              allocate(f_lnrho(mx,my,mz))
+              do l=1,mx; do m=1,my; do n=1,mz
+                f_lnrho(l,m,n) = log(f(l,m,n,irho))
+              enddo; enddo; enddo
+              call isothermal_entropy(f_lnrho,T0,f(:,:,:,iss))
             else
               call isothermal_entropy(f(:,:,:,ilnrho),T0,f(:,:,:,iss))
             endif
@@ -2025,8 +2035,11 @@ module Energy
             call blob(-cp1*ampl_ss(j),f,ilnrho,radius_ss(j),center1_x(j),center1_y(j),center1_z(j))
             if (ldensity_nolog) then
               f(:,:,:,irho) = exp(f(:,:,:,ilnrho))
-              if (lreference_state) &
-                f(l1:l2,:,:,irho) = f(l1:l2,:,:,irho) - spread(spread(reference_state(:,iref_rho),2,my),3,mz)
+              if (lreference_state) then
+                do m=1,my; do n=1,mz;
+                  f(l1:l2,m,n,irho) = f(l1:l2,m,n,irho) - reference_state(:,iref_rho)
+                enddo; enddo
+              endif
             endif
           case ('single_polytrope')
             call single_polytrope(f)
@@ -2091,8 +2104,9 @@ module Energy
 !  Set the initial condition for running average of entropy equal to
 !  initial entropy
 !
-      if (lss_running_aver_as_aux .or. lss_running_aver_as_var) &
+      if (lss_running_aver_as_aux .or. lss_running_aver_as_var) then
           f(:,m1:m2,n1:n2,iss_run_aver) = f(:,m1:m2,n1:n2,iss)
+      endif
 !
     endsubroutine init_energy
 !***********************************************************************
@@ -2102,10 +2116,11 @@ module Energy
 !
 !   6-may-07/axel: coded
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, optional :: xblob,yblob,zblob
       real :: ampl,radius,x01,y01,z01
       integer :: i
+      integer :: l,m,n
 !
 !  Single blob.
 !
@@ -2128,9 +2143,13 @@ module Energy
         if (lroot) print*,'ampl=0 in blob_radeq'
       else
         if (lroot.and.ip<14) print*,'blob: variable i,ampl=',i,ampl
-        f(:,:,:,i)=f(:,:,:,i)+ampl*( spread(spread(exp(-((x-x01)/radius)**2),2,my),3,mz) &
-                                    *spread(spread(exp(-((y-y01)/radius)**2),1,mx),3,mz)&
-                                    *spread(spread(exp(-((z-z01)/radius)**2),1,mx),2,my))
+        do l=1,mx; do m=1,my; do n=1,mz
+          f(l,m,n,i)=f(l,m,n,i)+ampl*(&
+                                         exp(-((x(l)-x01)/radius)**2)&
+                                        *exp(-((y(m)-y01)/radius)**2)&
+                                        *exp(-((z(n)-z01)/radius)**2)&
+                                    )
+        enddo; enddo; enddo
       endif
 !
     endsubroutine blob_radeq
@@ -2154,7 +2173,7 @@ module Energy
       use Gravity, only: gravz
       use Sub, only: step
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (mz) :: stp
       real :: tmp,mpoly,zint,zbot,zblend,beta1,cs2int,ssint
       integer :: isoth
@@ -2232,7 +2251,7 @@ module Energy
       use Gravity, only: gravz, nu_epicycle
       use Sub, only: step
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (mz) :: stp
       real :: tmp,mpoly,zint,zbot,zblend,beta1,cs2int,ssint, nu_epicycle2
       integer :: isoth
@@ -2295,7 +2314,7 @@ module Energy
       use EquationOfState, only: eoscalc
       use Gravity, only: gravz
 !
-      real, dimension (mx,my,mz,mfarray), intent(inout) :: f
+      real, contiguous, dimension(:,:,:,:), intent(inout) :: f
       real, intent(in) :: lnrho_bot,ss_const
       real :: cs2_,lnrho,lnrho_m
 !
@@ -2344,7 +2363,7 @@ module Energy
       use EquationOfState, only: get_gamma_etc
       use Gravity, only: gravz
 !
-      real, dimension (mx,my,mz,mfarray), intent(inout) :: f
+      real, contiguous, dimension(:,:,:,:), intent(inout) :: f
       real :: zz,lnrho,ss,rho,cs2,dlnrho,dss
       integer :: iz
       real :: gamma,gamma_m1
@@ -2411,7 +2430,7 @@ module Energy
       use General, only: safe_character_assign
       use Gravity, only: z1
 !
-      real, dimension (mx,my,mz,mfarray), intent(inout) :: f
+      real, contiguous, dimension(:,:,:,:), intent(inout) :: f
       real, dimension (nzgrid) :: tempm,lnrhom
       real :: zm,ztop,mixinglength_flux,lnrho,ss,lnTT
       real :: zbot,rbot,rt_old,rt_new,rb_old,rb_new,crit,rhotop,rhobot
@@ -2513,7 +2532,7 @@ module Energy
       use EquationOfState, only: eoscalc, get_gamma_etc
       use Gravity, only: g0
 !
-      real, dimension (mx,my,mz,mfarray), intent(inout) :: f
+      real, contiguous, dimension(:,:,:,:), intent(inout) :: f
       real, dimension (nx) :: lnrho,lnTT,TT,pert_TT,r_mn
       real :: beta1
       real :: gamma,gamma_m1,cp,cp1
@@ -2610,7 +2629,7 @@ module Energy
       use EquationOfState, only: eoscalc, get_gamma_etc
       use Gravity, only: gravz, zinfty
 !
-      real, dimension (mx,my,mz,mfarray), intent(inout) :: f
+      real, contiguous, dimension(:,:,:,:), intent(inout) :: f
 !
       real, dimension (nx) :: lnrho,TT
       real :: beta1
@@ -2655,7 +2674,7 @@ module Energy
       use EquationOfState, only: eoscalc
       use Mpicomm, only: mpibcast_real, MPI_COMM_PENCIL
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension(nx) :: absz
       real(KIND=rkind8), dimension(nx) :: n_c,n_w,n_i,n_h
 !  T in K, k_B s.t. pp is in code units ( = 9.59e-15 erg/cm/s^2)
@@ -2672,13 +2691,13 @@ module Energy
 !  Pressure is set to 6 times thermal pressure, this factor roughly
 !  allowing for other sources, as modelled by Ferriere.
 !
-      kpc = 3.086D21 / unit_length
+      kpc = real(3.086D21 / unit_length)
       rhoscale = 1.36 * m_p * unit_length**3
       print*, 'ferriere: kpc, rhoscale =', kpc, rhoscale
-      T_c=T_c_cgs/unit_temperature
-      T_w=T_w_cgs/unit_temperature
-      T_i=T_i_cgs/unit_temperature
-      T_h=T_h_cgs/unit_temperature
+      T_c=real(T_c_cgs/unit_temperature)
+      T_w=real(T_w_cgs/unit_temperature)
+      T_i=real(T_i_cgs/unit_temperature)
+      T_h=real(T_h_cgs/unit_temperature)
 !
       do n=n1,n2            ! nb: don't need to set ghost-zones here
       absz=abs(z(n))
@@ -2748,7 +2767,7 @@ module Energy
       use EquationOfState , only: eoscalc, getmu, get_gamma_etc
       use Mpicomm, only: mpibcast_real, MPI_COMM_PENCIL
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension(nx) :: rho,pp
       real :: rho0hs,muhs,fmpi1
       real :: g_A, g_C
@@ -2762,10 +2781,10 @@ module Energy
 !  Set up physical units.
 !
       if (unit_system=='cgs') then
-          g_A = g_A_cgs/unit_velocity*unit_time
-          g_B = g_B_cgs/unit_length
-          g_C = g_C_cgs/unit_velocity*unit_time
-          g_D = g_D_cgs/unit_length
+          g_A = real(g_A_cgs/unit_velocity*unit_time)
+          g_B = real(g_B_cgs/unit_length)
+          g_C = real(g_C_cgs/unit_velocity*unit_time)
+          g_D = real(g_D_cgs/unit_length)
       else if (unit_system=='SI') then
         call not_implemented('ferriere_hs','SI unit conversions')
       endif
@@ -2785,7 +2804,7 @@ module Energy
       do n=n1,n2
       do m=m1,m2
 
-        rho=rho0hs*exp(-m_u*muhs/T0/k_B*(-g_A*g_B+g_A*sqrt(g_B**2 + z(n)**2)+g_C/g_D*z(n)**2/2.))
+        rho=real(rho0hs*exp(-m_u*muhs/T0/k_B*(-g_A*g_B+g_A*sqrt(g_B**2 + z(n)**2)+g_C/g_D*z(n)**2/2.)))
         call putrho(f(:,m,n,ilnrho),rho)
 
 !  Isothermal
@@ -2820,7 +2839,7 @@ module Energy
       use EquationOfState, only: eoscalc
       use Mpicomm, only: mpibcast_real, MPI_COMM_PENCIL
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
 
       real, dimension(nx) :: rho,pp,ss
       real :: rho0hs,cs0hs,H0hs,fmpi1
@@ -2888,7 +2907,7 @@ module Energy
 !
       use EquationOfState, only: get_gamma_etc
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
 !
       real, dimension (4) :: rpp,rpr,rpu,rpv
       integer :: l,ind,n,m
@@ -3511,7 +3530,7 @@ module Energy
       use Sub, only: u_dot_grad, grad, multmv, h_dot_grad
       use WENO_transport, only: weno_transp
 !
-      real, dimension(mx,my,mz,mfarray), intent(IN)   :: f
+      real, contiguous, dimension(:,:,:,:), intent(IN)   :: f
       type(pencil_case),                 intent(INOUT):: p
 !
       integer :: j
@@ -3572,6 +3591,7 @@ module Energy
       if (lpencil(i_initss).and.iglobal_ss0/=0) p%initss=f(l1:l2,m,n,iglobal_ss0)
 !
       if (lpencil(i_uuadvec_gss)) call h_dot_grad(p%uu_advec,p%gss,p%uuadvec_gss)
+
 !
 !  ``cs2/dx^2'' for timestep
 !
@@ -3589,6 +3609,7 @@ module Energy
           if (headtt.or.ldebug) print*, 'calc_pencils_energy: max(advec_cs2) =', maxval(p%advec_cs2)
         endif
       endif
+
 !
       if (lcooling_patches.and.lpencil(i_cool_prof)) p%cool_prof=f(l1:l2,m,n,icool_prof)
 
@@ -3597,6 +3618,22 @@ module Energy
       endif
 !
     endsubroutine calc_pencils_energy
+!***********************************************************************
+    subroutine calc_energy_slope_limited(f,df)
+!
+!   16-apr-26/TP: carved from denergy_dt
+!
+      use Sub, only: calc_slope_diff_flux
+
+      real, intent(in),  contiguous, dimension(:,:,:,:) :: f
+      real, intent(out), dimension(mx,my,mz,mvar) :: df
+
+      real, dimension(nx) :: tmp
+
+      call calc_slope_diff_flux(f,iss,h_sld_ene,nlf_sld_ene,tmp,div_sld_ene)
+      df(l1:l2,m,n,iss)=df(l1:l2,m,n,iss)+tmp
+
+    endsubroutine calc_energy_slope_limited
 !***********************************************************************
     subroutine denergy_dt(f,df,p)
 !
@@ -3615,15 +3652,14 @@ module Energy
       use Viscosity, only: calc_viscous_heat
       use General, only: notanumber
 !
-      real, dimension (mx,my,mz,mfarray) :: f
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: f
+      real, contiguous, dimension(:,:,:,:) :: df
       type (pencil_case) :: p
 !
       intent(inout)  :: f,p
       intent(inout) :: df
 !
       real :: ztop,xi,profile_cor
-      real, dimension(nx) :: tmp1
       integer :: j
       real :: gamma,gamma_m1
 !
@@ -3762,8 +3798,7 @@ module Energy
 !     Slope-limited diffusion
 !
       if (lenergy_slope_limited.and.llast) then
-        call calc_slope_diff_flux(f,iss,p,h_sld_ene,nlf_sld_ene,tmp1,div_sld_ene)
-        df(l1:l2,m,n,iss)=df(l1:l2,m,n,iss)+tmp1
+        call calc_energy_slope_limited(f,df)
       endif
 !
 !  Explicit heating/cooling terms.
@@ -3807,7 +3842,7 @@ module Energy
 
     endsubroutine denergy_dt
 !***********************************************************************
-    subroutine calc_0d_diagnostics_energy(p)
+    subroutine calc_0d_diagnostics_energy(f,p)
 !
 !  Calculate entropy related diagnostics.
 !
@@ -3817,6 +3852,7 @@ module Energy
 
       type(pencil_case) :: p
 
+      real, contiguous, dimension(:,:,:,:) :: f
       real, dimension(nx) :: ufpres, glnTT2, Ktmp
       real, dimension(nx) :: gT2,gs2,gTxgso,gTxgs2,chix
       real, dimension(nx,3) :: gTxgs
@@ -3869,6 +3905,7 @@ module Energy
         if (idiag_ssruzm/=0) call sum_mn_name(p%ss*p%rho*p%uu(:,3),idiag_ssruzm)
         if (idiag_ssuzm/=0) call sum_mn_name(p%ss*p%uu(:,3),idiag_ssuzm)
         call sum_mn_name(p%ss,idiag_ssm)
+        if(idiag_ss_run_averm /= 0) call sum_mn_name(f(l1:l2,m,n,iss_run_aver),idiag_ss_run_averm)
         if (idiag_ssbycpm/=0) call sum_mn_name(p%ss*p%cp1,idiag_ssbycpm)
         if (idiag_ss2m/=0) call sum_mn_name(p%ss**2,idiag_ss2m)
         call sum_mn_name(p%ee,idiag_eem)
@@ -3977,7 +4014,7 @@ module Energy
       use Diagnostics
       use Sub, only: cross, dot2
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       type(pencil_case) :: p
 !
       real, dimension (nx,3) :: gTxgs
@@ -4112,7 +4149,13 @@ module Energy
           if (lheatc_smagorinsky) call xysum_mn_name_z(-Pr_smag1*p%nu_smag*p%rho*p%TT*gss1(:,3),idiag_fturbz)
 ! from calc_heatcond_constchi, calc_heatcond_kramers, calc_heatcond
           if (lheatc_Kprof.or.lheatc_chiconst.or.lheatc_kramers) then
-            if (idiag_fturbz/=0) call xysum_mn_name_z(-chi_t*chit_prof*p%rho*p%TT*p%gss(:,3),idiag_fturbz)
+            if (idiag_fturbz/=0) then 
+              if(chi_t == 0.) then
+                call xysum_mn_name_z(spread(0.,1,nx),idiag_fturbz)
+              else
+                call xysum_mn_name_z(-chi_t*chit_prof*p%rho*p%TT*p%gss(:,3),idiag_fturbz)
+              endif
+            endif
           endif
         endif
 
@@ -4252,7 +4295,7 @@ module Energy
 !***********************************************************************
     subroutine calc_diagnostics_energy(f,p)
 
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       type(pencil_case) :: p
 
       real, dimension(nx) :: thdiff
@@ -4280,7 +4323,7 @@ module Energy
 
       call calc_2d_diagnostics_energy(p)
       call calc_1d_diagnostics_energy(f,p)
-      call calc_0d_diagnostics_energy(p)
+      call calc_0d_diagnostics_energy(f,p)
 
     endsubroutine calc_diagnostics_energy
 !***********************************************************************
@@ -4292,7 +4335,7 @@ module Energy
 !
       use Sub, only: finalize_aver
 !
-      real, dimension (mx,my,mz,mfarray), intent(IN) :: f
+      real, contiguous, dimension(:,:,:,:), intent(IN) :: f
       real, dimension (mx,my),            intent(OUT):: ssmxy
 !
       integer :: l,m
@@ -4318,7 +4361,7 @@ module Energy
       use EquationOfState, only: get_gamma_etc
       use Sub, only : step
 !
-      real, dimension (mx,my,mz,mfarray), intent(inout) :: f
+      real, contiguous, dimension(:,:,:,:), intent(inout) :: f
       real, dimension (mx) :: cs2, prof_cs, fact_rho, fact_wsld
       real :: rhotop, lnrhotop, w_sldrat2=1.0
       real :: gamma,gamma_m1,cv,cv1
@@ -4397,18 +4440,17 @@ module Energy
 !
       use EquationOfState, only: get_gamma_etc
       use Deriv, only: der_x, der2_x, der_z, der2_z
-      use Mpicomm, only: mpiallreduce_sum, mpibcast_real_arr, MPI_COMM_PENCIL
+      use Mpicomm, only: mpiallreduce_sum, mpibcast_real_arr
       use Sub, only: finalize_aver,calc_all_diff_fluxes,div,smooth,global_mean
       Use General, only: random_number_wrapper
 !
-      real, dimension (mx,my,mz,mfarray),intent(INOUT) :: f
+      real, contiguous, dimension(:,:,:,:),intent(INOUT) :: f
 !
-      real, dimension (mx,my,mz) :: cs2p, ruzp
+      real, dimension (mx,my) :: cs2p, ruzp
       real, dimension (mz) :: ruzmz
 !
-      real, dimension (ncool_patch_max) :: dxpatch, dypatch
 !
-      integer :: l,m,n,lf,nn
+      integer :: l,m,n,lf
       real :: fact, tmp1
       real :: gamma,gamma_m1,cv,cv1,cp,cp1
 !
@@ -4608,7 +4650,9 @@ module Energy
 !  Compute running average of entropy
 !
       if (lss_running_aver) then
-        if (t<dt) f(:,:,:,iss_run_aver)=f(:,:,:,iss)
+        if (t == 0. .or. t<dt) then
+          f(:,:,:,iss_run_aver)=f(:,:,:,iss)
+        endif
         f(:,:,:,iss_run_aver)=(1.-dt/tau_aver1)*f(:,:,:,iss_run_aver)+dt/tau_aver1*f(:,:,:,iss)
         if (lsmooth_ss_run_aver.and.lrmv) call smooth(f,iss_run_aver)
       endif
@@ -4633,11 +4677,11 @@ module Energy
         call finalize_aver(nprocxy,12,ruzmz)
 !
         do n=1,mz
-          cs2p(l1:l2,m1:m2,n) = cs20*exp(gamma_m1*(f(l1:l2,m1:m2,n,ilnrho)-lnrho0)+cv1*f(l1:l2,m1:m2,n,iss))-cs2mz(n)
-          ruzp(l1:l2,m1:m2,n) = exp(f(l1:l2,m1:m2,n,ilnrho))*f(l1:l2,m1:m2,n,iuz)-ruzmz(n)
+          cs2p(l1:l2,m1:m2) = cs20*exp(gamma_m1*(f(l1:l2,m1:m2,n,ilnrho)-lnrho0)+cv1*f(l1:l2,m1:m2,n,iss))-cs2mz(n)
+          ruzp(l1:l2,m1:m2) = exp(f(l1:l2,m1:m2,n,ilnrho))*f(l1:l2,m1:m2,n,iuz)-ruzmz(n)
+          f(l1:l2,m1:m2,n,iFenth)=tmp1*cs2p(l1:l2,m1:m2)*ruzp(l1:l2,m1:m2)
         enddo
 !
-        f(l1:l2,m1:m2,:,iFenth)=tmp1*cs2p(l1:l2,m1:m2,:)*ruzp(l1:l2,m1:m2,:)
       endif
 !
     endsubroutine energy_after_boundary
@@ -4654,7 +4698,7 @@ module Energy
 !      use General, only: staggered_mean_scal
       use General, only: staggered_max_scal
 !
-      real, dimension(mx,my,mz,mfarray), intent(INOUT) :: f
+      real, contiguous, dimension(:,:,:,:), intent(INOUT) :: f
 !
       real, dimension(mx) :: cs2
 !
@@ -4685,7 +4729,7 @@ module Energy
       use EquationOfState, only: get_gamma_etc
       use BorderProfiles, only: border_driving, set_border_initcond
 !
-      real, dimension(mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       type (pencil_case) :: p
       real, dimension(mx,my,mz,mvar) :: df
       real, dimension(nx) :: f_target
@@ -4735,9 +4779,7 @@ module Energy
         f_target = ss_init - gamma_m1*cv*(p%lnrho-lnrho_init)
         call border_driving(f,df,p,f_target,iss)
 !
-      case ('nothing')
       endselect
-!
 !
     endsubroutine set_border_entropy
 !***********************************************************************
@@ -4748,7 +4790,7 @@ module Energy
       use Sub, only: dot, multmv_transp, multsv_mn
 
       real, dimension (nx), intent(out) :: thdiff
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       type (pencil_case) :: p
 !
       real, dimension(nx) :: g2
@@ -4820,8 +4862,8 @@ module Energy
       use EquationOfState, only: get_gamma_etc
       use Sub, only: dot, multmv_transp, multsv_mn
 !
-      real, dimension (mx,my,mz,mfarray) :: f
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: f
+      real, contiguous, dimension(:,:,:,:) :: df
       type (pencil_case) :: p
 !
       intent(inout) :: df
@@ -4856,7 +4898,7 @@ module Energy
       use EquationOfState, only: get_gamma_etc
       use Sub, only: dot
 !
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: df
       type (pencil_case) :: p
       real, dimension (nx) :: thdiff,g2,thchi
       real :: gamma
@@ -4949,7 +4991,7 @@ module Energy
       use EquationOfState, only: get_gamma_etc
       use Sub, only: dot
 !
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: df
       type (pencil_case) :: p
       real, dimension (nx) :: thdiff,g2,rhochi
       real :: gamma
@@ -5028,7 +5070,7 @@ module Energy
 !
 !  17-jun-05/anders: coded
 !
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: df
       type (pencil_case) :: p
 !
       real, dimension (nx) :: thdiff
@@ -5062,8 +5104,8 @@ module Energy
 !
       use Sub, only: del6fj
 !
-      real, dimension (mx,my,mz,mfarray),intent(in) :: f
-      real, dimension (mx,my,mz,mvar),intent(inout) :: df
+      real, contiguous, dimension(:,:,:,:),intent(in) :: f
+      real, contiguous, dimension(:,:,:,:),intent(inout) :: df
 !
       real, dimension (nx) :: thdiff
 !
@@ -5091,8 +5133,8 @@ module Energy
 !
       use Deriv, only: der6
 !
-      real, dimension (mx,my,mz,mfarray) :: f
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: f
+      real, contiguous, dimension(:,:,:,:) :: df
 !
       intent(in)  :: f
       intent(inout) :: df
@@ -5124,8 +5166,8 @@ module Energy
 !
       use Deriv, only: der6
 !
-      real, dimension (mx,my,mz,mfarray) :: f
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: f
+      real, contiguous, dimension(:,:,:,:) :: df
 !
       intent(in)  :: f
       intent(inout) :: df
@@ -5178,7 +5220,7 @@ module Energy
       use EquationOfState, only: get_gamma_etc
       use Sub, only: dot
 !
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: df
       type (pencil_case) :: p
       real, dimension (nx) :: thdiff,g2,gshockglnTT,gshockgss
       real :: gamma
@@ -5270,7 +5312,7 @@ module Energy
       use EquationOfState, only: get_gamma_etc
       use Sub, only: dot, step, der_step
 !
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: df
       type (pencil_case) :: p
       real, dimension (nx) :: thdiff,g2,gshockglnTT,gchiglnTT,pchi_shock
       real, dimension (nx,3) :: gradchi_shock
@@ -5349,7 +5391,7 @@ module Energy
 !
 !  This particular version assumes a simple polytrope, so mpoly is known.
 !
-      if (headtt) print*,'calc_heatcond_constK_arrays: hcond=', maxval(hcond)
+      if (headtt) print*,'calc_heatcond_constK_arrays: hcond=', hcond_Kconst
 !
 !  Heat conduction
 !  Note: these routines require revision when ionization turned on
@@ -5402,7 +5444,7 @@ module Energy
 !
 !
       type (pencil_case) :: p
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: df
 !
       intent(in) :: p
       intent(inout) :: df
@@ -5431,7 +5473,7 @@ module Energy
       use EquationOfState, only: get_gamma_etc
       use Sub, only: dot2_mn, multsv_mn, tensor_diffusion_coef
 !
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: df
       real, dimension (nx,3) :: gvKpara,gvKperp,tmpv,tmpv2
       real, dimension (nx) :: bb2,thdiff,b1
       real, dimension (nx) :: tmps,vKpara,vKperp
@@ -5498,7 +5540,7 @@ module Energy
       use Diagnostics, only: max_mn_name
       use Sub, only: tensor_diffusion_coef, dot, dot2
 !
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: df
       real, dimension (nx) :: cosbgT,gT2,b2,rhs
       real, dimension (nx) :: vKpara,vKperp
 !
@@ -5536,7 +5578,7 @@ module Energy
 !
 !  07-feb-07/wlad+heidar : coded
 !
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: df
       real, dimension (nx) :: tau,cooling,kappa,a1,a3
       real :: a2,kappa0,kappa0_cgs
 !
@@ -5548,7 +5590,7 @@ module Energy
       if (headtt) print*,'enter heatcond hubeny'
 !
       kappa0_cgs=2.0e-6  !cm2/g
-      kappa0=kappa0_cgs*unit_density/unit_length
+      kappa0=real(kappa0_cgs*unit_density/unit_length)
       kappa=kappa0*p%TT**2
 !
 !  Optical Depth tau=kappa*rho*H
@@ -5564,7 +5606,7 @@ module Energy
 !
         a1=0.375*tau ; a2=0.433013 ; a3=0.25/tau
 !
-        cooling = 2*sigmaSB*p%TT**4/(a1+a2+a3)
+        cooling = real(2*sigmaSB*p%TT**4/(a1+a2+a3))
 !
         df(l1:l2,m,n,iss)=df(l1:l2,m,n,iss) - cool_fac*cooling
 !
@@ -5619,8 +5661,8 @@ module Energy
       use Sub, only: dot
       use General, only: notanumber
 !
-      real, dimension (mx,my,mz,mfarray) :: f
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: f
+      real, contiguous, dimension(:,:,:,:) :: df
       type (pencil_case) :: p
 !
       intent(in) :: p
@@ -5715,8 +5757,8 @@ module Energy
       use Sub, only: dot, grad
       use General, only: notanumber
 !
-      real, dimension (mx,my,mz,mvar) :: df
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: df
+      real, contiguous, dimension(:,:,:,:) :: f
       type (pencil_case) :: p
       real, dimension (nx) :: thdiff, chix, g2
 !
@@ -5814,7 +5856,7 @@ module Energy
       use General, only: notanumber
 
       type (pencil_case), intent(IN) :: p
-      real, dimension (mx,my,mz,mfarray), intent(IN) :: f
+      real, contiguous, dimension(:,:,:,:), intent(IN) :: f
       real, dimension (nx), intent(OUT) :: thdiff
       real, dimension (nx,3) :: glnThcond,glhc
       real, dimension (nx) :: g2,del2ss1,chix
@@ -6019,8 +6061,8 @@ module Energy
 !  30-mar-06/ngrs: simplified calculations using p%glnTT and p%del2lnTT
 !  14-sep-25/TP:   separated calculation of thdiff and diffus_chi from update of df
 !
-      real, dimension (mx,my,mz,mfarray) :: f
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: f
+      real, contiguous, dimension(:,:,:,:) :: df
       type (pencil_case) :: p
 !
       intent(in) :: f,p
@@ -6049,7 +6091,7 @@ module Energy
 !
       use Sub, only: dot
 !
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: df
       type (pencil_case) :: p
       real, dimension (nx) :: thdiff,g2,del2ss1
       integer :: j
@@ -6127,8 +6169,8 @@ module Energy
       use Deriv, only: der6
       use Diagnostics
 !
-      real, dimension (mx,my,mz,mfarray) :: f
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: f
+      real, contiguous, dimension(:,:,:,:) :: df
       type (pencil_case) :: p
       real, dimension (nx) :: thdiff, thdiff1, g2, del2ss0, del2ss1
       real, dimension (nx,3) :: gradchit_prof, gradchit_prof_fluct
@@ -6284,7 +6326,7 @@ module Energy
       use Diagnostics, only: sum_mn_name, xysum_mn_name_z
       use EquationOfState, only: get_gamma_etc
 !
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: df
       type (pencil_case) :: p
       real, dimension (nx) :: Hmax, tmp
 !
@@ -6491,7 +6533,6 @@ module Energy
     subroutine apply_floor(a)
 !
       real, dimension(nx), intent(inout) :: a
-      integer :: i
 !
       where(a < TT_floor) a=TT_floor
 !
@@ -6661,7 +6702,7 @@ module Energy
       use Sub, only: step, cubic_step
 !
       type (pencil_case) :: p
-      real, dimension (nx) :: heat,prof
+      real, dimension (nx) :: heat
       real :: ztop
       intent(in) :: p
 !
@@ -6676,7 +6717,7 @@ module Energy
 !
 !  Smoothly switch on heating if required.
 !
-        if ((ttransient>0) .and. (t<ttransient)) heat = heat * t*(2*ttransient-t)/ttransient**2
+        if ((ttransient>0) .and. (t<ttransient)) heat = real(heat * t*(2*ttransient-t)/ttransient**2)
       endif
 !
 !  Allow for different cooling profile functions.
@@ -7016,7 +7057,7 @@ module Energy
       use Debug_IO, only: output_pencil
       use EquationOfState, only: get_gamma_etc
 !
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: df
       type (pencil_case) :: p
 !
       real, dimension (nx) :: lnQ,rtv_cool,lnTT_SI,lnneni,delta_lnTT,tmp
@@ -7068,11 +7109,11 @@ module Energy
         lnQ(:)=0.0
         do i=1,imax-1
           where (( intlnT_1(i) <= lnTT_SI .or. i==1 ) .and. lnTT_SI < intlnT_1(i+1) )
-            lnQ=lnQ + lnH_1(i) + B_1(i)*lnTT_SI
+            lnQ=real(lnQ + lnH_1(i) + B_1(i)*lnTT_SI)
           endwhere
         enddo
         where (lnTT_SI >= intlnT_1(imax) )
-          lnQ = lnQ + lnH_1(imax-1) + B_1(imax-1)*intlnT_1(imax)
+          lnQ = real(lnQ + lnH_1(imax-1) + B_1(imax-1)*intlnT_1(imax))
         endwhere
         if (Pres_cutoff/=impossible) then
           rtv_cool=exp(lnneni+lnQ-unit_lnQ-p%lnTT-p%lnrho)*exp(-p%rho*p%cs2*gamma1/Pres_cutoff)
@@ -7088,11 +7129,11 @@ module Energy
         lnQ(:)=0.0
         do i=1,imax-1
           where (( intlnT_2(i) <= lnTT_SI .or. i==1 ) .and. lnTT_SI < intlnT_2(i+1) )
-            lnQ=lnQ + lnH_2(i) + B_2(i)*lnTT_SI
+            lnQ=real(lnQ + lnH_2(i) + B_2(i)*lnTT_SI)
           endwhere
         enddo
         where (lnTT_SI >= intlnT_2(imax) )
-          lnQ = lnQ + lnH_2(imax-1) + B_2(imax-1)*intlnT_2(imax)
+          lnQ = real(lnQ + lnH_2(imax-1) + B_2(imax-1)*intlnT_2(imax))
         endwhere
         if (Pres_cutoff/=impossible) then
           rtv_cool=exp(lnneni+lnQ-unit_lnQ-p%lnTT-p%lnrho)*exp(-p%rho*p%cs2*gamma1/Pres_cutoff)
@@ -7133,7 +7174,7 @@ module Energy
 !
       use Gravity, only: zgrav
 !
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: df
       type (pencil_case) :: p
       real :: scl
 !
@@ -7158,8 +7199,8 @@ module Energy
 !
       use EquationOfState, only: eoscalc
 !
-      real, dimension (mx,my,mz,mfarray) :: f
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: f
+      real, contiguous, dimension(:,:,:,:) :: df
       type (pencil_case) :: p
 !
       intent(in) :: p
@@ -7271,6 +7312,7 @@ module Energy
         call parse_name(iname,cname(iname),cform(iname),'ssruzm',idiag_ssruzm)
         call parse_name(iname,cname(iname),cform(iname),'ssuzm',idiag_ssuzm)
         call parse_name(iname,cname(iname),cform(iname),'ssm',idiag_ssm)
+        call parse_name(iname,cname(iname),cform(iname),'ss_run_averm',idiag_ss_run_averm)
         call parse_name(iname,cname(iname),cform(iname),'ssbycpm',idiag_ssbycpm)
         call parse_name(iname,cname(iname),cform(iname),'ss2m',idiag_ss2m)
         call parse_name(iname,cname(iname),cform(iname),'eem',idiag_eem)
@@ -7486,7 +7528,7 @@ module Energy
       use EquationOfState, only: eoscalc
       use Slices_methods, only: assign_slices_scal, addto_slices, process_slices, exp2d
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       type (slice_data) :: slices
 !
       character(LEN=labellen) :: sname
@@ -7584,33 +7626,34 @@ module Energy
 !
     endsubroutine get_slices_energy
 !***********************************************************************
-    subroutine calc_heatcond_zprof(zprof_hcond,zprof_glhc)
-!
-!  Calculate z-profile of heat conduction for multilayer setup.
-!
-!  12-jul-05/axel: coded
-!
-      use Gravity, only: z1, z2
-      use Sub, only: cubic_step, cubic_der_step
-!
-      real, dimension (nz,3) :: zprof_glhc
-      real, dimension (nz) :: zprof_hcond
-      real :: zpt
-!
-      intent(out) :: zprof_hcond,zprof_glhc
-!
-      do n=1,nz
-        zpt=z(n+nghost)
-        zprof_hcond(n) = 1. + (hcond1-1.)*cubic_step(zpt,z1,-widthss) &
-                            + (hcond2-1.)*cubic_step(zpt,z2,+widthss)
-        zprof_hcond(n) = hcond0*zprof_hcond(n)
-        zprof_glhc(n,1:2) = 0.
-        zprof_glhc(n,3) = (hcond1-1.)*cubic_der_step(zpt,z1,-widthss) &
-                        + (hcond2-1.)*cubic_der_step(zpt,z2,+widthss)
-        zprof_glhc(n,3) = hcond0*zprof_glhc(n,3)
-      enddo
-!
-    endsubroutine calc_heatcond_zprof
+!   On comment since not used (to suppress compiler warnings)
+!    subroutine calc_heatcond_zprof(zprof_hcond,zprof_glhc)
+!!
+!!  Calculate z-profile of heat conduction for multilayer setup.
+!!
+!!  12-jul-05/axel: coded
+!!
+!      use Gravity, only: z1, z2
+!      use Sub, only: cubic_step, cubic_der_step
+!!
+!      real, dimension (nz,3) :: zprof_glhc
+!      real, dimension (nz) :: zprof_hcond
+!      real :: zpt
+!!
+!      intent(out) :: zprof_hcond,zprof_glhc
+!!
+!      do n=1,nz
+!        zpt=z(n+nghost)
+!        zprof_hcond(n) = 1. + (hcond1-1.)*cubic_step(zpt,z1,-widthss) &
+!                            + (hcond2-1.)*cubic_step(zpt,z2,+widthss)
+!        zprof_hcond(n) = hcond0*zprof_hcond(n)
+!        zprof_glhc(n,1:2) = 0.
+!        zprof_glhc(n,3) = (hcond1-1.)*cubic_der_step(zpt,z1,-widthss) &
+!                        + (hcond2-1.)*cubic_der_step(zpt,z2,+widthss)
+!        zprof_glhc(n,3) = hcond0*zprof_glhc(n,3)
+!      enddo
+!!
+!    endsubroutine calc_heatcond_zprof
 !***********************************************************************
     subroutine get_gravz_heatcond
 !
@@ -7790,7 +7833,7 @@ module Energy
       real, optional,        intent(in ) :: amp,amp1,amp2,pos1,pos2
       logical, optional,     intent(in ) :: llog
       type(pencil_case),                 optional, intent(in) :: p
-      real, dimension(mx,my,mz,mfarray), optional, intent(in) :: f
+      real, contiguous, dimension(:,:,:,:), optional, intent(in) :: f
       real, dimension(:),                optional, intent(in) :: stored_prof, stored_dprof
 !
       real, dimension(nx) :: r_mn, r_mn1
@@ -7951,7 +7994,7 @@ module Energy
       use Debug_IO, only: output_pencil
       use EquationOfState, only: get_gamma_etc
 !
-      real, dimension (mx,my,mz,mvar) :: df
+      real, contiguous, dimension(:,:,:,:) :: df
       real, dimension (nx) :: newton
       real :: lnTTor
       integer :: i
@@ -8189,11 +8232,12 @@ module Energy
       use EquationOfState, only: eoscalc, get_gamma_etc
       use Gravity, only: g0
 !
-      real, dimension (mx,my,mz,mfarray), intent(inout) :: f
+      real, contiguous, dimension(:,:,:,:), intent(inout) :: f
       real, dimension (nx) :: TT,r_mn
       real :: beta0,beta1,TT_bcz
       real :: lnrho_int,lnrho_ext,lnrho_bcz
       real :: gamma,gamma_m1,cp,cp1
+      integer :: m,n
 !
       if (lroot) print*,'r_bcz in entropy.f90=',r_bcz
 !
@@ -8245,8 +8289,11 @@ module Energy
 !
       if (ldensity_nolog) then
         f(:,:,:,irho) = exp(f(:,:,:,irho))
-        if (lreference_state) &
-          f(l1:l2,:,:,irho) = f(l1:l2,:,:,irho)-spread(spread(reference_state(:,iref_rho),2,my),3,mz)
+        if (lreference_state) then
+          do m = 1,size(f,2); do n=1,size(f,3)
+            f(l1:l2,m,n,irho) = f(l1:l2,m,n,irho)-reference_state(:,iref_rho)
+          enddo; enddo
+        endif
       endif
 !
     endsubroutine shell_ss_layers
@@ -8260,7 +8307,7 @@ module Energy
       use EquationOfState, only: eoscalc, get_gamma_etc
       use SharedVariables, only: get_shared_variable
 !
-      real, dimension (mx,my,mz,mfarray), intent(inout) :: f
+      real, contiguous, dimension(:,:,:,:), intent(inout) :: f
       real, dimension (nx) :: lnrho, TT
       real :: beta0, beta1, TT_bcz, TT_ext, TT_int
       real :: lnrho_bcz
@@ -8318,7 +8365,7 @@ module Energy
       use Gravity, only: gravz
       use SharedVariables, only: get_shared_variable
 !
-      real, dimension (mx,my,mz,mfarray), intent(inout) :: f
+      real, contiguous, dimension(:,:,:,:), intent(inout) :: f
       real, dimension (nx) :: lnrho, TT
       real :: beta, zbot, ztop, TT0
       real, pointer :: gravx
@@ -8442,7 +8489,7 @@ module Energy
 !
       use EquationOfState, only: eoscalc
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
 !
       if (lfpres_from_pressure) then
         do n=1,mz; do m=1,my
@@ -8459,7 +8506,7 @@ module Energy
 !
 !  07-aug-11/ccyang: coded
 !
-      real, dimension(mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
 !
       if (.not.lreference_state .and. entropy_floor /= impossible) &
         where(f(:,:,:,iss) < entropy_floor) f(:,:,:,iss) = entropy_floor
@@ -8721,10 +8768,8 @@ module Energy
     call copy_addr(dchit_aniso_prof,p_par(176)) ! (nx)
     call copy_addr(cs2mz,p_par(178)) ! (mz)
     call copy_addr(gssmz,p_par(179)) ! (mz) (3)
-    call copy_addr(ssmx,p_par(181)) ! (mx)
     call copy_addr(gssmx,p_par(182)) ! (nx) (3)
     call copy_addr(cs2mx,p_par(183)) ! (nx)
-    call copy_addr(del2ssmx,p_par(184)) ! (nx)
     call copy_addr(cs2mxy,p_par(185)) ! (nx) (my)
     call copy_addr(ssmxy,p_par(186)) ! (nx) (my)
     call copy_addr(cs2cool_x,p_par(187)) ! (nx)
@@ -8740,8 +8785,6 @@ module Energy
     call copy_addr(enum_heattype,p_par(194)) ! int
     call string_to_enum(enum_borderss,borderss)
     call copy_addr(enum_borderss,p_par(195)) ! int
-
-    call copy_addr(hcond_kconst,p_par(413))
 
     call copy_addr(hcond_prof_size,p_par(414)) ! int
     call copy_addr(chit_prof_size,p_par(415)) ! int
@@ -8759,8 +8802,8 @@ module Energy
     if (allocated(chit_prof_fluct_stored)) call copy_addr(chit_prof_fluct_stored,p_par(459)) ! (max_n)
     if (allocated(dchit_prof_fluct_stored)) call copy_addr(dchit_prof_fluct_stored,p_par(461)) ! (max_n)
     call copy_addr(w_sldchar_ene,p_par(462))
-    call copy_addr(h_sld_ene,p_par(463))
-    call copy_addr(nlf_sld_ene,p_par(464))
+    call copy_addr(h_sld_ene,p_par(463)) ! real dconst
+    call copy_addr(nlf_sld_ene,p_par(464)) ! real dconst
     call copy_addr(hcondxbot,p_par(465))
     call copy_addr(hcondxtop,p_par(466))
     call copy_addr(pp_cool,p_par(467))
@@ -8776,6 +8819,13 @@ module Energy
     call copy_addr(rheat,p_par(476)) 
     call copy_addr(heat_int,p_par(477))
     call copy_addr(coef_cs2,p_par(478)) ! (9)
+    call copy_addr(lsmooth_ss_run_aver,p_par(479)) ! bool
+
+
+    call keep_compiler_quiet(nsmooth_kramers)
+    call keep_compiler_quiet(patch_fac)
+    call keep_compiler_quiet(thermal_background)
+    call keep_compiler_quiet(thermal_scaling)
 
     endsubroutine pushpars2c
 !***********************************************************************

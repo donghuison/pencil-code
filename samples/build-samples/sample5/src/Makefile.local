@@ -1,0 +1,26 @@
+###  -*-Makefile-*-  (for Emacs)    vim:set filetype=make:  (for vim)
+###
+### Makefile for modular pencil code -- local part
+### Included by `Makefile'
+###
+
+MPICOMM   =   mpicomm
+GLOBAL    = noglobal
+VISCOSITY = noviscosity
+
+HYDRO     = nohydro
+DENSITY   = nodensity
+ENTROPY   =   noentropy
+MAGNETIC  = nomagnetic
+RADIATION = noradiation
+PSCALAR   = nopscalar
+EOS       = eos_chemistry_simple
+CHEMISTRY = chemistry_simple
+
+INTERSTELLAR =   interstellar
+GRAVITY      =   gravity_simple
+FORCING   = noforcing
+SHEAR     = noshear
+
+
+REAL_PRECISION = double

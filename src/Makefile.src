@@ -114,6 +114,7 @@ PARTICLES_ADSORBED    = noparticles_adsorbed
 PARTICLES_SURFSPEC    = noparticles_surfspec
 PARTICLES_CHEMISTRY   = noparticles_chemistry
 PARTICLES_COAGULATION = noparticles_coagulation
+PARTICLES_BREAKUP     = noparticles_breakup
 PARTICLES_CONDENSATION= noparticles_condensation
 PARTICLES_COLLISIONS  = noparticles_collisions
 PARTICLES_DRAG        = noparticles_drag
@@ -226,15 +227,9 @@ include Makefile.local
 #
 include Makefile.inc
 #
-# Fortran 2003 standard compilation settings.
+# Fortran 2008 standard compilation settings.
 #
 include Makefile-standard.inc
-#
-# Add real-time library calls if we need shared memory allocation
-#
-ifeq  ($(FARRAY_ALLOC),farray_alloc)
-	override LDFLAGS += -lrt
-endif
 #
 # Compile files with particle programming structure if particles are chosen.
 #
@@ -512,6 +507,15 @@ endif
 ifneq ($(findstring gpu_astaroth, $(GPU)),)
     override MULTITHREADING=openmp
     override MPICOMM=mpicomm
+    #Needed because of large subdomains
+    override FARRAY_ALLOC=farray_alloc
+endif
+#
+# Add real-time library calls if we need shared memory allocation
+#
+ifeq  ($(FARRAY_ALLOC),farray_alloc)
+  #2026-May-13/Kishore: also need `-lc` to use ftruncate?
+  override LDFLAGS += -lrt
 endif
 
 ifeq ($(USE_SPECIAL_DISPATCHER),yes)
@@ -538,7 +542,8 @@ DSL_WORKDIR=$(CUDA_MAKEDIR)/DSL/local
 LIBGPU =
 GPU_DEPS =
 
-ifeq ($(TRAINING),training_torchfort)
+#ifeq ($(TRAINING),training_torchfort)
+ifneq ($(TORCHFORT_PATH),)
   ifneq ($(HYDRO),hydro)
     $(error Training_torchfort needs hydro! Exit.)
   endif
@@ -580,6 +585,9 @@ ifneq ($(GPU),nogpu)
         $(warning  No CUDA or ROCM module seems to be loaded!)
         $(info Try (one of) the following: $(shell (module spider |& grep -i cuda | sed -e's/^.* \([^ ]*[Cc][Uu][Dd][Aa][^ ]*\) .*$$/\1/') ) )
         $(info or: $(shell (module spider |& grep -i rocm | sed -e's/^.* \([^ ]*[Rr][Oo][Cc][Mm][^ ]*\) .*$$/\1/') ) )
+        ifneq ($(wildcard .moduleinfo),)
+          $(info or: source src/.moduleinfo)
+        endif
         YESNO := $(shell bash -c 'read -p "Continue? (Y/N) " yesno; echo $$yesno')
         ifeq ($(YESNO),N)
           $(error Exit)
@@ -708,7 +716,7 @@ ifneq ($(filter $(SPECIAL) $(IO) $(IO_IN) $(IO_OUT) $(TRAINING), $(HDF5_MODULES)
   ifneq ($(MODULE_CMD),)
     HDF5_LOADED := $(shell (module list |& grep -i hdf5) || (module list |& grep -i hf5) )
     ifeq ($(HDF5_LOADED),)
-      ifeq ($(findstring clean,$(target)),)
+      ifeq ($(findstring code,$(target)),code)
         $(info )
         $(warning No HDF5 module seems to be loaded!)
         $(info Try (one of) the following: $(shell (module spider |& grep -i hdf5 | sed -e's/^.* \([^ ]*[Hh][Dd][Ff]5[^ ]*\) .*$$/\1/') ) )
@@ -1006,6 +1014,9 @@ PARTICLES_ADAPTATION_SRC=$(PARTICLES_ADAPTATION).f90
 #
 PARTICLES_COAGULATION_OBJ=$(PARTICLES_COAGULATION).o
 PARTICLES_COAGULATION_SRC=$(PARTICLES_COAGULATION).f90
+#
+PARTICLES_BREAKUP_OBJ=$(PARTICLES_BREAKUP).o
+PARTICLES_BREAKUP_SRC=$(PARTICLES_BREAKUP).f90
 #
 PARTICLES_CONDENSATION_OBJ=$(PARTICLES_CONDENSATION).o
 PARTICLES_CONDENSATION_SRC=$(PARTICLES_CONDENSATION).f90
@@ -3090,7 +3101,7 @@ default_to_be: Makefile cparam.inc code buildinfo
 #  Short hand for modules that must be preprocessed with mkcparam.
 #  Please use alphabetical order.
 #
-preprocess=$(ASCALAR_SRC) $(BORDER_PROFILES_SRC) $(CHEMISTRY_SRC) $(CHIRAL_SRC) $(COSMICRAY_SRC) $(COSMICRAYFLUX_SRC) $(DENSITY_SRC) $(DERIV_SRC) $(DETONATE_SRC) $(DUSTDENSITY_SRC) $(DUSTVELOCITY_SRC) $(ENERGY_SRC) $(EOS_SRC) $(FIXED_POINT_SRC) $(FORCING_SRC) $(GRAVITY_SRC) $(GPU_SRC) $(GRID_SRC) $(HEATFLUX_SRC) $(HYDRO_SRC) $(HYPERRESI_STRICT_SRC) $(HYPERVISC_STRICT_SRC) $(IMPLICIT_DIFFUSION_SRC) $(IMPLICIT_PHYSICS_SRC) $(INITIAL_CONDITION_SRC) $(INTERSTELLAR_SRC) $(LORENZ_GAUGE_SRC) $(MAGNETIC_SRC) $(MAGNETIC_MEANFIELD_SRC) $(MAGNETIC_MEANFIELD_DEMFDT_SRC) $(MPICOMM_SRC) $(NEUTRALDENSITY_SRC) $(NEUTRALVELOCITY_SRC) $(NSCBC_SRC) $(OPACITY_SRC) $(PARTICLES_SRC) $(PARTICLES_ADAPTATION_SRC) $(PARTICLES_COAGULATION_SRC) $(PARTICLES_CONDENSATION_SRC)  $(PARTICLES_COLLISIONS_SRC) $(PARTICLES_MAP_SRC) $(PARTICLES_DENSITY_SRC)  $(PARTICLES_MASS_SRC) $(PARTICLES_NUMBER_SRC) $(PARTICLES_RADIUS_SRC) $(PARTICLES_POTENTIAL_SRC) $(PARTICLES_GRAD_SRC) $(PARTICLES_SELFGRAVITY_SRC) $(PARTICLES_SINK_SRC) $(PARTICLES_DRAG_SRC) $(PARTICLES_SPIN_SRC) $(PARTICLES_STALKER_SRC) $(PARTICLES_LYAPUNOV_SRC) $(PARTICLES_CAUSTICS_SRC) $(PARTICLES_TETRAD_SRC) $(PARTICLES_STIRRING_SRC) $(PARTICLES_DIAGNOS_DV_SRC) $(PARTICLES_DIAGNOS_STATE_SRC) $(PARTICLES_PERSISTENCE_SRC) $(PARTICLES_TEMPERATURE_SRC) $(PARTICLES_ADSORBED_SRC) $(PARTICLES_SURFSPEC_SRC) $(PARTICLES_CHEMISTRY_SRC) $(POINTMASSES_SRC) $(POISSON_SRC) $(POLYMER_SRC) $(POWER_SRC) $(PYTHON_SRC) $(PSCALAR_SRC) $(RADIATION_SRC) $(SELFGRAVITY_SRC) $(SGSHYDRO_SRC) $(SHEAR_SRC) $(SHOCK_SRC) $(SIGNAL_HANDLING_SRC) $(SOLID_CELLS_SRC) $(STREAMLINES_SRC) $(TESTFIELD_GENERAL_SRC) $(TESTFIELD_SRC) $(TESTFLOW_SRC) $(TESTSCALAR_SRC) $(TIMEAVG_SRC) $(TIMESTEP_SRC) $(TRAINING_SRC) $(VISCOSITY_SRC) cparam.local
+preprocess=$(ASCALAR_SRC) $(BORDER_PROFILES_SRC) $(CHEMISTRY_SRC) $(CHIRAL_SRC) $(COSMICRAY_SRC) $(COSMICRAYFLUX_SRC) $(DENSITY_SRC) $(DERIV_SRC) $(DETONATE_SRC) $(DUSTDENSITY_SRC) $(DUSTVELOCITY_SRC) $(ENERGY_SRC) $(EOS_SRC) $(FIXED_POINT_SRC) $(FORCING_SRC) $(GRAVITY_SRC) $(GPU_SRC) $(GRID_SRC) $(HEATFLUX_SRC) $(HYDRO_SRC) $(HYPERRESI_STRICT_SRC) $(HYPERVISC_STRICT_SRC) $(IMPLICIT_DIFFUSION_SRC) $(IMPLICIT_PHYSICS_SRC) $(INITIAL_CONDITION_SRC) $(INTERSTELLAR_SRC) $(LORENZ_GAUGE_SRC) $(MAGNETIC_SRC) $(MAGNETIC_MEANFIELD_SRC) $(MAGNETIC_MEANFIELD_DEMFDT_SRC) $(MPICOMM_SRC) $(NEUTRALDENSITY_SRC) $(NEUTRALVELOCITY_SRC) $(NSCBC_SRC) $(OPACITY_SRC) $(PARTICLES_SRC) $(PARTICLES_ADAPTATION_SRC) $(PARTICLES_COAGULATION_SRC) $(PARTICLES_BREAKUP_SRC) $(PARTICLES_CONDENSATION_SRC)  $(PARTICLES_COLLISIONS_SRC) $(PARTICLES_MAP_SRC) $(PARTICLES_DENSITY_SRC)  $(PARTICLES_MASS_SRC) $(PARTICLES_NUMBER_SRC) $(PARTICLES_RADIUS_SRC) $(PARTICLES_POTENTIAL_SRC) $(PARTICLES_GRAD_SRC) $(PARTICLES_SELFGRAVITY_SRC) $(PARTICLES_SINK_SRC) $(PARTICLES_DRAG_SRC) $(PARTICLES_SPIN_SRC) $(PARTICLES_STALKER_SRC) $(PARTICLES_LYAPUNOV_SRC) $(PARTICLES_CAUSTICS_SRC) $(PARTICLES_TETRAD_SRC) $(PARTICLES_STIRRING_SRC) $(PARTICLES_DIAGNOS_DV_SRC) $(PARTICLES_DIAGNOS_STATE_SRC) $(PARTICLES_PERSISTENCE_SRC) $(PARTICLES_TEMPERATURE_SRC) $(PARTICLES_ADSORBED_SRC) $(PARTICLES_SURFSPEC_SRC) $(PARTICLES_CHEMISTRY_SRC) $(POINTMASSES_SRC) $(POISSON_SRC) $(POLYMER_SRC) $(POWER_SRC) $(PYTHON_SRC) $(PSCALAR_SRC) $(RADIATION_SRC) $(SELFGRAVITY_SRC) $(SGSHYDRO_SRC) $(SHEAR_SRC) $(SHOCK_SRC) $(SIGNAL_HANDLING_SRC) $(SOLID_CELLS_SRC) $(STREAMLINES_SRC) $(TESTFIELD_GENERAL_SRC) $(TESTFIELD_SRC) $(TESTFLOW_SRC) $(TESTSCALAR_SRC) $(TIMEAVG_SRC) $(TIMESTEP_SRC) $(TRAINING_SRC) $(VISCOSITY_SRC) cparam.local
 ifeq ($(USE_SPECIAL_DISPATCHER),no)
   preprocess += $(SPECIAL_SRC)
 else
@@ -3139,7 +3150,12 @@ FORCE_GPU_MAKE:
 #  Rule for building the Astaroth and interface libraries.
 #
 #$(LIBGPU): $(GPU_DEPS)
-$(LIBGPU): $(CUDA_INCDIR)/PC_moduleflags.h $(CUDA_MAKEDIR)/Makefile.vendor FORCE_GPU_MAKE
+$(DSL_WORKDIR)/boundconds.h:
+	rm -f astaroth/DSL/local/boundconds.h
+	touch astaroth/DSL/local/boundconds.h
+	@scripts/bc2ast 1> astaroth/DSL/local/boundconds.h
+
+$(LIBGPU): $(CUDA_INCDIR)/PC_moduleflags.h $(CUDA_MAKEDIR)/Makefile.vendor FORCE_GPU_MAKE $(DSL_WORKDIR)/boundconds.h
 	@echo "Building Astaroth and interface libraries - see src/astaroth/ac_build.log!"
 	cd astaroth && make MPICOMM=$(MPICOMM) RUNTIME_COMPILATION=$(RUNTIME_COMPILATION) TRAINING=$(TRAINING) PRECISION=$(REAL_PRECISION) READ_OVERRIDES=$(READ_OVERRIDES) TRANSPILATION=$(TRANSPILATION) GENERATE_DSL_CODE=$(GENERATE_DSL_CODE) >& ac_build.log
 #
@@ -3166,19 +3182,15 @@ endif
 special_tmp.f90: special.f90
 	@sed -e's/\(n_special_modules_max *= *\)[1-9][0-9]*/\1'$(SPECIAL_MULT)'/' < special.f90 > special_tmp.f90
 
-ifeq ($(GPU),gpu_astaroth)
-special.so: $(CPARAM_OBJ) $(CDATA_OBJ) $(SPECIAL_OBJ) special_dummies.inc $(SPECIAL_MODULES:=.o)
-	$(LD) $(SPECIAL_MODULES:=.o) $(LIBFLAGS) $(DLL_LDFLAGS) -o special.so
-else
-special.so: $(CPARAM_OBJ) $(CDATA_OBJ) $(SPECIAL_OBJ) special_dummies.inc $(SPECIAL_MODULES:=.o)
-	# pc_mkspecial should run regardless of whether ld succeeds; if ld fails,
-	# we want make to fail AFTER running pc_mkspecial. The backslashes and
-	# semicolons below are essential for this.
-	$(LD) $(SPECIAL_MODULES:=.o) $(DLL_LDFLAGS) -o special.so ;\
-	ld_status=$$? ;\
-	pc_mkspecial.sh "$(SPECIAL_MODULES:=.f90)" ;\
-	exit $$ld_status
-endif
+special.so: $(CPARAM_OBJ) $(CDATA_OBJ) $(SPECIAL_OBJ) special_dummies.inc $(SPECIAL_MODULES:=.o)  $(LIBGPU)
+	@$(LD) $(SPECIAL_MODULES:=.o) $(LIBFLAGS) $(DLL_LDFLAGS) -o special.so ;\
+        ld_status=$$? ;\
+        pc_mkspecial.sh "$(SPECIAL_MODULES:=.f90)" ;\
+        exit $$ld_status
+
+# pc_mkspecial should run regardless of whether ld succeeds; if ld fails,
+# we want make to fail AFTER running pc_mkspecial. The backslashes and
+# semicolons above are essential for this.
 #
 #  comment out the 3 lines ifneq, @, endif below if one gets an error message
 #  about io_dist cannot copy.
@@ -3192,9 +3204,12 @@ ifneq ($(IO),io_wrapper)
 ifeq ($(IO),io_mpi2)
 	$(FC) $(ALL_COMP_FLAGS) $(ALLOW_ARG_MISMATCH) -o $(IO_OBJ) -c $(IO_SRC)
 else
-	$(FC) $(ALL_COMP_FLAGS) $(FSTD_2003) -o $(IO_OBJ) -c $(IO_SRC)
+	$(FC) $(ALL_COMP_FLAGS) $(FSTD_2008) -o $(IO_OBJ) -c $(IO_SRC)
 endif
 endif
+#
+$(LSODE_FC_OBJ):
+	$(FC) $(ALL_COMP_FLAGS) $(FSTD_2008) -o $(LSODE_FC_OBJ) -c $(LSODE_FC_SRC)
 #
 ifneq ($(IO_IN),)
 $(IO_IN_OBJ): $(IO_IN_SRC) Makefile.local
@@ -3205,7 +3220,7 @@ $(IO_IN_OBJ): $(IO_IN_SRC) Makefile.local
 ifeq ($(IO_IN),io_mpi2)
 	$(FC) $(ALL_COMP_FLAGS) $(ALLOW_ARG_MISMATCH) -o $(IO_IN_OBJ) -c $(IO_IN_SRC)
 else
-	$(FC) $(ALL_COMP_FLAGS) $(FSTD_2003) -o $(IO_IN_OBJ) -c $(IO_IN_SRC)
+	$(FC) $(ALL_COMP_FLAGS) $(FSTD_2008) -o $(IO_IN_OBJ) -c $(IO_IN_SRC)
 endif
 	@$(call sed_follow_link,"s/^\( *[^!]*module  *\)Io_in/\1Io/",$(IO_IN_SRC))
 $(IO_OUT_OBJ): $(IO_OUT_SRC) Makefile.local
@@ -3216,7 +3231,7 @@ $(IO_OUT_OBJ): $(IO_OUT_SRC) Makefile.local
 ifeq ($(IO_OUT),io_mpi2)
 	$(FC) $(ALL_COMP_FLAGS) $(ALLOW_ARG_MISMATCH) -o $(IO_OUT_OBJ) -c $(IO_OUT_SRC)
 else
-	$(FC) $(ALL_COMP_FLAGS) $(FSTD_2003) -o $(IO_OUT_OBJ) -c $(IO_OUT_SRC)
+	$(FC) $(ALL_COMP_FLAGS) $(FSTD_2008) -o $(IO_OUT_OBJ) -c $(IO_OUT_SRC)
 endif
 	@$(call sed_follow_link,"s/^\( *[^!]*module  *\)Io_out/\1Io/",$(IO_OUT_SRC))
 endif
@@ -3345,9 +3360,6 @@ ifeq ($(wildcard $(DSL_WORKDIR)/solve_two.ac),)
     endif
   endif
 endif
-	rm -f astaroth/DSL/local/boundconds.h
-	touch astaroth/DSL/local/boundconds.h
-	@scripts/bc2ast 1> astaroth/DSL/local/boundconds.h
 
 #	@sed -e':loop' -e'N' -e'$$!b loop' -e's/\#pragma  *once//' -e's/\# *define *\([A-Z0-9_][A-Z0-9_]*\)/..\/..\/\L\1.f90 /g' -e's/\n/ /g' < $(CUDA_INCDIR)/PC_moduleflags.h >> $(CUDA_MAKEDIR)/PC_modulesources.h
 #
@@ -3419,11 +3431,17 @@ nompicomm.o: nompicomm.f90
 	$(FC) $(FFLAGS) $(FFLAGS_GENERAL) $(F90FLAGS)   -o nompicomm.o -c nompicomm.f90
 #
 hdf5_io%.o: hdf5_io%.f90 hdf5_io.h Makefile.local
-	$(FC_HDF5) $(FFLAGS) $(FFLAGS_GENERAL) $(F90FLAGS) $(FSTD_2003) -c hdf5_io$*.f90 -o hdf5_io$*.o
+	$(FC_HDF5) $(FFLAGS) $(FFLAGS_GENERAL) $(F90FLAGS) $(FSTD_2008) -c hdf5_io$*.f90 -o hdf5_io$*.o
 #
 geometrical_types.o: geometrical_types.f90
 	$(FC) $(FFLAGS) $(FFLAGS_GENERAL) -c geometrical_types.f90 -o geometrical_types.o
 #
+initcond.o: 
+	$(FC) $(FFLAGS) $(FFLAGS_GENERAL) $(FSTD) $(FFLAG_HEAP_ALLOC) -c initcond.f90 -o initcond.o
+#
+$(INITIAL_CONDITION_OBJ):
+	$(FC) $(FFLAGS) $(FFLAGS_GENERAL) $(FSTD) $(FFLAG_HEAP_ALLOC) -c $(INITIAL_CONDITION_SRC) -o $(INITIAL_CONDITION_OBJ)
+
 special/meanfield_e_tensor.o: special/meanfield_e_tensor.f90
 ifeq ($(USE_SPECIAL_DISPATCHER),yes)
 	$(FC_HDF5) $(FFLAGS) $(FFLAGS_GENERAL) $(F90FLAGS) $(DLL_FFLAGS) -c special/meanfield_e_tensor.f90 -o special/meanfield_e_tensor.o

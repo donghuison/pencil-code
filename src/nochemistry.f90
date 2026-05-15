@@ -23,7 +23,6 @@ module Chemistry
   implicit none
 !
   real :: Rgas, Rgas_unit_sys
-  logical :: lchemistry_diag=.false.
   logical :: lreactions=.false.
   logical, allocatable, dimension(:,:,:) :: lnucleii_generated
 !
@@ -41,8 +40,8 @@ module Chemistry
 !
       real, dimension (mx,my,mz,mfarray) :: f
 !
-      Rgas_unit_sys = k_B_cgs/m_u_cgs
-      Rgas = Rgas_unit_sys/unit_energy
+      Rgas_unit_sys = real(k_B_cgs/m_u_cgs)
+      Rgas = real(Rgas_unit_sys/unit_energy)
 !
       call keep_compiler_quiet(f)
 !
@@ -165,6 +164,7 @@ module Chemistry
     subroutine write_chemistry_init_pars(unit)
 !
       integer, intent(in) :: unit
+      call keep_compiler_quiet(unit)
 !
     endsubroutine write_chemistry_init_pars
 !***********************************************************************
@@ -181,6 +181,7 @@ module Chemistry
     subroutine write_chemistry_run_pars(unit)
 !
       integer, intent(in) :: unit
+      call keep_compiler_quiet(unit)
 !
     endsubroutine write_chemistry_run_pars
 !***********************************************************************
@@ -200,6 +201,7 @@ module Chemistry
       real, dimension(ny,nz), intent(out) :: slice, grad_slice
       integer, intent(in) :: index, sgn,direction
 !
+      call keep_compiler_quiet(f)
       call keep_compiler_quiet(slice)
       call keep_compiler_quiet(grad_slice)
       call keep_compiler_quiet(index,sgn,direction)
@@ -212,6 +214,7 @@ module Chemistry
       real, dimension (:,:), intent(out)  :: slice
       integer, intent(in) :: index,dir
 !
+      call keep_compiler_quiet(f)
       call keep_compiler_quiet(slice)
       call keep_compiler_quiet(index)
       call keep_compiler_quiet(dir)
@@ -224,6 +227,7 @@ module Chemistry
       real, dimension (:,:), intent(out)  :: slice
       integer, intent(in) :: index,dir
 !
+      call keep_compiler_quiet(f)
       call keep_compiler_quiet(slice)
       call keep_compiler_quiet(index)
       call keep_compiler_quiet(dir)
@@ -296,7 +300,9 @@ module Chemistry
       character (len=*), intent(in) :: species_name
       logical, intent(out) :: found_specie
 !
+      call keep_compiler_quiet(species_name)
       call keep_compiler_quiet(ind_glob)
+      call keep_compiler_quiet(ind_chem)
       call keep_compiler_quiet(found_specie)
 
    endsubroutine find_species_index
@@ -355,9 +361,13 @@ module Chemistry
  !
       call keep_compiler_quiet(f)
       call keep_compiler_quiet(df)
+      call keep_compiler_quiet(rp)
       call keep_compiler_quiet(p)
       call keep_compiler_quiet(dapdt)
       call keep_compiler_quiet(ix0)
+      call keep_compiler_quiet(ix)
+      call keep_compiler_quiet(np_swarm)
+      call keep_compiler_quiet(dapdt)
 !
     end subroutine cond_spec_cond_lagr
 !***********************************************************************

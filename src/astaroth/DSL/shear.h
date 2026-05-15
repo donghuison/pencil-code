@@ -4,7 +4,7 @@ if(lshear)
 {
   if(!AC_lshearadvection_as_shift__mod__shear)
   {
-        const real uy0 = AC_uy0__mod__shear[vertexIdx.x-NGHOST]
+        const real uy0 = AC_uy0__mod__shear[vertexIdx.x-AC_nmin.x]
 	DF_UU  -= uy0*dery(UU)
 	DF_AA  -= uy0*dery(AA)
 	DF_SS  -= uy0*dery(SS)

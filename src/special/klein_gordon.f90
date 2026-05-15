@@ -125,6 +125,10 @@ module Special
   real, pointer :: sigE_prefactor, sigB_prefactor, mass_chi
   real, dimension (nx) :: dt1_special
   real, dimension (nx, 4, 3) :: dfdxs=0.
+  !Whether the sums needed for the ODE and rhs advancement are done in the together in the same kernel as the rhs
+  !advancement. Benchmarks seem to suggest that combining them is indeed more performant.
+  !This approach is however strictly approximative since we effectively take the value of Hscript from the preceeding substep
+  logical :: lcombine_prep_ode_right_with_rhs = .false.
   logical :: lcompute_dphi0=.true., lem_backreact=.false.
   logical :: lscale_tobox=.true., ldt_klein_gordon=.true., lconf_time=.true.
   logical :: lskip_projection_phi=.false., lvectorpotential=.false., lflrw=.false.
@@ -201,6 +205,7 @@ module Special
   real :: a2rhopsim_all_diagnos, a2rhogpsim_all_diagnos
 
   integer :: ia0 = 0, iW0 = 0
+
   contains
 !****************************************************************************
     subroutine register_special
@@ -435,7 +440,7 @@ module Special
             t=tstart
             Hubble_ini=sqrt(8.*pi/3.*(.5*dphi0**2+.5*phimass2*phi0**2*ascale_ini**2))
             lnascale=log(ascale_ini)
-            if (lroot .and. lflrw) f_ode(ilna)=lnascale
+            if (lflrw) f_ode(ilna)=lnascale
   !
           case ('default')
             Vpotential=.5*phimass2*phi0**2
@@ -446,7 +451,7 @@ module Special
             lnascale=log(ascale_ini)
             f(:,:,:,iphi)   = f(:,:,:,iphi)   + phi0
             f(:,:,:,idphi)  = f(:,:,:,idphi)  + dphi0
-            if (lroot .and. lflrw) then
+            if (lflrw) then
               f_ode(ilna)   =lnascale
               a2                 =exp(f_ode(ilna))**2
               Hscript            =Hubble_ini/exp(lnascale)
@@ -499,7 +504,7 @@ module Special
 !
 !  initial condition for energy density of charged particles
 !
-      if (lroot .and. lrho_chi) then
+      if (lrho_chi) then
         select case (init_rho_chi)
           case ('zero');  f_ode(iinfl_rho_chi)=0.
           case ('given'); f_ode(iinfl_rho_chi)=rho_chi_init
@@ -514,8 +519,6 @@ module Special
     endsubroutine init_special
 !***********************************************************************
     subroutine pencil_criteria_special
-
-    integer :: i
 !
 !  All pencils that this special module depends on are specified here.
 !
@@ -537,6 +540,7 @@ module Special
       endif
 !
 !  Call pencils phi and dphi
+!
       lpenc_requested(i_phi)=.true.
       lpenc_requested(i_dphi)=.true.
 
@@ -1044,41 +1048,11 @@ module Special
 !
     endsubroutine dspecial_dt
 !***********************************************************************
-    subroutine read_sums_from_device
-
-      use GPU, only: get_gpu_reduced_vars
-      real, dimension(10) :: tmp
-
-      call get_gpu_reduced_vars(tmp)
-      a2rhom_all     = tmp(1)
-      a2rhopm_all    = tmp(2)
-      a2rhophim_all  = tmp(3)
-      a2rhogphim_all = tmp(4)
-      sigE1m_all_nonaver = tmp(5)
-      sigB1m_all_nonaver = tmp(6)
-      ddotam_all         = tmp(7)
-      e2m_all            = tmp(8)
-      b2m_all            = tmp(9)
-      call get_Hscript_and_a2(Hscript,a2rhom_all)
-      call get_echarge
-      call get_sigE_and_B
-      if (lfirst .and. lout) then
-        a2rhom_all_diagnos     = a2rhom_all 
-        a2rhopm_all_diagnos    = a2rhopm_all 
-        a2rhophim_all_diagnos  = a2rhophim_all 
-        a2rhogphim_all_diagnos = a2rhogphim_all
-        ddotam_all_diagnos     = ddotam_all
-        sigEm_all_diagnos      = sigEm_all
-        sigBm_all_diagnos      = sigBm_all
-      endif
-
-    endsubroutine read_sums_from_device
-!***********************************************************************
     subroutine dspecial_dt_ode
 !
       use SharedVariables, only: get_shared_variable
 !
-      if(lgpu) call read_sums_from_device
+      if (lgpu) call read_sums_from_GPU
       call get_Hscript_and_a2(Hscript,a2rhom_all)
       if (lflrw) df_ode(ilna)=df_ode(ilna)+Hscript
 !
@@ -1121,7 +1095,7 @@ module Special
 
       if (ldiagnos) then
         call get_Hscript_and_a2(Hscript_diagnos,a2rhom_all_diagnos)
-        if(lflrw) lnascale=f_ode(ilna)
+        if (lflrw) lnascale=f_ode(ilna)
         call save_name(Hscript_diagnos,idiag_Hscriptm)
         call save_name(lnascale,idiag_lnam)
         call save_name(ddotam_all_diagnos,idiag_ddotam)
@@ -1146,6 +1120,7 @@ module Special
       real, dimension(mx,my,mz,mfarray) :: f
       type(pencil_case) :: p
 
+      call keep_compiler_quiet(f)
       if (ldiagnos) then
         call sum_mn_name(p%phi,idiag_phim)
         if (idiag_phi2m/=0) call sum_mn_name(p%phi**2,idiag_phi2m)
@@ -1217,6 +1192,7 @@ module Special
 !  reset everything in case of reset
 !  (this needs to be consistent with what is defined above!)
 !
+      call keep_compiler_quiet(lwrite)
       if (lreset) then
         idiag_phim=0; idiag_phi2m=0; idiag_phirms=0
         idiag_dphim=0; idiag_dphi2m=0; idiag_dphirms=0
@@ -1279,7 +1255,6 @@ module Special
       real, dimension (mx,my,mz,mvar+maux) :: f
       type (slice_data) :: slices
 !
-      integer :: inamev
 !
 !  Loop over slices
 !
@@ -1307,7 +1282,7 @@ module Special
             echarge=echarge_const
           case ('erun')
             energy_scale=(.5*e2m_all+.5*b2m_all)**.25/ascale
-            echarge=1./sqrt(1./.35**2+41./(48.*pi**2)*alog(real(mass_zboson/energy_scale)))
+            echarge=1./sqrt(1./.35**2+41./(48.*pi**2)*log(real(mass_zboson/energy_scale)))
         endselect
       else
         echarge=echarge_const
@@ -1386,9 +1361,10 @@ module Special
     endsubroutine prep_rhs_special
 !***********************************************************************
     subroutine get_a2
-  
+
       real :: lnascale
-      if(lflrw) then
+  
+      if (lflrw) then
         lnascale=f_ode(ilna)
         ascale=exp(lnascale)
       endif
@@ -1479,9 +1455,7 @@ module Special
       a2rhogpsim_all_diagnos = a2rhogpsim_all
       ddotam_all_diagnos     = ddotam_all
 
-      if (lroot .and. lflrw) then
-        call get_Hscript_and_a2(Hscript,a2rhom_all)
-      endif
+      if (lflrw) call get_Hscript_and_a2(Hscript,a2rhom_all)
 !
 !  Broadcast to other processors, and each processor uses put_shared_variable
 !  to get the values to other subroutines.
@@ -1675,6 +1649,41 @@ module Special
 !
     endsubroutine prep_ode_right
 !********************************************************************
+! Subroutines below needed only for GPUs, if you do not care about GPUs don't worry about them
+!***********************************************************************
+    subroutine read_sums_from_GPU
+!
+!  The sums needed for ODE and PDE advancement are computed on the GPUs in before_boundary.
+!  Then we need them back on the host to advance the ODEs which this function does.
+!
+      use GPU, only: get_gpu_reduced_vars
+      real, dimension(10) :: tmp
+
+      call get_gpu_reduced_vars(tmp)
+      a2rhom_all     = tmp(1)
+      a2rhopm_all    = tmp(2)
+      a2rhophim_all  = tmp(3)
+      a2rhogphim_all = tmp(4)
+      sigE1m_all_nonaver = tmp(5)
+      sigB1m_all_nonaver = tmp(6)
+      ddotam_all         = tmp(7)
+      e2m_all            = tmp(8)
+      b2m_all            = tmp(9)
+      call get_Hscript_and_a2(Hscript,a2rhom_all)
+      call get_echarge
+      call get_sigE_and_B
+      if (lfirst .and. lout) then
+        a2rhom_all_diagnos     = a2rhom_all 
+        a2rhopm_all_diagnos    = a2rhopm_all 
+        a2rhophim_all_diagnos  = a2rhophim_all 
+        a2rhogphim_all_diagnos = a2rhogphim_all
+        ddotam_all_diagnos     = ddotam_all
+        sigEm_all_diagnos      = sigEm_all
+        sigBm_all_diagnos      = sigBm_all
+      endif
+
+    endsubroutine read_sums_from_GPU
+!***********************************************************************
     subroutine pushpars2c(p_par)
 
     use Syscalls, only: copy_addr
@@ -1737,6 +1746,9 @@ module Special
     call copy_addr(beta_usr,p_par(55))
     call copy_addr(v_usr,p_par(56))
     call copy_addr(v0_usr,p_par(57))
+    call copy_addr(lcombine_prep_ode_right_with_rhs,p_par(58)) ! bool
+    call keep_compiler_quiet(eps)
+    call keep_compiler_quiet(phase_phi)
 
     endsubroutine pushpars2c
 !********************************************************************

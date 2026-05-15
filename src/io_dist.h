@@ -11,6 +11,7 @@
       character(LEN=1024) :: mailstr
       character(LEN=20) :: cjobid
       integer, parameter :: lun_input1=89
+      integer :: l,m,n,ll
 
       if (lserial_io) call start_serialize
 
@@ -57,8 +58,7 @@
             open (lun_input, FILE=trim(readdir)//'/'//trim(file), FORM='unformatted', status='old', iostat=ios)
             if (ios==0) then
 
-              if (islink(trim(readdir)//'/'//trim(file))) &
-                 snaplink=trim(readdir)//'/'//trim(file)
+              if (islink(trim(readdir)//'/'//trim(file))) snaplink=trim(readdir)//'/'//trim(file)
 !      if (ip<=8) print *, 'read_snap: open, mx,my,mz,nv=', mx, my, mz, nv
 
               if (lwrite_2d) then
@@ -162,7 +162,9 @@
                     else
                       read (lun_input,iostat=iosr) a(:,1:len1d,1:len1d,:)
                     endif
-                    a=spread(spread(a(:,m1,n1,:),2,my),3,mz)
+                    do l=1,size(a,1); do m=1,size(a,2); do n=1,size(a,3); do ll=1,size(a,4)
+                      a(l,m,n,ll) = a(l,m1,n1,ll) 
+                    enddo; enddo; enddo; enddo
                   elseif (nghost_read_fewer==-2) then
                     if (ivar_omit(1)>0) allocate(tmp_omit(len1d,my,len1d,ivar_omit(1):ivar_omit(2)))
                     if (ivar_omit(1)==1) then
@@ -174,7 +176,9 @@
                     else
                       read (lun_input,iostat=iosr) a(1:len1d,:,1:len1d,:)
                     endif
-                    a=spread(spread(a(l1,:,n1,:),1,mx),3,mz)
+                    do l=1,size(a,1); do m=1,size(a,2); do n=1,size(a,3); do ll=1,size(a,4)
+                      a(l,m,n,ll) = a(l1,m,n1,ll) 
+                    enddo; enddo; enddo; enddo
                   elseif (nghost_read_fewer==-3) then
                     if (ivar_omit(1)>0) allocate(tmp_omit(len1d,len1d,mz,ivar_omit(1):ivar_omit(2)))
                     if (ivar_omit(1)==1) then
@@ -186,7 +190,9 @@
                     else
                       read (lun_input,iostat=iosr) a(1:len1d,1:len1d,:,:)
                     endif
-                    a=spread(spread(a(l1,m1,:,:),1,mx),2,my)
+                    do l=1,size(a,1); do m=1,size(a,2); do n=1,size(a,3); do ll=1,size(a,4)
+                      a(l,m,n,ll) = a(l1,m1,n,ll) 
+                    enddo; enddo; enddo; enddo
                   else
                     call fatal_error('read_snap','nghost_read_fewer must be >=0')
                   endif
@@ -254,7 +260,7 @@
 !
       if ((ireset_tstart == 0) .or. (tstart == impossible)) then
 !
-        t_test = t_sp
+        t_test = real(t_sp)
         call mpibcast_real(t_test,comm=MPI_COMM_PENCIL)
         call mpiallreduce_or((t_test /= t_sp) .and. .not. lread_from_other_prec &
                              .or. (abs(t_test-t_sp) > 1.e-6),ltest, MPI_COMM_PENCIL)
@@ -275,7 +281,7 @@
               if (lroot) write (*,*) 'Timestamps in snapshot INCONSISTENT.',&
                                      ' Using (max) t=', t_red,'with ireset_tstart=', MAXT,'.'
             endif
-            tstart = t_red
+            tstart = real(t_red)
             if (lroot) write (*,*) 'Timestamps in snapshot INCONSISTENT. Using t=', tstart, '.'
           else
             write (*,*) 'ERROR: '//trim(directory_snap)//'/'//trim(file)// &
@@ -283,7 +289,7 @@
             call stop_it('read_snap')
           endif
         else
-          tstart = t_sp
+          tstart = real(t_sp)
         endif
 !
       endif

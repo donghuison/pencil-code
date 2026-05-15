@@ -1,6 +1,5 @@
 ! $Id$
-!
-!  This modules addes chemical species and reactions.
+!  !  This modules addes chemical species and reactions.
 !  The units used in the chem.in files are cm3,mole,sec,kcal and K
 !  This was found out by comparing the mechanism found in
 !  samples/0D/chemistry_H2_ignition_delay
@@ -28,7 +27,7 @@ module Chemistry
 !
   use Cdata
   use General, only: keep_compiler_quiet
-  use EquationOfState
+  use EquationOfState, pushpars2c_eos => pushpars2c
   use Messages
 !
   implicit none
@@ -103,6 +102,8 @@ module Chemistry
 !
   real, dimension(mx,my,mz,nchemspec), save :: RHS_Y_full
   real, dimension(nchemspec) :: nu_spec=0., mobility=1.
+  real, allocatable, dimension(:,:) :: vreactions_p, vreactions_m
+  !$omp threadprivate(vreactions_p,vreactions_m)
 !
 !  Chemkin related parameters
 !
@@ -110,8 +111,10 @@ module Chemistry
   logical :: lmobility=.false.
   integer :: iTemp1=2, iTemp2=3, iTemp3=4
   integer, dimension(7) :: iaa1, iaa2
+  integer, parameter :: iaa1_offset=4,iaa2_offset=11
   real, allocatable, dimension(:) :: B_n, alpha_n, E_an
   real, allocatable, dimension(:,:) :: low_coeff, high_coeff, troe_coeff, a_k4
+  real, allocatable, dimension(:) :: low_coeff_abs_max, high_coeff_abs_max, troe_coeff_abs_max, a_k4_min
   logical, allocatable, dimension(:) :: Mplus_case
   logical, allocatable, dimension(:) :: photochem_case
   real, allocatable, dimension(:,:) :: orders_m, orders_p
@@ -199,6 +202,7 @@ module Chemistry
 !
   integer :: ireac=0, ireac_CO2=0, ireac_CO=0, ireac_O2=0
 !
+  integer :: enum_reac_rate_method = 0
   contains
 !***********************************************************************
     subroutine register_chemistry
@@ -215,7 +219,9 @@ module Chemistry
 !
       integer :: k, ichemspec_tmp
       character(len=fnlen) :: input_file
+      character (len=labellen), dimension(20) :: chemspec_names
       logical ::  chemin, cheminp
+      integer :: i
 !
 !  Initialize some index pointers
 !
@@ -270,14 +276,18 @@ module Chemistry
       else
 !        if (lmech_simple) then
         if (lmech_simple .and. nchemspec==5) then
-          varname(ichemspec(1):ichemspec(nchemspec))= (/ 'CO2       ','CO        ','N2        ','O2        ','H2O       '/)
+          chemspec_names(1:5) = (/ 'CO2       ','CO        ','N2        ','O2        ','H2O       '/)
         elseif (lmech_simple) then
-          varname(ichemspec(1):ichemspec(nchemspec))= (/ 'CO2       ','CO        ','N2        ','O2        '/)
+          chemspec_names(1:4) = (/ 'CO2       ','CO        ','N2        ','O2        '/)
         else
-          varname(ichemspec(1):ichemspec(nchemspec))= (/ 'H2        ','O2        ','H2O       ','H         ','O         ',&
+          chemspec_names(1:13) = (/ 'H2        ','O2        ','H2O       ','H         ','O         ',&
              'OH        ','HO2       ','H2O2      ','AR        ','N2        ','HE        ','CO        ','CO2       '/)
         endif
       endif
+
+      do i=1,nchemspec
+        varname(ichemspec(i)) = chemspec_names(i)
+      enddo
 !
 !  Read data on the thermodynamical properties of the different species.
 !  All these data are stored in the array species_constants.
@@ -342,6 +352,10 @@ module Chemistry
     endsubroutine register_chemistry
 !***********************************************************************
     subroutine chemistry_allocate_rhs_arrays
+
+    if(.not. allocated(vreactions_p)) allocate(vreactions_p(nx,mreactions))
+    if(.not. allocated(vreactions_m)) allocate(vreactions_m(nx,mreactions))
+
     endsubroutine chemistry_allocate_rhs_arrays
 !***********************************************************************
     subroutine read_thermodyn_simple
@@ -618,6 +632,32 @@ module Chemistry
       open (1,file=trim(datadir)//'/net_reactions.dat',position='append')
       write (1,*) nchemspec,nreactions
       close (1)
+
+      if(allocated(a_k4)) then
+        if (allocated(a_k4_min)) deallocate(a_k4_min)
+        allocate(a_k4_min(size(a_k4,2)))
+        a_k4_min = minval(a_k4,1)
+      endif
+
+      if(allocated(low_coeff)) then
+        if (allocated(low_coeff_abs_max)) deallocate(low_coeff_abs_max)
+        allocate(low_coeff_abs_max(size(low_coeff,2)))
+        low_coeff_abs_max= maxval(abs(low_coeff),1)
+      endif
+
+      if(allocated(high_coeff)) then
+        if (allocated(high_coeff_abs_max)) deallocate(high_coeff_abs_max)
+        allocate(high_coeff_abs_max(size(high_coeff,2)))
+        high_coeff_abs_max= maxval(abs(high_coeff),1)
+      endif
+
+      if(allocated(troe_coeff)) then
+        if (allocated(troe_coeff_abs_max)) deallocate(troe_coeff_abs_max)
+        allocate(troe_coeff_abs_max(size(troe_coeff,2)))
+        troe_coeff_abs_max= maxval(abs(troe_coeff),1)
+      endif
+
+      if(.not. lmultithread) call chemistry_allocate_rhs_arrays
 !
     endsubroutine initialize_chemistry
 !***********************************************************************
@@ -804,19 +844,19 @@ module Chemistry
             T_mid = species_constants(k,iTemp2)
             T_up = species_constants(k,iTemp3)
             where (T_loc <= T_mid)
-              p%H0_RT(:,k) = species_constants(k,iaa2(ii1)) &
-                           + species_constants(k,iaa2(ii2))*T_loc/2 &
-                           + species_constants(k,iaa2(ii3))*TT_2/3  &
-                           + species_constants(k,iaa2(ii4))*TT_3/4  &
-                           + species_constants(k,iaa2(ii5))*TT_4/5  &
-                           + species_constants(k,iaa2(ii6))/T_loc
+              p%H0_RT(:,k) = species_constants(k,iaa2_offset+ii1) &
+                           + species_constants(k,iaa2_offset+ii2)*T_loc/2 &
+                           + species_constants(k,iaa2_offset+ii3)*TT_2/3  &
+                           + species_constants(k,iaa2_offset+ii4)*TT_3/4  &
+                           + species_constants(k,iaa2_offset+ii5)*TT_4/5  &
+                           + species_constants(k,iaa2_offset+ii6)/T_loc
             elsewhere
-              p%H0_RT(:,k) = species_constants(k,iaa1(ii1)) &
-                           + species_constants(k,iaa1(ii2))*T_loc/2 &
-                           + species_constants(k,iaa1(ii3))*TT_2/3  &
-                           + species_constants(k,iaa1(ii4))*TT_3/4  &
-                           + species_constants(k,iaa1(ii5))*TT_4/5  &
-                           + species_constants(k,iaa1(ii6))/T_loc
+              p%H0_RT(:,k) = species_constants(k,iaa1_offset+ii1) &
+                           + species_constants(k,iaa1_offset+ii2)*T_loc/2 &
+                           + species_constants(k,iaa1_offset+ii3)*TT_2/3  &
+                           + species_constants(k,iaa1_offset+ii4)*TT_3/4  &
+                           + species_constants(k,iaa1_offset+ii5)*TT_4/5  &
+                           + species_constants(k,iaa1_offset+ii6)/T_loc
             endwhere
           enddo
 !
@@ -852,19 +892,19 @@ module Chemistry
             T_mid = species_constants(k,iTemp2)
             T_up = species_constants(k,iTemp3)
             where (T_loc <= T_mid .and. T_low <= T_loc)
-              p%S0_R(:,k) = species_constants(k,iaa2(ii1))*p%lnTT &
-                          + species_constants(k,iaa2(ii2))*T_loc  &
-                          + species_constants(k,iaa2(ii3))*TT_2/2 &
-                          + species_constants(k,iaa2(ii4))*TT_3/3 &
-                          + species_constants(k,iaa2(ii5))*TT_4/4 &
-                          + species_constants(k,iaa2(ii7))
+              p%S0_R(:,k) = species_constants(k,iaa2_offset+ii1)*p%lnTT &
+                          + species_constants(k,iaa2_offset+ii2)*T_loc  &
+                          + species_constants(k,iaa2_offset+ii3)*TT_2/2 &
+                          + species_constants(k,iaa2_offset+ii4)*TT_3/3 &
+                          + species_constants(k,iaa2_offset+ii5)*TT_4/4 &
+                          + species_constants(k,iaa2_offset+ii7)
             elsewhere (T_mid <= T_loc .and. T_loc <= T_up)
-              p%S0_R(:,k) = species_constants(k,iaa1(ii1))*p%lnTT &
-                          + species_constants(k,iaa1(ii2))*T_loc  &
-                          + species_constants(k,iaa1(ii3))*TT_2/2 &
-                          + species_constants(k,iaa1(ii4))*TT_3/3 &
-                          + species_constants(k,iaa1(ii5))*TT_4/4 &
-                          + species_constants(k,iaa1(ii7))
+              p%S0_R(:,k) = species_constants(k,iaa1_offset+ii1)*p%lnTT &
+                          + species_constants(k,iaa1_offset+ii2)*T_loc  &
+                          + species_constants(k,iaa1_offset+ii3)*TT_2/2 &
+                          + species_constants(k,iaa1_offset+ii4)*TT_3/3 &
+                          + species_constants(k,iaa1_offset+ii5)*TT_4/4 &
+                          + species_constants(k,iaa1_offset+ii7)
             endwhere
           enddo
         endif
@@ -1354,17 +1394,17 @@ module Chemistry
                 endif
 !
                 where (T_loc >= T_low .and. T_loc <= T_mid)
-                  cp_R_spec(:,j2,j3,k) = species_constants(k,iaa2(1)) &
-                                        +species_constants(k,iaa2(2))*T_loc &
-                                        +species_constants(k,iaa2(3))*T_loc_2 &
-                                        +species_constants(k,iaa2(4))*T_loc_3 &
-                                        +species_constants(k,iaa2(5))*T_loc_4
+                  cp_R_spec(:,j2,j3,k) = species_constants(k,iaa2_offset+1) &
+                                        +species_constants(k,iaa2_offset+2)*T_loc &
+                                        +species_constants(k,iaa2_offset+3)*T_loc_2 &
+                                        +species_constants(k,iaa2_offset+4)*T_loc_3 &
+                                        +species_constants(k,iaa2_offset+5)*T_loc_4
                 elsewhere (T_loc >= T_mid .and. T_loc <= T_up)
-                  cp_R_spec(:,j2,j3,k) = species_constants(k,iaa1(1)) &
-                                        +species_constants(k,iaa1(2))*T_loc &
-                                        +species_constants(k,iaa1(3))*T_loc_2 &
-                                        +species_constants(k,iaa1(4))*T_loc_3 &
-                                        +species_constants(k,iaa1(5))*T_loc_4
+                  cp_R_spec(:,j2,j3,k) = species_constants(k,iaa1_offset+1) &
+                                        +species_constants(k,iaa1_offset+2)*T_loc &
+                                        +species_constants(k,iaa1_offset+3)*T_loc_2 &
+                                        +species_constants(k,iaa1_offset+4)*T_loc_3 &
+                                        +species_constants(k,iaa1_offset+5)*T_loc_4
                 endwhere
 !
 ! Check if the temperature are within bounds
@@ -1634,11 +1674,21 @@ module Chemistry
       real, dimension(mx,my,mz,mfarray) :: f
       type (pencil_case) :: p
 !
-      integer :: i,ii
+      integer :: i,ii,j,k
 !
 !  Calculate diagnostic quantities
 !
       if (ldiagnos) then
+
+        if (lchemistry_diag) then
+          do k = 1,nchemspec
+            do j = 1,nreactions
+              net_react_p(k,j) = net_react_p(k,j)+stoichio(k,j)*sum(vreactions_p(:,j))
+              net_react_m(k,j) = net_react_m(k,j)+stoichio(k,j)*sum(vreactions_m(:,j))
+            enddo
+          enddo
+        endif
+
         if (idiag_dtchem /= 0) call max_mn_name(reac_chem/cdtc,idiag_dtchem,l_dt=.true.)
         !!if (idiag_dtchem /= 0) call max_mn_name(reac_chem/cdtc,idiag_dtchem,l_dt=.true.)
 !
@@ -4017,7 +4067,7 @@ module Chemistry
 !
     endsubroutine read_reactions
 !***********************************************************************
-    subroutine get_reaction_rate(f,vreact_p,vreact_m,p)
+    subroutine get_reaction_rate(f,p)
 !
 !  This subroutine calculates forward and reverse reaction rates,
 !  if chem.inp file exists.
@@ -4031,7 +4081,6 @@ module Chemistry
 !                    logarithmic form
 !
       real, dimension(mx,my,mz,mfarray), intent(in) :: f
-      real, dimension(nx,nreactions), intent(out) :: vreact_p, vreact_m
 !
       type (pencil_case) :: p
       real, dimension(nx) :: dSR, dHRT, Kp, Kc
@@ -4151,7 +4200,7 @@ module Chemistry
 !
 !  Multiply by third body reaction term
 !
-          if (minval(a_k4(:,reac)) < impossible) then
+          if (a_k4_min(reac) < impossible) then
             sum_sp = 0.
             do k = 1,nchemspec
               sum_sp = sum_sp+a_k4(k,reac)*f(l1:l2,m,n,ichemspec(k))  &
@@ -4166,14 +4215,14 @@ module Chemistry
 !
 !  The Lindeman approach to the fall of reactions
 !
-          if (maxval(abs(low_coeff(:,reac))) > 0.) then
+          if (low_coeff_abs_max(reac) > 0.) then
             B_n_0 = low_coeff(1,reac)
             alpha_n_0 = low_coeff(2,reac)
             E_an_0 = low_coeff(3,reac)
             kf_0(:) = B_n_0+alpha_n_0*p%lnTT(:)-E_an_0*Rcal1*TT1_loc(:)
             Pr = exp(kf_0-kf)*mix_conc
             kf = kf+log(Pr/(1.+Pr))
-          elseif (maxval(abs(high_coeff(:,reac))) > 0.) then
+          elseif (high_coeff_abs_max(reac) > 0.) then
             B_n_0 = high_coeff(1,reac)
             alpha_n_0 = high_coeff(2,reac)
             E_an_0 = high_coeff(3,reac)
@@ -4184,7 +4233,7 @@ module Chemistry
 !
 ! The Troe approach
 !
-          if (maxval(abs(troe_coeff(:,reac))) > 0.) then
+          if (troe_coeff_abs_max(reac) > 0.) then
             Fcent = (1.-troe_coeff(1,reac))*exp(-p%TT(:)/troe_coeff(2,reac)) &
                    +troe_coeff(1,reac)*exp(-p%TT(:)/troe_coeff(3,reac))
             ccc = -0.4-0.67*log10(Fcent)
@@ -4198,40 +4247,40 @@ module Chemistry
             kf = kf+FF
           endif
 !
-!  Find forward (vreact_p) and backward (vreact_m) rate of
+!  Find forward (vreactions_p) and backward (vreactions_m) rate of
 !  progress variable.
-!  (vreact_p - vreact_m) is labeled q in the chemkin manual
+!  (vreactions_p - vreactions_m) is labeled q in the chemkin manual
 !
             kr = kf-Kc
 !
         endif
 
-          if (Mplus_case (reac)) then
+          if (Mplus_case(reac)) then
             where (prod1 > 0.)
-              vreact_p(:,reac) = prod1*exp(kf)
+              vreactions_p(:,reac) = prod1*exp(kf)
             elsewhere
-              vreact_p(:,reac) = 0.
+              vreactions_p(:,reac) = 0.
             endwhere
             where (prod2 > 0.)
-              vreact_m(:,reac) = prod2*exp(kr)
+              vreactions_m(:,reac) = prod2*exp(kr)
             elsewhere
-              vreact_m(:,reac) = 0.
+              vreactions_m(:,reac) = 0.
             endwhere
 !
           else
             where (prod1 > 0.)
-              vreact_p(:,reac) = prod1*exp(kf)*sum_sp
+              vreactions_p(:,reac) = prod1*exp(kf)*sum_sp
             elsewhere
-              vreact_p(:,reac) = 0.
+              vreactions_p(:,reac) = 0.
             endwhere
             where (prod2 > 0.)
-              vreact_m(:,reac) = prod2*exp(kr)*sum_sp
+              vreactions_m(:,reac) = prod2*exp(kr)*sum_sp
             elsewhere
-              vreact_m(:,reac) = 0.
+              vreactions_m(:,reac) = 0.
             endwhere
           endif
 !
-          if (.not. back(reac)) vreact_m(:,reac) = 0.
+          if (.not. back(reac)) vreactions_m(:,reac) = 0.
         enddo
       endif
 !
@@ -4247,7 +4296,7 @@ module Chemistry
       use Diagnostics, only: sum_mn_name, max_mn_name
 !
       real, dimension(mx,my,mz,mfarray), intent(in) :: f
-      real, dimension(nx,mreactions) :: vreactions, vreactions_p, vreactions_m
+      real, dimension(nx,mreactions) :: vreactions
       real, dimension(nx,nchemspec) :: xdot
       real, dimension(nx) :: rho1
       real, dimension(nx,nchemspec) :: molm
@@ -4264,7 +4313,7 @@ module Chemistry
 !
 !  Chemkin data case
 !
-        call get_reaction_rate(f,vreactions_p,vreactions_m,p)
+        call get_reaction_rate(f,p)
 !
 !  Calculate rate of reactions (labeled q in the chemkin manual)
 !
@@ -4281,17 +4330,6 @@ module Chemistry
       enddo
       p%DYDt_reac = xdot*unit_time
       if (t < intro_time) p%DYDt_reac = p%DYDt_reac*t/intro_time
-!
-!  For diagnostics
-!
-      if (ldiagnos.and.lchemistry_diag) then
-        do k = 1,nchemspec
-          do j = 1,nreactions
-            net_react_p(k,j) = net_react_p(k,j)+stoichio(k,j)*sum(vreactions_p(:,j))
-            net_react_m(k,j) = net_react_m(k,j)+stoichio(k,j)*sum(vreactions_m(:,j))
-          enddo
-        enddo
-      endif
 !
     endsubroutine calc_reaction_term
 !***********************************************************************
@@ -4910,7 +4948,11 @@ module Chemistry
       if (allocated(low_coeff))      deallocate(low_coeff)
       if (allocated(high_coeff))     deallocate(high_coeff)
       if (allocated(troe_coeff))     deallocate(troe_coeff)
+      if (allocated(low_coeff_abs_max))      deallocate(low_coeff_abs_max)
+      if (allocated(high_coeff_abs_max))     deallocate(high_coeff_abs_max)
+      if (allocated(troe_coeff_abs_max))     deallocate(troe_coeff_abs_max)
       if (allocated(a_k4))           deallocate(a_k4)
+      if (allocated(a_k4_min))       deallocate(a_k4_min)
       if (allocated(Mplus_case))     deallocate(Mplus_case)
       if (allocated(photochem_case)) deallocate(photochem_case)
       if (allocated(net_react_m))    deallocate(net_react_m)
@@ -5128,5 +5170,62 @@ subroutine make_mixture_fraction(f)
 end subroutine make_mixture_fraction
 !***********************************************************************
     include 'chemistry_common.inc'
+!***********************************************************************
+    subroutine pushpars2c(p_par)
+
+    use Syscalls, only: copy_addr
+    use General,  only: string_to_enum
+
+    integer, parameter :: n_pars=150
+    integer(KIND=ikind8), dimension(n_pars) :: p_par
+    integer :: i
+
+    call copy_addr(rgas,p_par(1))
+    call copy_addr(rgas_unit_sys,p_par(2))
+    call copy_addr(lfilter_strict,p_par(3)) ! bool
+    call copy_addr(lreactions,p_par(4)) ! bool
+    call copy_addr(ladvection,p_par(5)) ! bool
+    call copy_addr(ldiffusion,p_par(6)) ! bool
+    call copy_addr(lheatc_chemistry,p_par(7)) ! bool
+    call copy_addr(lt_const,p_par(8)) ! bool
+    call copy_addr(ldiff_corr,p_par(9)) ! bool
+    call copy_addr(lmech_simple,p_par(10)) ! bool
+    call copy_addr(lfilter,p_par(11)) ! bool
+    call copy_addr(nreactions,p_par(12)) ! int
+    call copy_addr(mreactions,p_par(13)) ! int
+    call copy_addr(lreac_as_aux,p_par(14)) ! bool
+    call copy_addr(lmobility,p_par(15)) ! bool
+    call copy_addr(itemp1,p_par(16)) ! int
+    call copy_addr(itemp2,p_par(17)) ! int
+    call copy_addr(itemp3,p_par(18)) ! int
+    call copy_addr(intro_time,p_par(19))
+    call copy_addr(ichem_co,p_par(20)) ! int
+    call copy_addr(y_h2o,p_par(21))
+    call copy_addr(m_h2o,p_par(22))
+    call copy_addr(lchemistry_diag,p_par(23)) ! bool
+    call copy_addr(cp_r_spec,p_par(24)) ! (mx) (my) (mz) (nchemspec)
+    call copy_addr(stoichio,p_par(25)) ! (nchemspec) (mreactions)
+    call copy_addr(sijm,p_par(26)) ! (nchemspec) (mreactions)
+    call copy_addr(sijp,p_par(27)) ! (nchemspec) (mreactions)
+    call copy_addr(back,p_par(28)) ! bool (mreactions)
+    call copy_addr(mobility,p_par(29)) ! (nchemspec)
+    call copy_addr(b_n,p_par(32)) ! (mreactions)
+    call copy_addr(alpha_n,p_par(33)) ! (mreactions)
+    call copy_addr(e_an,p_par(34)) ! (mreactions)
+    call copy_addr(low_coeff,p_par(35)) ! (3) (nreactions)
+    call copy_addr(high_coeff,p_par(36)) ! (3) (nreactions)
+    call copy_addr(troe_coeff,p_par(37)) ! (3) (nreactions)
+    call copy_addr(a_k4,p_par(38)) ! (nchemspec) (nreactions)
+    call copy_addr(mplus_case,p_par(39)) ! bool (nreactions)
+    call copy_addr(orders_m,p_par(40)) ! (5) (nreactions)
+    call copy_addr(orders_p,p_par(41)) ! (5) (nreactions)
+    call copy_addr(species_constants,p_par(42)) ! (nchemspec) (24)
+    call copy_addr(lewis_coef1,p_par(43)) ! (nchemspec)
+    call copy_addr(enum_reac_rate_method,p_par(44)) ! int
+    call copy_addr(low_coeff_abs_max,p_par(45)) ! (nreactions)
+    call copy_addr(high_coeff_abs_max,p_par(46)) ! (nreactions)
+    call copy_addr(troe_coeff_abs_max,p_par(47)) ! (nreactions)
+    call copy_addr(a_k4_min,p_par(48)) ! (nreactions)
+    endsubroutine pushpars2c
 !***********************************************************************
 endmodule Chemistry

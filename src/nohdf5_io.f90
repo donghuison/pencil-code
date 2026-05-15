@@ -71,13 +71,9 @@ module HDF5_IO
 !***********************************************************************
     subroutine init_hdf5
 !
-      ! nothing to do
-!
     endsubroutine init_hdf5
 !***********************************************************************
     subroutine finalize_hdf5
-!
-      call fatal_error ('finalize_hdf5', 'You can not use HDF5 without setting an HDF5_IO module.')
 !
     endsubroutine finalize_hdf5
 !***********************************************************************
@@ -95,13 +91,13 @@ module HDF5_IO
       call keep_compiler_quiet(.true.,write)
       call keep_compiler_quiet(comm)
 
-      call fatal_error ('file_open_hdf5', 'You can not use HDF5 without setting an HDF5_IO module.')
+      call fatal_error ('file_open_hdf5', 'you can not use HDF5 without setting an HDF5_IO module')
 !
     endsubroutine file_open_hdf5
 !***********************************************************************
     subroutine file_close_hdf5
 !
-      call fatal_error ('file_close_hdf5', 'You can not use HDF5 without setting an HDF5_IO module.')
+      call fatal_error ('file_close_hdf5', 'you can not use HDF5 without setting an HDF5_IO module')
 !
     endsubroutine file_close_hdf5
 !***********************************************************************
@@ -109,7 +105,7 @@ module HDF5_IO
 !
       character (len=*), intent(in) :: name
 !
-      call fatal_error ('create_group_hdf5', 'You can not use HDF5 without setting an HDF5_IO module.')
+      call fatal_error ('create_group_hdf5', 'you can not use HDF5 without setting an HDF5_IO module')
       call keep_compiler_quiet(name)
 !
     endsubroutine create_group_hdf5
@@ -118,7 +114,7 @@ module HDF5_IO
 !
       character (len=*), intent(in) :: name
 !
-      call fatal_error ('exists_in_hdf5', 'You can not use HDF5 without setting an HDF5_IO module.')
+      call fatal_error ('exists_in_hdf5', 'you can not use HDF5 without setting an HDF5_IO module')
       call keep_compiler_quiet(name)
       exists_in_hdf5 = .false.
 !
@@ -129,7 +125,7 @@ module HDF5_IO
       character (len=*), intent(in) :: name
       integer, intent(out) :: data
 !
-      call fatal_error ('input_hdf5_int_0D', 'You can not use HDF5 without setting an HDF5_IO module.')
+      call fatal_error ('input_hdf5_int_0D', 'you can not use HDF5 without setting an HDF5_IO module')
       call keep_compiler_quiet(name)
       data = -1
 !
@@ -142,7 +138,7 @@ module HDF5_IO
       integer, dimension (nv), intent(out) :: data
       logical, optional, intent(in) :: same_size
 !
-      call fatal_error ('input_hdf5_int_1D', 'You can not use HDF5 without setting an HDF5_IO module.')
+      call fatal_error ('input_hdf5_int_1D', 'you can not use HDF5 without setting an HDF5_IO module')
       call keep_compiler_quiet(name)
       data(:) = -1
       call keep_compiler_quiet(.true., same_size)
@@ -154,7 +150,7 @@ module HDF5_IO
       character (len=*), intent(in) :: name
       real, intent(out) :: data
 !
-      call fatal_error ('input_hdf5_0D', 'You can not use HDF5 without setting an HDF5_IO module.')
+      call fatal_error ('input_hdf5_0D', 'you can not use HDF5 without setting an HDF5_IO module')
       call keep_compiler_quiet(name)
       data = -1.0
 !
@@ -167,7 +163,7 @@ module HDF5_IO
       real, dimension (nv), intent(out) :: data
       logical, optional, intent(in) :: same_size
 !
-      call fatal_error ('input_hdf5_1D', 'You can not use HDF5 without setting an HDF5_IO module.')
+      call fatal_error ('input_hdf5_1D', 'you can not use HDF5 without setting an HDF5_IO module')
       call keep_compiler_quiet(name)
       data(:) = -1.0
       call keep_compiler_quiet(.true., same_size)
@@ -181,7 +177,7 @@ module HDF5_IO
       real, dimension (mv,mparray), intent(out) :: data
       integer, intent(out) :: nv
 !
-      call fatal_error ('input_hdf5_part_2D', 'You can not use HDF5 without setting an HDF5_IO module.')
+      call fatal_error ('input_hdf5_part_2D', 'you can not use HDF5 without setting an HDF5_IO module')
       call keep_compiler_quiet(name)
       call keep_compiler_quiet(mv)
       call keep_compiler_quiet(nc)
@@ -196,7 +192,7 @@ module HDF5_IO
       real, dimension (:) :: data
       integer, intent(in) :: ldim, gdim, np1, np2
 !
-      call fatal_error ('input_hdf5_profile_1D', 'You can not use HDF5 without setting an HDF5_IO module.')
+      call fatal_error ('input_hdf5_profile_1D', 'you can not use HDF5 without setting an HDF5_IO module')
       call keep_compiler_quiet(name)
       call keep_compiler_quiet(data)
       call keep_compiler_quiet(ldim)
@@ -212,8 +208,9 @@ module HDF5_IO
       real, dimension (mx,my,mz), intent(out) :: data
       logical, optional, intent(in) :: lghost
 !
-      call fatal_error ('input_hdf5_3D', 'You can not use HDF5 without setting an HDF5_IO module.')
+      call fatal_error ('input_hdf5_3D', 'you can not use HDF5 without setting an HDF5_IO module')
       call keep_compiler_quiet(name)
+      call keep_compiler_quiet(lghost)
       data(:,:,:) = -1.0
 !
     endsubroutine input_hdf5_3D
@@ -224,7 +221,7 @@ module HDF5_IO
       integer, intent(in) :: nv
       real, dimension (mx,my,mz,nv), intent(out) :: data
 !
-      call fatal_error ('input_hdf5_4D', 'You can not use HDF5 without setting an HDF5_IO module.')
+      call fatal_error ('input_hdf5_4D', 'you can not use HDF5 without setting an HDF5_IO module')
       call keep_compiler_quiet(name)
       data(:,:,:,:) = -1.0
 !
@@ -235,7 +232,7 @@ module HDF5_IO
       character (len=*), intent(in) :: name
       character (len=*), intent(in) :: data
 !
-      call fatal_error ('output_hdf5_string', 'You can not use HDF5 without setting an HDF5_IO module.')
+      call fatal_error ('output_hdf5_string', 'you can not use HDF5 without setting an HDF5_IO module')
       call keep_compiler_quiet(name,data)
 !
     endsubroutine output_hdf5_string
@@ -245,7 +242,7 @@ module HDF5_IO
       character (len=*), intent(in) :: name
       integer, intent(in) :: data
 !
-      call fatal_error ('output_hdf5_int_0D', 'You can not use HDF5 without setting an HDF5_IO module.')
+      call fatal_error ('output_hdf5_int_0D', 'you can not use HDF5 without setting an HDF5_IO module')
       call keep_compiler_quiet(name)
       call keep_compiler_quiet(data)
 !
@@ -258,7 +255,7 @@ module HDF5_IO
       integer, dimension(nv), intent(in) :: data
       logical, optional, intent(in) :: same_size
 !
-      call fatal_error ('output_hdf5_int_1D', 'You can not use HDF5 without setting an HDF5_IO module.')
+      call fatal_error ('output_hdf5_int_1D', 'you can not use HDF5 without setting an HDF5_IO module')
       call keep_compiler_quiet(name)
       call keep_compiler_quiet(data)
       call keep_compiler_quiet(.true., same_size)
@@ -270,7 +267,7 @@ module HDF5_IO
       character (len=*), intent(in) :: name
       real, intent(in) :: data
 !
-      call fatal_error ('output_hdf5_0D', 'You can not use HDF5 without setting an HDF5_IO module.')
+      call fatal_error ('output_hdf5_0D', 'you can not use HDF5 without setting an HDF5_IO module')
       call keep_compiler_quiet(name)
       call keep_compiler_quiet(data)
 !
@@ -283,7 +280,7 @@ module HDF5_IO
       real, dimension (nv), intent(in) :: data
       logical, optional, intent(in) :: same_size
 !
-      call fatal_error ('output_hdf5_1D', 'You can not use HDF5 without setting an HDF5_IO module.')
+      call fatal_error ('output_hdf5_1D', 'you can not use HDF5 without setting an HDF5_IO module')
       call keep_compiler_quiet(name)
       call keep_compiler_quiet(data)
       call keep_compiler_quiet(.true., same_size)
@@ -297,7 +294,7 @@ module HDF5_IO
       real, dimension (mv,mparray), intent(in) :: data
       integer, intent(in) :: nv
 !
-      call fatal_error ('output_hdf5_part_2D', 'You can not use HDF5 without setting an HDF5_IO module.')
+      call fatal_error ('output_hdf5_part_2D', 'you can not use HDF5 without setting an HDF5_IO module')
       call keep_compiler_quiet(name)
       call keep_compiler_quiet(data)
       call keep_compiler_quiet(mv)
@@ -313,7 +310,7 @@ module HDF5_IO
       integer, intent(in) :: ldim, gdim, ip, np1, np2, ng
       logical, intent(in) :: lhas_data
 !
-      call fatal_error ('output_hdf5_profile_1D', 'You can not use HDF5 without setting an HDF5_IO module.')
+      call fatal_error ('output_hdf5_profile_1D', 'you can not use HDF5 without setting an HDF5_IO module')
       call keep_compiler_quiet(name)
       call keep_compiler_quiet(data)
       call keep_compiler_quiet(ldim)
@@ -332,7 +329,7 @@ module HDF5_IO
       integer, intent(in) :: dim1, dim2
       real, dimension (dim1,dim2), intent(in) :: data
 !
-      call fatal_error ('output_local_hdf5_2D', 'You can not use HDF5 without setting an HDF5_IO module.')
+      call fatal_error ('output_local_hdf5_2D', 'you can not use HDF5 without setting an HDF5_IO module')
       call keep_compiler_quiet(name)
       call keep_compiler_quiet(data)
       call keep_compiler_quiet(dim1)
@@ -347,7 +344,7 @@ module HDF5_IO
       integer, intent(in) :: ldim1, ldim2, gdim1, gdim2, ip1, ip2
       logical, intent(in) :: lhas_data
 !
-      call fatal_error ('output_hdf5_slice_2D', 'You can not use HDF5 without setting an HDF5_IO module.')
+      call fatal_error ('output_hdf5_slice_2D', 'you can not use HDF5 without setting an HDF5_IO module')
       call keep_compiler_quiet(name)
       call keep_compiler_quiet(data)
       call keep_compiler_quiet(ldim1)
@@ -366,7 +363,7 @@ module HDF5_IO
       integer, intent(in) :: dim1, dim2, dim3
       real, dimension (dim1,dim2,dim3), intent(in) :: data
 !
-      call fatal_error ('output_local_hdf5_3D', 'You can not use HDF5 without setting an HDF5_IO module.')
+      call fatal_error ('output_local_hdf5_3D', 'you can not use HDF5 without setting an HDF5_IO module')
       call keep_compiler_quiet(name)
       call keep_compiler_quiet(data)
       call keep_compiler_quiet(dim1)
@@ -380,7 +377,7 @@ module HDF5_IO
       character (len=*), intent(in) :: name
       real, dimension (mx,my,mz), intent(in) :: data
 !
-      call fatal_error ('output_hdf5_3D', 'You can not use HDF5 without setting an HDF5_IO module.')
+      call fatal_error ('output_hdf5_3D', 'you can not use HDF5 without setting an HDF5_IO module')
       call keep_compiler_quiet(name)
       call keep_compiler_quiet(data)
 !
@@ -392,7 +389,7 @@ module HDF5_IO
       integer, intent(in) :: dim1, dim2, dim3, dim4
       real, dimension (dim1,dim2,dim3,dim4), intent(in) :: data
 !
-      call fatal_error ('output_local_hdf5_4D', 'You can not use HDF5 without setting an HDF5_IO module.')
+      call fatal_error ('output_local_hdf5_4D', 'you can not use HDF5 without setting an HDF5_IO module')
       call keep_compiler_quiet(name)
       call keep_compiler_quiet(data)
       call keep_compiler_quiet(dim1)
@@ -409,7 +406,7 @@ module HDF5_IO
       real, dimension (mx,my,mz,nv), intent(in) :: data
       logical, optional, intent(in) :: compress
 !
-      call fatal_error ('output_hdf5_4D', 'You can not use HDF5 without setting an HDF5_IO module.')
+      call fatal_error ('output_hdf5_4D', 'you can not use HDF5 without setting an HDF5_IO module')
       call keep_compiler_quiet(name)
       call keep_compiler_quiet(data)
       call keep_compiler_quiet(compress)
@@ -420,8 +417,11 @@ module HDF5_IO
                          prec_in, nghost_in, nprocx_in, nprocy_in, nprocz_in, local)
 !
 !  Read dimensions from dim.dat (local or global).
+!  If local=.true., nprocx_in, nprocy_in, nprocz_in contain the processor coordinates
+!  from dim.dat, not the processor numbers (which are not stored there).
+!  Default: local=.false.
 !
-      use General, only: loptest
+      use General, only: loptest,itoa
 
       character (len=*), intent(in) :: wrkdir
       integer, intent(out) :: mx_in, my_in, mz_in, mvar_in, maux_in, mglobal_in
@@ -431,26 +431,29 @@ module HDF5_IO
       character (len=fnlen) :: filename
       character :: prec_in
       integer :: iprocz_slowest, ipx_in, ipy_in, ipz_in
+      logical :: lread
 !
-      if (lroot) then
         ! local or global dimension file
         if (loptest(local)) then
-          filename = trim(wrkdir)//'/data/proc0/dim.dat'
+          filename = trim(wrkdir)//'/data/proc'//trim(itoa(iproc_world))//'/dim.dat'
+          lread=.true.
         else
           filename = trim(wrkdir)//'/data/dim.dat'
+          lread=lroot
         endif
-        open(lun_input,file=filename)
-        read(lun_input,'(3i7,3i7)') mx_in, my_in, mz_in, mvar_in, maux_in, mglobal_in
-        read(lun_input,'(a)') prec_in
-        read(lun_input,'(3i5)') nghost_in
-        if (loptest(local)) then
-          read(lun_input,'(4i5)') ipx_in, ipy_in, ipz_in
-          nprocx_in=ipx_in; nprocy_in=ipy_in; nprocz_in=ipz_in
-        else
-          read(lun_input,'(4i5)') nprocx_in, nprocy_in, nprocz_in, iprocz_slowest
+        if (lread) then
+          open(lun_input,file=filename)
+          read(lun_input,'(3i7,3i7)') mx_in, my_in, mz_in, mvar_in, maux_in, mglobal_in
+          read(lun_input,'(a)') prec_in
+          read(lun_input,'(3i5)') nghost_in
+          if (loptest(local)) then
+            read(lun_input,'(4i5)') ipx_in, ipy_in, ipz_in
+            nprocx_in=ipx_in; nprocy_in=ipy_in; nprocz_in=ipz_in
+          else
+            read(lun_input,'(4i5)') nprocx_in, nprocy_in, nprocz_in, iprocz_slowest
+          endif
+          close(lun_input)
         endif
-        close(lun_input)
-      endif
 
     endsubroutine input_dim
 !***********************************************************************
@@ -459,7 +462,7 @@ module HDF5_IO
       character (len=*), intent(in) :: name
       real(KIND=rkind8), intent(in) :: data
 !
-      call fatal_error ('output_hdf5_double_0D', 'You can not use HDF5 without setting an HDF5_IO module.')
+      call fatal_error ('output_hdf5_double_0D', 'you can not use HDF5 without setting an HDF5_IO module')
       call keep_compiler_quiet(name)
       call keep_compiler_quiet(real(data))
 !
@@ -471,7 +474,7 @@ module HDF5_IO
       integer, intent(in) :: nv
       real(KIND=rkind8), dimension (nv), intent(in) :: data
 !
-      call fatal_error ('output_hdf5_double_1D', 'You can not use HDF5 without setting an HDF5_IO module.')
+      call fatal_error ('output_hdf5_double_1D', 'you can not use HDF5 without setting an HDF5_IO module')
       call keep_compiler_quiet(name)
       call keep_compiler_quiet(real(data))
       call keep_compiler_quiet(nv)
@@ -516,46 +519,6 @@ module HDF5_IO
 !
     endsubroutine output_dim
 !***********************************************************************
-    subroutine wdim_default_grid(file)
-!
-!  Write dimension to file.
-!
-!  02-Nov-2018/PABourdin: redesigned
-!
-      character (len=*), intent(in) :: file
-!
-      call output_dim (file, mx, my, mz, mxgrid, mygrid, mzgrid, mvar, maux, mglobal)
-!
-    endsubroutine wdim_default_grid
-!***********************************************************************
-    subroutine wdim_default(file, mx_out, my_out, mz_out, mxgrid_out, mygrid_out, mzgrid_out)
-!
-!  Write dimension to file.
-!
-!  02-Nov-2018/PABourdin: redesigned
-!
-      character (len=*), intent(in) :: file
-      integer, intent(in) :: mx_out, my_out, mz_out, mxgrid_out, mygrid_out, mzgrid_out
-!
-      call output_dim (file, mx_out, my_out, mz_out, mxgrid_out, mygrid_out, mzgrid_out, mvar, maux, mglobal)
-!
-    endsubroutine wdim_default
-!***********************************************************************
-    subroutine wdim(file, mx_out, my_out, mz_out, mxgrid_out, mygrid_out, mzgrid_out, mvar_out, maux_out)
-!
-!  Write dimension to file.
-!
-!   8-sep-01/axel: adapted to take my_out,mz_out
-!   4-oct-16/MR: added optional parameters mvar_out,maux_out
-!  02-Nov-2018/PABourdin: redesigned, moved to IO modules
-!
-      character (len=*), intent(in) :: file
-      integer, intent(in) :: mx_out, my_out, mz_out, mxgrid_out, mygrid_out, mzgrid_out, mvar_out, maux_out
-!
-      call output_dim (file, mx_out, my_out, mz_out, mxgrid_out, mygrid_out, mzgrid_out, mvar_out, maux_out, mglobal)
-!
-    endsubroutine wdim
-!***********************************************************************
     subroutine output_timeseries(data, data_im)
 !   
 !  Append diagnostic data to a binary file.
@@ -569,29 +532,30 @@ module HDF5_IO
 !                       
     endsubroutine output_timeseries
 !***********************************************************************
-    subroutine input_slice_position(directory,ix_bc_,iy_bc_,iy2_bc_,iz_bc_,iz2_bc_,iz3_bc_,iz4_bc_)
+!TP: on comment since never used (to suppress compiler warnings)
+!    subroutine input_slice_position(directory,ix_bc_,iy_bc_,iy2_bc_,iz_bc_,iz2_bc_,iz3_bc_,iz4_bc_)
+!!
+!!  'data/procN/slice_position.dat' is distributed, but may not be synchronized
+!!  on I/O error (-> dist=0) as this would make it disfunctional; correct a posteriori if necessary.
+!!
+!!  24-May-2019/MR: cloned from output_slice_position
+!!
+!      character(LEN=*) :: directory
+!      integer, intent(out) :: ix_bc_,iy_bc_,iy2_bc_,iz_bc_,iz2_bc_,iz3_bc_,iz4_bc_
+!      logical :: lexist_slice_xy, lexist_slice_xy2, lexist_slice_xy3, lexist_slice_xy4, &
+!                 lexist_slice_xz, lexist_slice_xz2, lexist_slice_yz
 !
-!  'data/procN/slice_position.dat' is distributed, but may not be synchronized
-!  on I/O error (-> dist=0) as this would make it disfunctional; correct a posteriori if necessary.
-!
-!  24-May-2019/MR: cloned from output_slice_position
-!
-      character(LEN=*) :: directory
-      integer, intent(out) :: ix_bc_,iy_bc_,iy2_bc_,iz_bc_,iz2_bc_,iz3_bc_,iz4_bc_
-      logical :: lexist_slice_xy, lexist_slice_xy2, lexist_slice_xy3, lexist_slice_xy4, &
-                 lexist_slice_xz, lexist_slice_xz2, lexist_slice_yz
-
-      open (lun_input, file=trim(directory)//'/data/slice_position.dat', STATUS='unknown')
-      read (lun_input, '(l5,i5)') lexist_slice_xy, iz_bc_
-      read (lun_input, '(l5,i5)') lexist_slice_xy2, iz2_bc_
-      read (lun_input, '(l5,i5)') lexist_slice_xy3, iz3_bc_
-      read (lun_input, '(l5,i5)') lexist_slice_xy4, iz4_bc_
-      read (lun_input, '(l5,i5)') lexist_slice_xz, iy_bc_
-      read (lun_input, '(l5,i5)') lexist_slice_xz2, iy2_bc_
-      read (lun_input, '(l5,i5)') lexist_slice_yz, ix_bc_
-      close(lun_input)
-!
-    endsubroutine input_slice_position
+!      open (lun_input, file=trim(directory)//'/data/slice_position.dat', STATUS='unknown')
+!      read (lun_input, '(l5,i5)') lexist_slice_xy, iz_bc_
+!      read (lun_input, '(l5,i5)') lexist_slice_xy2, iz2_bc_
+!      read (lun_input, '(l5,i5)') lexist_slice_xy3, iz3_bc_
+!      read (lun_input, '(l5,i5)') lexist_slice_xy4, iz4_bc_
+!      read (lun_input, '(l5,i5)') lexist_slice_xz, iy_bc_
+!      read (lun_input, '(l5,i5)') lexist_slice_xz2, iy2_bc_
+!      read (lun_input, '(l5,i5)') lexist_slice_yz, ix_bc_
+!      close(lun_input)
+!!
+!    endsubroutine input_slice_position
 !***********************************************************************
     subroutine input_slice_real_arr(file, time, pos, data)
 !
@@ -827,7 +791,7 @@ module HDF5_IO
       integer, intent(in) :: ivar
       logical, optional, intent(in) :: particle, pointmass, quiet
 !
-      call fatal_error ('index_get', 'You can not use HDF5 without setting an HDF5_IO module.')
+      call fatal_error ('index_get', 'you can not use HDF5 without setting an HDF5_IO module')
       call keep_compiler_quiet(ivar)
       call keep_compiler_quiet(particle)
       call keep_compiler_quiet(pointmass)

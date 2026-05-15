@@ -31,7 +31,7 @@ module Pscalar
 !  Init parameters.
 !
   real, dimension(3) :: gradC0=(/0.0,0.0,0.0/)
-  real :: ampllncc=impossible, widthlncc=impossible, lncc_min
+  real :: ampllncc=impossible, widthlncc=impossible
   real :: ampllncc2=impossible, radius_lncc=impossible
   real :: kx_lncc=impossible, ky_lncc=impossible,kz_lncc=impossible
   real :: epsilon_lncc=impossible
@@ -46,7 +46,7 @@ module Pscalar
   logical :: reinitialize_lncc=.false.
   character (len=labellen) :: initlncc='impossible', initlncc2='impossible'
   character (len=labellen) :: initcc='nothing', initcc2='zero'
-  character (len=40) :: tensor_pscalar_file
+  !character (len=40) :: tensor_pscalar_file
   integer :: ll_sh=-1, mm_sh=-1, n_xprof=0
 !
   namelist /pscalar_init_pars/ &
@@ -87,23 +87,60 @@ module Pscalar
 !
 !  Diagnostic variables (needs to be consistent with reset list below).
 !
-  integer :: idiag_rhoccm=0, idiag_ccmax=0, idiag_ccmin=0, idiag_ccm=0
-  integer :: idiag_mrclncm=0, idiag_rhoccmax=0, idiag_rhoc2m=0, idiag_rhoc3m=0
-  integer :: idiag_Qrhoccm=0, idiag_Qpsclm=0, idiag_mcct=0
-  integer :: idiag_gcc5m=0, idiag_gcc10m=0
-  integer :: idiag_ucm=0, idiag_uudcm=0, idiag_Cz2m=0, idiag_Cz4m=0
-  integer :: idiag_Crmsm=0, idiag_ccrms=0
-  integer :: idiag_uxcm=0, idiag_uycm=0, idiag_uzcm=0
-  integer :: idiag_cc1m=0, idiag_cc2m=0, idiag_cc3m=0, idiag_cc4m=0
-  integer :: idiag_cc5m=0, idiag_cc6m=0, idiag_cc7m=0, idiag_cc8m=0
-  integer :: idiag_cc9m=0, idiag_cc10m=0
-  integer :: idiag_gcc1m=0, idiag_gcc2m=0, idiag_gcc3m=0, idiag_gcc4m=0
-  integer :: idiag_gcc6m=0, idiag_gcc7m=0, idiag_gcc8m=0, idiag_gcc9m=0
-  integer :: idiag_cugccm=0, idiag_ccugum=0
-  integer :: idiag_ccmx=0, idiag_ccmy=0, idiag_ccmz=0, idiag_ccglnrm=0
-  integer :: idiag_uxcmz=0, idiag_uycmz=0, idiag_uzcmz=0, idiag_cc2mz=0
-  integer :: idiag_ccmxy=0, idiag_ccmxz=0
-  integer :: idiag_cluz_uzlcm=0, idiag_gcguzm=0
+  integer :: idiag_rhoccm=0 ! DIAG_DOC: $\left< \rho c_1 \right>$
+  integer :: idiag_ccmax=0 ! DIAG_DOC: $\max[ c_1 ]$
+  integer :: idiag_ccmin=0 ! DIAG_DOC: $\min[ c_1 ]$
+  integer :: idiag_ccm=0
+  integer :: idiag_mrclncm=0 ! DIAG_DOC: $\left< \rho c_1 \log(c_1) \right>$
+  integer :: idiag_rhoccmax=0 ! DIAG_DOC: $\max[ \rho c_1 ]$
+  integer :: idiag_rhoc2m=0 ! DIAG_DOC: $\left< \rho c_2 \right>$
+  integer :: idiag_rhoc3m=0 ! DIAG_DOC: $\left< \rho c_3 \right>$
+  integer :: idiag_Qrhoccm=0
+  integer :: idiag_Qpsclm=0
+  integer :: idiag_mcct=0
+  integer :: idiag_ucm=0 ! DIAG_DOC: $\left< u_z c_1 \right>$ (with an extra factor of $2 \cos(z)$ if lgradC_profile=T)
+  integer :: idiag_uudcm=0 ! DIAG_DOC: $\left< u_z \vec{u} \cdot \grad c_1 \right>$
+  integer :: idiag_Cz2m=0 ! DIAG_DOC: $\left< \rho c_1 z^2 \right>$
+  integer :: idiag_Cz4m=0 ! DIAG_DOC: $\left< \rho c_1 z^4 \right>$
+  integer :: idiag_Crmsm=0 ! DIAG_DOC: $\sqrt{\left< \rho c_1^2 \right>}$
+  integer :: idiag_ccrms=0 ! DIAG_DOC: $\sqrt{\left< c_1^2 \right>}$
+  integer :: idiag_uxcm=0 ! DIAG_DOC: $\left< u_x c_1 \right>$
+  integer :: idiag_uycm=0 ! DIAG_DOC: $\left< u_y c_1 \right>$
+  integer :: idiag_uzcm=0 ! DIAG_DOC: $\left< u_z c_1 \right>$
+  integer :: idiag_cc1m=0 ! DIAG_DOC: $\left< c_1^{-1} \right>$
+  integer :: idiag_cc2m=0 ! DIAG_DOC: $\left< c_1^{-2} \right>$
+  integer :: idiag_cc3m=0 ! DIAG_DOC: $\left< c_1^{-3} \right>$
+  integer :: idiag_cc4m=0 ! DIAG_DOC: $\left< c_1^{-4} \right>$
+  integer :: idiag_cc5m=0 ! DIAG_DOC: $\left< c_1^{-5} \right>$
+  integer :: idiag_cc6m=0 ! DIAG_DOC: $\left< c_1^{-6} \right>$
+  integer :: idiag_cc7m=0 ! DIAG_DOC: $\left< c_1^{-7} \right>$
+  integer :: idiag_cc8m=0 ! DIAG_DOC: $\left< c_1^{-8} \right>$
+  integer :: idiag_cc9m=0 ! DIAG_DOC: $\left< c_1^{-9} \right>$
+  integer :: idiag_cc10m=0 ! DIAG_DOC: $\left< c_1^{-10} \right>$
+  integer :: idiag_gcc1m=0 ! DIAG_DOC: $\left< \left|\grad c_1 \right| \right>$
+  integer :: idiag_gcc2m=0 ! DIAG_DOC: $\left< \left|\grad c_1 \right|^{2} \right>$
+  integer :: idiag_gcc3m=0 ! DIAG_DOC: $\left< \left|\grad c_1 \right|^{3} \right>$
+  integer :: idiag_gcc4m=0 ! DIAG_DOC: $\left< \left|\grad c_1 \right|^{4} \right>$
+  integer :: idiag_gcc5m=0 ! DIAG_DOC: $\left< \left|\grad c_1 \right|^{5} \right>$
+  integer :: idiag_gcc6m=0 ! DIAG_DOC: $\left< \left|\grad c_1 \right|^{6} \right>$
+  integer :: idiag_gcc7m=0 ! DIAG_DOC: $\left< \left|\grad c_1 \right|^{7} \right>$
+  integer :: idiag_gcc8m=0 ! DIAG_DOC: $\left< \left|\grad c_1 \right|^{8} \right>$
+  integer :: idiag_gcc9m=0 ! DIAG_DOC: $\left< \left|\grad c_1 \right|^{9} \right>$
+  integer :: idiag_gcc10m=0 ! DIAG_DOC: $\left< \left|\grad c_1 \right|^{10} \right>$
+  integer :: idiag_cugccm=0 ! DIAG_DOC: $\left< c_1 \vec{u} \cdot \grad c_1 \right>$
+  integer :: idiag_ccugum=0 ! DIAG_DOC: $\left< c_1 \vec{u} \cdot \grad u_z \right>$
+  integer :: idiag_ccmx=0
+  integer :: idiag_ccmy=0
+  integer :: idiag_ccmz=0
+  integer :: idiag_ccglnrm=0 ! DIAG_DOC: $\left< c_1 \partial_z \log\rho \right>$
+  integer :: idiag_uxcmz=0
+  integer :: idiag_uycmz=0
+  integer :: idiag_uzcmz=0
+  integer :: idiag_cc2mz=0
+  integer :: idiag_ccmxy=0
+  integer :: idiag_ccmxz=0
+  integer :: idiag_cluz_uzlcm=0
+  integer :: idiag_gcguzm=0
 !
   real, dimension(:,:), allocatable :: spharm 
   real, dimension(:,:,:,:), allocatable :: bunit,hhh
@@ -237,6 +274,7 @@ module Pscalar
       real, dimension(nx) :: tmpx
       real, dimension(:,:), allocatable :: yz
       integer :: iyz
+      integer :: l,m,n
 !
       ! for the time being, keep old name for backward compatibility
       if (initlncc/='impossible') initcc=initlncc
@@ -288,8 +326,10 @@ module Pscalar
         case ('propto-uz'); call wave_uu(amplcc,f,icc,kz=kz_cc)
         case ('cosx_cosy_cosz'); call cosx_cosy_cosz(amplcc,f,icc,kx_cc,ky_cc,kz_cc)
         case ('triquad'); call triquad(amplcc,f,icc,kx_cc,ky_cc,kz_cc,kxx_cc,kyy_cc,kzz_cc)
-        case ('semiangmom'); f(:,:,:,icc)=(1-2*powerlr*hoverr**2-1.5*zoverh**2*hoverr**2) &
-                             *spread(spread(x,2,my),3,mz) + 3*zoverh*hoverr*spread(spread(z,1,mx),2,my)
+        case ('semiangmom')
+          do l=1,mx; do m=1,my; do n=1,mz
+            f(l,m,n,icc) = (1-2*powerlr*hoverr**2-1.5*zoverh**2*hoverr**2)*x(l) +3*zoverh*hoverr*z(n)
+          enddo; enddo; enddo
         case ('sound-wave')
           do n=n1,n2; do m=m1,m2
             f(l1:l2,m,n,icc)=-amplcc*cos(kx_cc*x(l1:l2))
@@ -572,7 +612,6 @@ module Pscalar
       intent(out) :: df
 !
       character(len=2) :: id
-      real, dimension(nx,3) :: tmp
 !
 !  Identify module and boundary conditions.
 !
@@ -781,8 +820,8 @@ module Pscalar
         if (idiag_Qrhoccm/=0) call sum_mn_name(bump*p%rho*p%cc(:,1),idiag_Qrhoccm)
         if (idiag_mcct/=0)    call integrate_mn_name(p%rho*p%cc(:,1),idiag_mcct)
         if (idiag_rhoccm/=0)  call sum_mn_name(p%rho*p%cc(:,1),idiag_rhoccm)
-        if (idiag_rhoc2m/=0)  call sum_mn_name(p%rho*p%cc(:,2),idiag_rhoc2m)
-        if (idiag_rhoc3m/=0)  call sum_mn_name(p%rho*p%cc(:,3),idiag_rhoc3m)
+        if (idiag_rhoc2m/=0)  call sum_mn_name(p%rho*p%cc(:,min(2,size(p%cc,2))),idiag_rhoc2m)
+        if (idiag_rhoc3m/=0)  call sum_mn_name(p%rho*p%cc(:,min(3,size(p%cc,2))),idiag_rhoc3m)
         if (idiag_rhoccmax/=0)  call max_mn_name(p%rho*p%cc(:,1),idiag_rhoccmax)
         if (idiag_mrclncm/=0) call sum_mn_name(-p%rho*p%cc(:,1)*alog(p%cc(:,1)),idiag_mrclncm)
         call max_mn_name(p%cc(:,1),idiag_ccmax)
@@ -897,9 +936,7 @@ module Pscalar
       logical :: lreset
       logical, optional :: lwrite
 !
-      character(len=80) :: fmt
       integer :: iname, inamez, inamey, inamex, inamexy, inamexz
-      integer :: i
       logical :: lwr
 !
       lwr = .false.
@@ -1144,6 +1181,7 @@ module Pscalar
     subroutine pushpars2c(p_par)
 
     use Syscalls, only: copy_addr
+    use General,  only: keep_compiler_quiet
 
     integer, parameter :: n_pars=100
     integer(KIND=ikind8), dimension(n_pars) :: p_par
@@ -1180,6 +1218,8 @@ module Pscalar
     call copy_addr(bunit,p_par(30)) ! (nx) (ny) (nz) (3)
     call copy_addr(hhh,p_par(31)) ! (nx) (ny) (nz) (3)
     call copy_addr(cc_xyaver,p_par(32)) ! (mz) (npscalar)
+
+    call keep_compiler_quiet(reinitialize_lncc)
 
     endsubroutine pushpars2c
 !***********************************************************************

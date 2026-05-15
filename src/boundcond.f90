@@ -68,7 +68,7 @@ module Boundcond
 !
       use Grid, only: coarsegrid_interp
 
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
 !
       if (ighosts_updated>=0) then
 !
@@ -97,7 +97,7 @@ module Boundcond
       use General, only: add_merge_range
       use Grid, only: coarsegrid_interp
 !
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer  :: ivar1,ivar2
       integer, optional :: ivar2_opt
 !
@@ -143,7 +143,7 @@ module Boundcond
 !
 !  23-oct-13/ccyang: coded.
 !
-      real, dimension(mx,my,mz,mfarray), intent(inout) :: f
+      real, contiguous, dimension(:,:,:,:), intent(inout) :: f
 !
       call zero_ghosts_range(f, 1, mfarray)
 !
@@ -155,7 +155,7 @@ module Boundcond
 !
 !  23-oct-13/ccyang: coded.
 !
-      real, dimension(mx,my,mz,mfarray), intent(inout) :: f
+      real, contiguous, dimension(:,:,:,:), intent(inout) :: f
       integer, intent(in) :: ivar1
       integer, intent(in), optional :: ivar2_opt
 !
@@ -194,7 +194,7 @@ module Boundcond
       use EquationOfState, only: get_gamma_etc
       use SharedVariables, only: get_shared_variable
 
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
 
       integer :: ix_bc,ix2_bc,iy_bc,iy2_bc,iz_bc,iz2_bc,idum
       logical :: lread_slice_yz,lread_slice_yz2,lread_slice_xz,lread_slice_xz2, &
@@ -513,7 +513,7 @@ module Boundcond
 
       use General, only: get_scattered_array
 
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer, intent(IN) :: topbot
       integer :: j
 
@@ -521,15 +521,14 @@ module Boundcond
       real, save :: last_gettime, timediff
       real, allocatable, dimension(:,:,:), save :: ahead_data
 
-      if(.not. allocated(ahead_data)) allocate(ahead_data(ny,nz,mvar))
+      if (.not. allocated(ahead_data)) allocate(ahead_data(ny,nz,mvar))
       if (lfirst) then
         if (ilayer==-1) then
-          last_gettime=t
           ilayer=0
         elseif (t-last_gettime>=timediff) then
           ilayer=mod(ilayer+1,nt_slices)
-          last_gettime=t
         endif
+        last_gettime=real(t)
       endif
 
       if (topbot==BOT) then
@@ -544,7 +543,7 @@ module Boundcond
 
       use General, only: get_scattered_array
 
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer, intent(IN) :: topbot
       integer :: j
 
@@ -552,14 +551,14 @@ module Boundcond
       real, save :: last_gettime, timediff
       real, allocatable, dimension(:,:,:), save :: ahead_data
 
-      if(.not. allocated(ahead_data)) allocate(ahead_data(ny,nz,mvar))
+      if (.not. allocated(ahead_data)) allocate(ahead_data(ny,nz,mvar))
       if (lfirst) then
         if (ilayer==-1) then
-          last_gettime=t
+          last_gettime=real(t)
           ilayer=0
         elseif (t-last_gettime>=timediff) then
           ilayer=mod(ilayer+1,nt_slices)
-          last_gettime=t
+          last_gettime=real(t)
         endif
       endif
 
@@ -575,7 +574,7 @@ module Boundcond
 
       use General, only: get_scattered_array
 
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer, intent(IN) :: topbot
       integer :: j
 
@@ -586,14 +585,14 @@ module Boundcond
       real, allocatable, dimension(:,:,:), save :: ahead_data
       real :: w
 
-      if(.not. allocated(ahead_data)) allocate(ahead_data(ny,nz,mvar))
+      if (.not. allocated(ahead_data)) allocate(ahead_data(ny,nz,mvar))
       lget=.false.
       if (itsub==0.or.lfirst) then
 !
 ! update only in first substep of integration or before integration has started
 !
         if (ilayer(j)==0) then
-          last_gettime=t
+          last_gettime=real(t)
           ilayer(j)=1
           lget=.true.
         elseif (t-last_gettime(j)>=timediff) then
@@ -602,13 +601,13 @@ module Boundcond
           else
             ilayer(j)=ilayer(j)+1   !mod(ilayer(j)+1,nt_slices)
           endif
-          last_gettime(j)=t
+          last_gettime(j)=real(t)
           lget=.true.
         endif
       endif
 
       lboth = ilayer(j)==1 .or. nt_slices==1
-      if (.not.lget) w = (t-last_gettime(j))/timediff
+      if (.not.lget) w = real((t-last_gettime(j))/timediff)
 
       if (topbot==BOT) then
         if (lget) then
@@ -656,7 +655,7 @@ module Boundcond
 !
 !  10-oct-02/wolf: coded
 !
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer, optional :: ivar1_opt, ivar2_opt
       integer :: ivar1, ivar2
 !
@@ -674,7 +673,7 @@ module Boundcond
 !
 !  Envelope for being called from C code.
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer, optional :: ivar1_opt, ivar2_opt
 
       call boundconds_x(f,ivar1_opt,ivar2_opt)
@@ -682,14 +681,17 @@ module Boundcond
     endsubroutine boundconds_x_c
 !***********************************************************************
     subroutine bc_sts(f,topbot,j)
+!
       use EquationOfState, only: bc_stellar_surface
-      real, dimension(mx,my,mz,mfarray) :: f
+!
+      real, contiguous, dimension(:,:,:,:) :: f
       integer, intent(IN) ::  topbot,j
-      !Normal usage of StS assumes that StS is set for both ilnrho and ilnTT.
-      !But since bc_stellar_surface sets both of them need to call it only once
-      if(j == ilnrho) then
-        call bc_stellar_surface(f,topbot)
-      endif
+!
+!  Normal usage of 'sts' assumes that it is set for both ilnrho and ilnTT.
+!  But since bc_stellar_surface sets both of them one needs to call it only once.
+!
+      if (j == ilnrho) call bc_stellar_surface(f,topbot)
+!
     endsubroutine bc_sts
 !***********************************************************************
     subroutine boundconds_x(f,ivar1_opt,ivar2_opt)
@@ -709,7 +711,7 @@ module Boundcond
       use Shear
       use Special, only: special_boundconds
 !
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer, optional :: ivar1_opt, ivar2_opt
 !
       integer :: ivar1, ivar2, j, topbot
@@ -724,7 +726,8 @@ module Boundcond
       if (present(ivar1_opt)) ivar1=ivar1_opt
       if (present(ivar2_opt)) ivar2=ivar2_opt
 !
-!!print*, 'boundconds_x: mcom,mfarray,ivar1,ivar2=', mcom,mfarray,ivar1,ivar2
+!if (ldownsampling) print*, 'boundconds_x: mcom,mfarray,ivar1,ivar2=', mcom,mfarray,ivar1,ivar2,maxval(abs(f))
+!flush(6)
       select case (nxgrid)
 !
       case (1)
@@ -895,6 +898,11 @@ module Boundcond
                   ! BCX_DOC: Special time-dependent boundary condition to model temporal changes.
                   ! The functional form and the functional values should be generalized in function bc_st.
                   call bc_sym_x_ydep(f,topbot,j,-1,REL=.true.,val=bc_st())
+                case ('st2')
+                  ! BCX_DOC: set boundary value to value generated by function bc_st.
+                  ! BCX_DOC: Special time-dependent boundary condition to model temporal changes.
+                  ! The functional form and the functional values should be generalized in function bc_st.
+                  call bc_sym_x_ydep2(f,topbot,j,-1,REL=.true.,val=bc_st2())
                 case ('der')
                   ! BCX_DOC: set derivative on boundary to \var{fbcx}
                   call bc_set_der_x(f,topbot,j,fbcx(j,topbot))
@@ -1054,7 +1062,7 @@ module Boundcond
 !  25-jan-2026/TP: adapted from 'bc_outflow_x'
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
 !
       integer :: i, iy, iz
       real :: theta
@@ -1098,7 +1106,7 @@ module Boundcond
 
       use EquationOfState
 
-      real, dimension(mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: topbot,j
 
       if (j==iss)   call bc_ss_flux_x(f,topbot)
@@ -1109,7 +1117,7 @@ module Boundcond
     subroutine bc_d1s_x(f,topbot,j)
 
       use EquationOfState
-      real, dimension(mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: topbot,j
 
       call bc_set_val_x(f,topbot,j,fbcx(j,topbot))
@@ -1121,7 +1129,7 @@ module Boundcond
 
       use EquationOfState
 
-      real, dimension(mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: topbot,j
 
       call bval_from_neumann(f,topbot,j,1,fbcx(j,topbot))
@@ -1133,7 +1141,7 @@ module Boundcond
 !
 !  Envelope for being called from C code.
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer, optional :: ivar1_opt, ivar2_opt
 
       call boundconds_y(f,ivar1_opt,ivar2_opt)
@@ -1155,7 +1163,7 @@ module Boundcond
       use Special, only: special_boundconds
       use EquationOfState
 !
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer, optional :: ivar1_opt, ivar2_opt
 !
       integer :: ivar1, ivar2, j, topbot
@@ -1391,7 +1399,7 @@ module Boundcond
     subroutine bc_d1s_y(f,topbot,j)
 
       use EquationOfState
-      real, dimension(mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: topbot,j
 
        call bc_set_val_y(f,topbot,j,fbcy(j,topbot))
@@ -1403,7 +1411,7 @@ module Boundcond
 !
 !  Envelope for being called from C code.
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer, optional :: ivar1_opt, ivar2_opt
 
       call boundconds_z(f,ivar1_opt,ivar2_opt)
@@ -1426,12 +1434,11 @@ module Boundcond
 !  30-dec-16/MR: added BC 'a1s' for constant alpha mean-field model in one dimension
 !
       use General, only: var_is_vec
-      use Gravity, only: gravz_profile
       use Special, only: special_boundconds
       use EquationOfState
       !!use Energy, only: bc_ss_flux
 !
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer, optional :: ivar1_opt, ivar2_opt
       integer :: ivar1, ivar2, j, topbot
       logical :: ip_ok
@@ -1464,6 +1471,7 @@ module Boundcond
               if (ldebug) write(*,'(A,I1,A,I2,A,A)') ' bcz',topbot,'(',j,')=',bcz12(j,topbot)
 
               is_vec = var_is_vec(j)
+
 
               select case (bcz12(j,topbot))
               case ('0')
@@ -1741,6 +1749,8 @@ module Boundcond
               case ('cop')
                 ! BCZ_DOC: copy value of last physical point to all ghost cells
                 call bc_copy_z(f,topbot,j)
+              case ('str')
+                call bc_stratified_z(f,topbot,j)
               case ('tay')
                 call tayler_expansion(f,topbot,j,'z')
               case ('exp')
@@ -1781,7 +1791,7 @@ module Boundcond
       use EquationOfState
       use Magnetic_meanfield, only: pc_aasb_const_alpha
 
-      real, dimension(mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: topbot,j
 
       call pc_aasb_const_alpha(f,topbot,j)
@@ -1793,7 +1803,7 @@ module Boundcond
 
       use EquationOfState
 
-      real, dimension(mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: topbot,j
 
       call bc_set_val_z(f,topbot,j,fbcz(j,topbot))
@@ -1805,7 +1815,7 @@ module Boundcond
 
       use EquationOfState
 
-      real, dimension(mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: topbot,j
 
       call bval_from_neumann(f,topbot,j,3,fbcz(j,topbot))
@@ -1817,7 +1827,7 @@ module Boundcond
 
       use EquationOfState
 
-      real, dimension(mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: topbot,j
 
       if (j==iss) call bc_ss_flux(f,topbot)
@@ -1830,7 +1840,7 @@ module Boundcond
 
       use EquationOfState
 
-      real, dimension(mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: topbot,j
 
       if (j==ilnrho) call bc_lnrho_temp_z(f,topbot)
@@ -1843,7 +1853,7 @@ module Boundcond
       use EquationOfState
       use Gravity
 
-      real, dimension(mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: topbot,j
 
       if ((j==ilnrho) .or. (j==irho_b) .or. (j==iss)) then
@@ -1858,7 +1868,7 @@ module Boundcond
 
       use EquationOfState
 
-      real, dimension(mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: topbot,j
 
       if (j == ilnTT) then
@@ -1873,7 +1883,7 @@ module Boundcond
 
       use EquationOfState
 
-      real, dimension(mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
       integer :: topbot,j
 
       call bc_wind_z(f,topbot,fbcz(j,topbot))
@@ -1891,11 +1901,11 @@ module Boundcond
       use Shear
       use Special, only: special_boundconds
 !
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer, optional :: ivar1_opt, ivar2_opt
 !
       integer :: ivar1, ivar2, j, topbot
-      character(LEN=bclen) :: bc_code, cjvar
+      character(LEN=intlen) :: bc_code, cjvar
       character(LEN=128) :: errmsg
 !
       if (nxgrid<=1) return
@@ -1916,7 +1926,17 @@ module Boundcond
             cjvar=itoa(j)
             bc_code=bcx12(j,topbot)
             errmsg=''
-!
+
+            if(j == iss_run_aver .and. bc_code /= 'nil') then
+                    bcx12(j,topbot) = 'nil'
+                    if (lroot) print*,"Changed iss_run_aver bc to nil: Will time average the boundary of ss" 
+                    if(lgpu) then
+                            print*,"To run on GPUs please enter nill!"
+                            goto 10
+                    endif
+                    cycle
+            endif
+
             if (bc_code == 'she') then
               if (bcx12(j,1) /= bcx12(j,2)) then
                 errmsg='generalize '//trim(bc_code)//' to have sheared periodic boundary on only one end'; goto 10
@@ -1934,7 +1954,7 @@ module Boundcond
               case ('Fcm')
                 if (j/=iss) then; errmsg=' not allowed for variable no. '//trim(cjvar); goto 10; endif
               case ('sT')
-                if (.not.(j==iss .or. j==iss_run_aver)) then; errmsg=' not allowed for variable no. '//trim(cjvar); goto 10; endif
+                if (.not.(j==iss)) then; errmsg=' not allowed for variable no. '//trim(cjvar); goto 10; endif
               case ('asT')
                 if (j/=iss) then; errmsg=' not allowed for variable no. '//trim(cjvar); goto 10; endif
               case ('hat')
@@ -1986,11 +2006,11 @@ module Boundcond
 !
       use Special, only: special_boundconds
 !
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer, optional :: ivar1_opt, ivar2_opt
 !
       integer :: ivar1, ivar2, j, topbot
-      character(LEN=bclen) :: bc_code, cjvar
+      character(LEN=intlen) :: bc_code, cjvar
       character(LEN=128) :: errmsg
 !
       ivar1=1; ivar2=min(mcom,size(f,4))
@@ -2008,6 +2028,16 @@ module Boundcond
           bc_code=bcy12(j,topbot)
           cjvar=itoa(j)
           errmsg=''
+
+          if(j == iss_run_aver .and. bc_code /= 'nil') then
+                  bcy12(j,topbot) = 'nil'
+                  if (lroot) print*,"Changed iss_run_aver bc to nil: Will time average the boundary of ss" 
+                  if(lgpu) then
+                          print*,"To run on GPUs please enter nill!"
+                          goto 20
+                  endif
+                  cycle
+          endif
 !
           select case (bc_code)
           case ('pp')
@@ -2027,7 +2057,7 @@ module Boundcond
             if (j/=iss) then; errmsg=' not allowed for variable no. '//trim(cjvar); goto 20; endif
           case ('sT')
             ! BCY: symmetric temp.
-            if (.not.(j==iss .or. j==iss_run_aver)) then; errmsg=' not allowed for variable no. '//trim(cjvar); goto 20; endif
+            if (.not.(j==iss)) then; errmsg=' not allowed for variable no. '//trim(cjvar); goto 20; endif
           case ('asT')
             ! BCY: select entropy for uniform ghost temperature
             ! BCY: matching fluctuating boundary value,
@@ -2071,10 +2101,10 @@ module Boundcond
       use Magnetic_meanfield, only: pc_aasb_const_alpha
       use Special, only: special_boundconds
 !
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer, optional :: ivar1_opt, ivar2_opt
       integer :: ivar1, ivar2, j, topbot
-      character(LEN=bclen) :: bc_code, cjvar
+      character(LEN=intlen) :: bc_code, cjvar
       character(LEN=128) :: errmsg
 !
       ivar1=1; ivar2=min(mcom,size(f,4))
@@ -2089,10 +2119,22 @@ module Boundcond
 !
         do j=ivar1,ivar2
 !
+
           bc_code=bcz12(j,topbot)
           cjvar=itoa(j)
           errmsg=''
 !
+
+          if(j == iss_run_aver .and. bc_code /= 'nil') then
+                  bcz12(j,topbot) = 'nil'
+                  if (lroot) print*,"Changed iss_run_aver bc to nil: Will time average the boundary of ss" 
+                  if(lgpu) then
+                          print*,"To run on GPUs please enter nill!"
+                          goto 30
+                  endif
+                  cycle
+          endif
+
           select case (bc_code)
           case ('yy')
             ! BCZ: Yin-Yang grid
@@ -2168,7 +2210,7 @@ module Boundcond
           case ('cp')
             if (j/=ilnrho) then; errmsg=' not allowed for variable no. '//trim(cjvar); goto 30; endif
           case ('sT')
-            if (.not.(j==iss .or. j==iss_run_aver)) then; errmsg=' not allowed for variable no. '//trim(cjvar); goto 30; endif
+            if (.not.(j==iss)) then; errmsg=' not allowed for variable no. '//trim(cjvar); goto 30; endif
           case ('ctz')
             if (j/=iss) then; errmsg=' not allowed for variable no. '//trim(cjvar); goto 30; endif
           case ('cdz')
@@ -2348,7 +2390,7 @@ module Boundcond
 !
 !  11-nov-02/wolf: coded
 !
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
       integer, intent(IN) :: topbot
 !
@@ -2372,7 +2414,7 @@ module Boundcond
 !
 !  11-nov-02/wolf: coded
 !
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
       integer, intent(IN) :: topbot
 !
@@ -2398,7 +2440,7 @@ module Boundcond
 !
       use General, only: transform_cart_spher
 
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
       integer, intent(IN) :: topbot
 !
@@ -2435,7 +2477,7 @@ module Boundcond
 !            In principle similar conditions could apply for R=0
 !            for sph/cyl coords, but not yet implemented
 !
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j,nhalf,sgn
       integer, intent(IN) :: topbot
 !
@@ -2470,7 +2512,7 @@ module Boundcond
 !
 !  11-nov-02/wolf: coded
 !
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
       integer, intent(IN) :: topbot
 !
@@ -2498,7 +2540,7 @@ module Boundcond
 !
       use General, only: transform_cart_spher
 
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
       integer, intent(IN) :: topbot
 
@@ -2539,7 +2581,7 @@ module Boundcond
 !  24-nov-12/joern: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       real :: tmp1,tmp2
       integer ::j
 !
@@ -2603,7 +2645,7 @@ module Boundcond
 !  11-nov-02/wolf: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       real, optional :: val
       integer :: sgn,i,j
       logical, optional :: rel
@@ -2645,8 +2687,10 @@ module Boundcond
 !  11-nov-02/wolf: coded
 !  18-feb-24/axel: adapted from bc_sym_x to model Comisso+15; use -cos instead of +cos(ky).
 !
+      use General, only: keep_compiler_quiet
+
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       real, optional :: val
       integer :: sgn,i,j
       logical, optional :: rel
@@ -2654,26 +2698,34 @@ module Boundcond
       real :: ky
 !
       ky=2.*pi/Lxyz(2)
+      call keep_compiler_quiet(sgn)
+      call keep_compiler_quiet(rel)
 !
       select case (topbot)
 !
       case(BOT)               ! bottom boundary
-        if (present(val)) f(l1,:,:,j)=-.5-val*spread(cos(ky*y),2,mz)
-        if (loptest(rel)) then
-          do i=1,nghost; f(l1-i,:,:,j)=2*f(l1,:,:,j)+sgn*f(l1+i,:,:,j); enddo
-        else
-          do i=1,nghost; f(l1-i,:,:,j)=              sgn*f(l1+i,:,:,j); enddo
-          if (sgn<0) f(l1,:,:,j) = 0. ! set bdry value=0 (indep of initcond)
-        endif
+        ! if (present(val)) f(l1,:,:,j)=-.5-val*spread(cos(ky*y),2,mz)
+        if (present(val)) f(l1,:,:,j)=.5*x(l1)**2     -  x(l1) * val * spread(cos(ky*y),2,mz)
+          do i=1,nghost; f(l1-i,:,:,j)= .5*x(l1-i)**2 -   x(l1-i) * val * spread(cos(ky*y),2,mz); enddo
+          
+        ! if (loptest(rel)) then
+        !   do i=1,nghost; f(l1-i,:,:,j)=2*f(l1,:,:,j)+sgn*f(l1+i,:,:,j); enddo
+        ! else
+        !   do i=1,nghost; f(l1-i,:,:,j)=              sgn*f(l1+i,:,:,j); enddo
+        !   if (sgn<0) f(l1,:,:,j) = 0. ! set bdry value=0 (indep of initcond)
+        ! endif
 !
       case(TOP)               ! top boundary
-        if (present(val)) f(l2,:,:,j)=-.5-val*spread(cos(ky*y),2,mz)
-        if (loptest(rel)) then
-          do i=1,nghost; f(l2+i,:,:,j)=2*f(l2,:,:,j)+sgn*f(l2-i,:,:,j); enddo
-        else
-          do i=1,nghost; f(l2+i,:,:,j)=              sgn*f(l2-i,:,:,j); enddo
-          if (sgn<0) f(l2,:,:,j) = 0. ! set bdry value=0 (indep of initcond)
-        endif
+        ! if (present(val)) f(l2,:,:,j)=-.5-val*spread(cos(ky*y),2,mz)
+        if (present(val)) f(l2,:,:,j)=.5*x(l2)**2    +  x(l2) * val * spread(cos(ky*y),2,mz)
+          do i=1,nghost; f(l2+i,:,:,j)=.5*x(l2+i)**2 +   x(l2+i) * val * spread(cos(ky*y),2,mz); enddo
+
+        ! if (loptest(rel)) then
+        !   do i=1,nghost; f(l2+i,:,:,j)=2*f(l2,:,:,j)+sgn*f(l2-i,:,:,j); enddo
+        ! else
+        !   do i=1,nghost; f(l2+i,:,:,j)=              sgn*f(l2-i,:,:,j); enddo
+        !   if (sgn<0) f(l2,:,:,j) = 0. ! set bdry value=0 (indep of initcond)
+        ! endif
 !
       case default
         call fatal_error("bc_sym_x_ydep: ","topbot should be BOT or TOP")
@@ -2681,6 +2733,52 @@ module Boundcond
 !
     endsubroutine bc_sym_x_ydep
 !***********************************************************************
+
+   subroutine bc_sym_x_ydep2(f,topbot,j,sgn,rel,val)
+  !
+  !  Symmetry boundary conditions.
+  !  (f,topbot,j,-1)            --> antisymmetry             (f  =0)
+  !  (f,topbot,j,+1)            --> symmetry                 (f' =0)
+  !  (f,topbot,j,-1,REL=.true.) --> generalized antisymmetry (f''=0)
+  !  Don't combine rel=T and sgn=1, that wouldn't make much sense.
+  !
+  !  11-nov-02/wolf: coded
+  !  18-feb-24/axel: adapted from bc_sym_x to model Comisso+15; use -cos instead of +cos(ky).
+  !
+        use General, only: keep_compiler_quiet
+        integer, intent(IN) :: topbot
+        real, contiguous, dimension (:,:,:,:) :: f
+        real, optional :: val
+        integer :: sgn,i,j
+        logical, optional :: rel
+  !
+        real :: ky
+  !
+        call keep_compiler_quiet(sgn)
+        call keep_compiler_quiet(rel)
+        ky=2.*pi/Lxyz(2)
+  !
+        select case (topbot)
+  !
+        case(BOT)               ! bottom boundary
+          ! if (present(val)) f(l1,:,:,j)=-.5-val*spread(cos(ky*y),2,mz)
+          if (present(val)) f(l1,:,:,j)=  val*spread(cos(ky*y),2,mz)
+            do i=1,nghost; f(l1-i,:,:,j)= val*spread(cos(ky*y),2,mz); enddo
+
+  !
+        case(TOP)               ! top boundary
+          ! if (present(val)) f(l2,:,:,j)=-.5-val*spread(cos(ky*y),2,mz)
+          if (present(val)) f(l2,:,:,j)=  -val*spread(cos(ky*y),2,mz)
+            do i=1,nghost; f(l2+i,:,:,j)= -val*spread(cos(ky*y),2,mz); enddo
+
+
+        case default
+          call fatal_error("bc_sym_x_ydep: ","topbot should be BOT or TOP")
+        endselect
+  !
+      endsubroutine bc_sym_x_ydep2
+  !***********************************************************************
+
     subroutine bc_cpc_x(f,topbot,j)
 !
 !  This condition gives A"+A'/R=0.
@@ -2697,7 +2795,7 @@ module Boundcond
 !  11-nov-09/axel+koen: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       real, dimension (size(f,2),size(f,3)) :: extra1,extra2
       integer :: i,j
       real :: dxR
@@ -2739,7 +2837,7 @@ module Boundcond
 !  28-feb-11/koen: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       real, dimension (size(f,2),size(f,3)) :: f1_co,f2_co
       integer :: i,j
       real :: dxR
@@ -2780,7 +2878,7 @@ module Boundcond
 !  28-feb-11/koen: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       real, dimension (size(f,2),size(f,3)) :: f1_co,f2_co
       integer :: i,j
       real :: dxR
@@ -2821,7 +2919,7 @@ module Boundcond
 !!  15-may-13/joern: coded
 !!
 !      integer, intent(IN) :: topbot
-!      real, dimension (:,:,:,:) :: f
+!      real, contiguous, dimension (:,:,:,:) :: f
 !      integer :: j
 !      real :: tmp
 !!
@@ -2870,7 +2968,7 @@ module Boundcond
 !  09-may-16/fred: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: ix,j
 !
       if (.not.lspherical_coords) &
@@ -2911,7 +3009,7 @@ module Boundcond
 !  11-nov-02/wolf: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: sgn,i,j
       logical, optional :: rel
       real, optional :: val
@@ -2949,7 +3047,7 @@ module Boundcond
 !  30-may-11/axel: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       real :: val
       integer :: i,j
 !
@@ -2976,7 +3074,7 @@ module Boundcond
 !  12-nov-09/axel+koen: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: i,j,i1=1,i2=2,i3=3,i4=4,i5=5,i6=6
 !
       select case (topbot)
@@ -3017,7 +3115,7 @@ module Boundcond
 !  25-feb-07/axel: adapted from bc_sym_x
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       real :: slope
       real, optional :: val
       integer :: i,j
@@ -3065,7 +3163,7 @@ module Boundcond
 !
 !  02-Sep-2017/PABourdin: coded as a replacement for 'bc_slope_x'
 !
-      real, dimension(:,:,:,:), intent(inout) :: f
+      real, contiguous, dimension(:,:,:,:), intent(inout) :: f
       real, intent(in) :: slope
       integer, intent(IN) :: topbot
       integer, intent(in) :: j
@@ -3096,7 +3194,7 @@ module Boundcond
 !
 !  02-Sep-2017/PABourdin: coded
 !
-      real, dimension(:,:,:,:), intent(inout) :: f
+      real, contiguous, dimension(:,:,:,:), intent(inout) :: f
       real, intent(in) :: slope, abscissa
       integer, intent(IN) :: topbot
       integer, intent(in) :: j
@@ -3127,7 +3225,7 @@ module Boundcond
 !
 !  04-Sep-2017/PABourdin: coded
 !
-      real, dimension(:,:,:,:), intent(inout) :: f
+      real, contiguous, dimension(:,:,:,:), intent(inout) :: f
       real, intent(in) :: slope, abscissa
       integer, intent(IN) :: topbot
       integer, intent(in) :: j
@@ -3158,7 +3256,7 @@ module Boundcond
 !
 !  04-Sep-2017/PABourdin: coded
 !
-      real, dimension(:,:,:,:), intent(inout) :: f
+      real, contiguous, dimension(:,:,:,:), intent(inout) :: f
       real, intent(in) :: slope, abscissa
       integer, intent(IN) :: topbot
       integer, intent(in) :: j
@@ -3196,7 +3294,7 @@ module Boundcond
 !  25-feb-07/axel: adapted from bc_sym_x
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       real, optional :: val
       real :: slope
       integer :: i,j
@@ -3258,7 +3356,7 @@ module Boundcond
 !  25-feb-07/axel: adapted from bc_sym_x
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       real :: dist
       integer :: i,j
 !
@@ -3296,7 +3394,7 @@ module Boundcond
 !  25-feb-07/axel: adapted from bc_sym_z
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       real :: dist
       integer :: i,j
 !
@@ -3338,7 +3436,7 @@ module Boundcond
 !  25-feb-07/axel: adapted from bc_slope_x
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       real :: slope
       integer :: i,j
       logical, optional :: rel
@@ -3395,7 +3493,7 @@ module Boundcond
 !   9-jun-11/axel: added val2 argument
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       real, optional :: val,val2,val4
       integer :: sgn,i,j
       logical, optional :: rel
@@ -3440,7 +3538,7 @@ module Boundcond
       use EquationOfState, only: cs0
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       real, dimension(size(f,1)) :: rad,za,zg,H,lnrho
       integer :: i,in,j
 !
@@ -3500,7 +3598,7 @@ module Boundcond
       use EquationOfState, only: cs0
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       real, dimension(size(f,1)) :: lnrho
       real :: za,zg,H
       integer :: i,im,j
@@ -3563,7 +3661,7 @@ module Boundcond
 !  10-apr-05/axel: added val argument
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       real, optional :: val
       integer :: sgn,i,j
       logical, optional :: rel
@@ -3601,7 +3699,7 @@ module Boundcond
 !  30-may-11/axel: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       real :: val
       integer :: i,j
 !
@@ -3626,7 +3724,7 @@ module Boundcond
 !  30-may-11/axel: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       real, dimension (size(f,1),size(f,3)) :: derval
       real :: val
       integer :: i,j
@@ -3655,7 +3753,7 @@ module Boundcond
 !  19-nov-09/axel: adapted from bc_symset0der_x
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: i,j,i1=1,i2=2,i3=3,i4=4,i5=5,i6=6
 !
       select case (topbot)
@@ -3701,7 +3799,7 @@ module Boundcond
 !  23-may-13/joern: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       real :: tmp
       integer :: j
 !
@@ -3753,7 +3851,7 @@ module Boundcond
 !  10-apr-05/axel: added val argument
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       real, optional :: val,val2,val4
       integer :: sgn,i,j
       logical, optional :: rel
@@ -3812,7 +3910,7 @@ module Boundcond
 !
 !  12-nov-16/ccyang: coded
 !
-      real, dimension(:,:,:,:), intent(inout) :: f
+      real, contiguous, dimension(:,:,:,:), intent(inout) :: f
       integer, intent(in) :: sgn, j
       integer, intent(IN) :: topbot
 !
@@ -3840,7 +3938,7 @@ module Boundcond
 !
 !  12-nov-16/ccyang: coded
 !
-      real, dimension(:,:,:,:), intent(inout) :: f
+      real, contiguous, dimension(:,:,:,:), intent(inout) :: f
       integer, intent(in) :: sgn, j
       integer, intent(IN) :: topbot
 !
@@ -3868,7 +3966,7 @@ module Boundcond
 !
 !  14-feb-09/ccyang: coded
 !
-      real, dimension(:,:,:,:), intent(inout) :: f
+      real, contiguous, dimension(:,:,:,:), intent(inout) :: f
       integer, intent(in) :: sgn, j
       integer, intent(IN) :: topbot
 !
@@ -3894,7 +3992,7 @@ module Boundcond
 !  22-nov-09/axel: adapted from bc_symset0der_y
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: i,j,i1=1,i2=2,i3=3,i4=4,i5=5,i6=6
 !
       select case (topbot)
@@ -3934,7 +4032,7 @@ module Boundcond
 !  14-may-2006/tobi: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:), intent (inout) :: f
+      real, contiguous, dimension (:,:,:,:), intent (inout) :: f
       integer, intent (in) :: j
       real, intent (in) :: val
 !
@@ -3963,7 +4061,7 @@ module Boundcond
 !  27-apr-2007/dhruba: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:), intent (inout) :: f
+      real, contiguous, dimension (:,:,:,:), intent (inout) :: f
       integer, intent (in) :: j
 !
       real, intent (in) :: val
@@ -3988,7 +4086,7 @@ module Boundcond
 !   9-jan-2008/axel+nils+natalia: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:), intent (inout) :: f
+      real, contiguous, dimension (:,:,:,:), intent (inout) :: f
       integer, intent (in) :: j
 !
       real, dimension (:,:,:,:), allocatable :: bc_file_x_array
@@ -4029,7 +4127,7 @@ module Boundcond
 !  x - Udrift_bc*t = dx * (ix - Udrift_bc*t/dx)
 !
       case(BOT)               ! bottom boundary
-        lbc=Udrift_bc*t*dx_1(1)+1.
+        lbc=real(Udrift_bc*t*dx_1(1)+1.)
         lbc0=int(lbc)
         frac=mod(lbc,real(lbc0))
         lbc1=iszx+mod(-lbc0,iszx)
@@ -4043,7 +4141,7 @@ module Boundcond
 !  note: this "top" thing hasn't been adapted or tested yet.
 !  The -lbc0-1 has been changed to +lbc0+1, but has not been tested yet.
 !
-        lbc=Udrift_bc*t*dx_1(1)+1.
+        lbc=real(Udrift_bc*t*dx_1(1)+1.)
         lbc0=int(lbc)
         frac=mod(lbc,real(lbc0))
         lbc1=iszx+mod(+lbc0,iszx)
@@ -4069,7 +4167,7 @@ module Boundcond
 !  27-apr-2007/dhruba: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:), intent (inout) :: f
+      real, contiguous, dimension (:,:,:,:), intent (inout) :: f
       integer, intent (in) :: j
 !
       real, intent (in) :: val
@@ -4109,7 +4207,7 @@ module Boundcond
 !  25-Aug-2007/dhruba: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:), intent (inout) :: f
+      real, contiguous, dimension (:,:,:,:), intent (inout) :: f
       integer, intent (in) :: j
 !
       select case (topbot)
@@ -4142,7 +4240,7 @@ module Boundcond
 !  25-Aug-2007/dhruba: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:), intent (inout) :: f
+      real, contiguous, dimension (:,:,:,:), intent (inout) :: f
       integer, intent (in) :: j
       integer :: k
 !
@@ -4175,7 +4273,7 @@ module Boundcond
 !  13-Dec-2016/MR: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:), intent (inout) :: f
+      real, contiguous, dimension (:,:,:,:), intent (inout) :: f
       integer, intent (in) :: j
 !
       if (topbot==BOT) then
@@ -4196,7 +4294,7 @@ module Boundcond
 !  4-Sep-2017/MR: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:), intent (inout) :: f
+      real, contiguous, dimension (:,:,:,:), intent (inout) :: f
       integer, intent (in) :: j
 !
       if (topbot==BOT) then
@@ -4218,7 +4316,7 @@ module Boundcond
 !  03-Dec-2009/dhruba: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:), intent (inout) :: f
+      real, contiguous, dimension (:,:,:,:), intent (inout) :: f
       integer, intent (in) :: j
       integer :: k
 !
@@ -4258,7 +4356,7 @@ module Boundcond
       use SharedVariables, only : get_shared_variable
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:), intent (inout) :: f
+      real, contiguous, dimension (:,:,:,:), intent (inout) :: f
       integer, intent (in) :: j
 !
       real, pointer :: nu,Lambda_V0t,Lambda_V0b,Lambda_V1t,Lambda_V1b
@@ -4302,7 +4400,7 @@ module Boundcond
                 endif
                 do k=1,nghost
                    fac=(1.-dx2_bound(-k)/x(l1+k))**lambda_exp
-                   if (Omega==0) then
+                   if (.not. lrotation) then
                      f(l1-k,iy,:,j) = f(l1+k,iy,:,j)*fac
                    else
                      f(l1-k,iy,:,j) = (f(l1+k,iy,:,j)+Omega*x(l1+k)*sth)*fac &
@@ -4324,7 +4422,7 @@ module Boundcond
                 endif
                 do k=1,nghost
                    fac=(1.-dx2_bound(-k)/x(l1+k))**lambda_exp
-                   if (Omega==0) then
+                   if (.not. lrotation) then
                      f(l1-k,iy,:,j) = f(l1+k,iy,:,j)*fac
                    else
                      f(l1-k,iy,:,j) = (f(l1+k,iy,:,j)+Omega*x(l1+k))*fac
@@ -4366,7 +4464,7 @@ module Boundcond
                 endif
                 do k=1,nghost
                   fac=(1.+dx2_bound(k)/x(l2-k))**lambda_exp
-                  if (Omega==0) then
+                  if (.not. lrotation) then
                     f(l2+k,iy,:,j) = f(l2-k,iy,:,j)*fac
                   else
                     f(l2+k,iy,:,j) = (f(l2-k,iy,:,j)+Omega*x(l2-k)*sth)*fac &
@@ -4388,7 +4486,7 @@ module Boundcond
                 endif
                 do k=1,nghost
                   fac=(1.+dx2_bound(k)/x(l2-k))**lambda_exp
-                  if (Omega==0) then
+                  if (.not. lrotation) then
                     f(l2+k,iy,:,j) = f(l2-k,iy,:,j)*fac
                   else
                     f(l2+k,iy,:,j) = (f(l2-k,iy,:,j)+Omega*x(l2-k))*fac
@@ -4424,7 +4522,7 @@ module Boundcond
       use Sub, only: step
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:), intent (inout) :: f
+      real, contiguous, dimension (:,:,:,:), intent (inout) :: f
       integer, intent(in) :: jj
       integer :: i,j,k
       real, intent(in) :: frac,uzero
@@ -4487,7 +4585,7 @@ module Boundcond
 !
       integer, intent(IN) :: topbot
       real, dimension (m2-m1+1,n2-n1+1) :: prof
-      real, dimension (:,:,:,:), intent (inout) :: f
+      real, contiguous, dimension (:,:,:,:), intent (inout) :: f
       integer, intent(in) :: jj
       integer :: i,j,k
       real, intent(in) :: vel,rad
@@ -4577,7 +4675,7 @@ module Boundcond
 !  25-Aug-2007/dhruba: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:), intent (inout) :: f
+      real, contiguous, dimension (:,:,:,:), intent (inout) :: f
       integer, intent (in) :: j
       integer :: k
 !
@@ -4612,7 +4710,7 @@ module Boundcond
       use SharedVariables, only : get_shared_variable
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:), intent (inout) :: f
+      real, contiguous, dimension (:,:,:,:), intent (inout) :: f
       integer, intent (in) :: j
       real, pointer :: Lambda_H1,nu
       real, pointer :: LH1_rprof(:)
@@ -4640,7 +4738,7 @@ module Boundcond
             do k=1,nghost
               cos2thm_k= costh(m1-k)**2-sinth(m1-k)**2
               cos2thmpk= costh(m1+k)**2-sinth(m1+k)**2
-              if (Omega==0) then
+              if (.not. lrotation) then
                 do ix=1,size(f,1)
                   if (llambda_scale_with_nu) then
                     f(ix,m1-k,:,j)= f(ix,m1+k,:,j)* &
@@ -4690,7 +4788,7 @@ module Boundcond
             do k=1,nghost
               cos2thm_k= costh(m2-k)**2-sinth(m2-k)**2
               cos2thmpk= costh(m2+k)**2-sinth(m2+k)**2
-              if (Omega==0)then
+              if (.not. lrotation)then
                 do ix=1,size(f,1)
                   if (llambda_scale_with_nu) then
                     f(ix,m2+k,:,j)= f(ix,m2-k,:,j)* &
@@ -4756,7 +4854,7 @@ module Boundcond
 !  25-Aug-2007/dhruba: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:), intent (inout) :: f
+      real, contiguous, dimension (:,:,:,:), intent (inout) :: f
       integer, intent (in) :: j
       real :: cottheta
 !
@@ -4790,7 +4888,7 @@ module Boundcond
 !  14-may-2006/tobi: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:), intent (inout) :: f
+      real, contiguous, dimension (:,:,:,:), intent (inout) :: f
       integer, intent (in) :: j
       real, intent (in) :: val
 !
@@ -4817,7 +4915,7 @@ module Boundcond
 !  14-may-2006/tobi: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:), intent (inout) :: f
+      real, contiguous, dimension (:,:,:,:), intent (inout) :: f
       integer, intent (in) :: j
       real, intent (in) :: val
 !
@@ -4844,7 +4942,7 @@ module Boundcond
 !  17-may-2010/bing: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:), intent (inout) :: f
+      real, contiguous, dimension (:,:,:,:), intent (inout) :: f
       real, dimension (l2-l1+1,m2-m1+1) :: fac,duz_dz
       real, intent(in) :: val
 !
@@ -4917,15 +5015,25 @@ module Boundcond
       real :: XXi0, tau_XXi
 
       XXi0=0.04
-      tau_XXi=10.
-      bc_st=XXi0*(1.-(1.+t/tau_XXi)*exp(-t/tau_XXi))
+      tau_XXi=2.
+      bc_st=real(XXi0*(1.-(1.+t/tau_XXi)*exp(-t/tau_XXi)))
 
     endfunction bc_st
+!***********************************************************************
+  real function bc_st2()
+
+    real :: XXi0, tau_XXi
+
+    XXi0=0.04
+    tau_XXi=2.
+    bc_st2=real(XXi0 * t * exp(-t/tau_XXi) / tau_XXi**2)
+
+  endfunction bc_st2
 !***********************************************************************
     subroutine bc_set_val_z(f,topbot,j,val)
 
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
       real :: val
 
@@ -4940,7 +5048,7 @@ module Boundcond
     subroutine bc_set_val_y(f,topbot,j,val)
 
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
       real :: val
 !
@@ -4955,7 +5063,7 @@ module Boundcond
     subroutine bc_set_val_x(f,topbot,j,val)
 
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
       real :: val
 !
@@ -4975,7 +5083,7 @@ module Boundcond
 !  26-apr-06/tobi: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: i,j
 !
       select case (topbot)
@@ -5004,7 +5112,7 @@ module Boundcond
 !  26-apr-06/tobi: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: i,j
 !
       select case (topbot)
@@ -5033,7 +5141,7 @@ module Boundcond
 !  26-apr-06/tobi: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: i,j
 !
       select case (topbot)
@@ -5067,7 +5175,7 @@ module Boundcond
 !        or else, just code a separate van3rd_log subroutine
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
 !
       real, dimension (size(f,1),size(f,3)) :: cpoly0,cpoly1,cpoly2
@@ -5129,7 +5237,7 @@ module Boundcond
 !  19-aug-03/anders: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
 !
       real, dimension (size(f,1),size(f,2)) :: cpoly0,cpoly1,cpoly2
@@ -5166,7 +5274,7 @@ module Boundcond
 !  05-apr-03/axel: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: i,j,k
 !
       select case (topbot)
@@ -5201,49 +5309,50 @@ module Boundcond
 !
     endsubroutine bc_onesided_x_old
 !***********************************************************************
-    subroutine bc_onesided_z_orig(f,topbot,j)
-!
-!  One-sided conditions.
-!  These expressions result from combining Eqs(207)-(210), astro-ph/0109497,
-!  corresponding to (9.207)-(9.210) in Ferriz-Mas proceedings.
-!
-!  05-apr-03/axel: coded
-!
-      integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
-      integer :: i,j,k
-!
-      select case (topbot)
-!
-      case(BOT)               ! bottom boundary
-        do i=1,nghost
-          k=n1-i
-          f(:,:,k,j)=7*f(:,:,k+1,j) &
-                   -21*f(:,:,k+2,j) &
-                   +35*f(:,:,k+3,j) &
-                   -35*f(:,:,k+4,j) &
-                   +21*f(:,:,k+5,j) &
-                    -7*f(:,:,k+6,j) &
-                      +f(:,:,k+7,j)
-        enddo
-!
-      case(TOP)               ! top boundary
-        do i=1,nghost
-          k=n2+i
-          f(:,:,k,j)=7*f(:,:,k-1,j) &
-                   -21*f(:,:,k-2,j) &
-                   +35*f(:,:,k-3,j) &
-                   -35*f(:,:,k-4,j) &
-                   +21*f(:,:,k-5,j) &
-                    -7*f(:,:,k-6,j) &
-                      +f(:,:,k-7,j)
-        enddo
-!
-      case default
-        call fatal_error("bc_onesided_z ","topbot should be BOT or TOP")
-      endselect
-!
-    endsubroutine bc_onesided_z_orig
+!TP: on comment since not used (to suppress compiler warnings)
+!    subroutine bc_onesided_z_orig(f,topbot,j)
+!!
+!!  One-sided conditions.
+!!  These expressions result from combining Eqs(207)-(210), astro-ph/0109497,
+!!  corresponding to (9.207)-(9.210) in Ferriz-Mas proceedings.
+!!
+!!  05-apr-03/axel: coded
+!!
+!      integer, intent(IN) :: topbot
+!      real, dimension (:,:,:,:) :: f
+!      integer :: i,j,k
+!!
+!      select case (topbot)
+!!
+!      case(BOT)               ! bottom boundary
+!        do i=1,nghost
+!          k=n1-i
+!          f(:,:,k,j)=7*f(:,:,k+1,j) &
+!                   -21*f(:,:,k+2,j) &
+!                   +35*f(:,:,k+3,j) &
+!                   -35*f(:,:,k+4,j) &
+!                   +21*f(:,:,k+5,j) &
+!                    -7*f(:,:,k+6,j) &
+!                      +f(:,:,k+7,j)
+!        enddo
+!!
+!      case(TOP)               ! top boundary
+!        do i=1,nghost
+!          k=n2+i
+!          f(:,:,k,j)=7*f(:,:,k-1,j) &
+!                   -21*f(:,:,k-2,j) &
+!                   +35*f(:,:,k-3,j) &
+!                   -35*f(:,:,k-4,j) &
+!                   +21*f(:,:,k-5,j) &
+!                    -7*f(:,:,k-6,j) &
+!                      +f(:,:,k-7,j)
+!        enddo
+!!
+!      case default
+!        call fatal_error("bc_onesided_z ","topbot should be BOT or TOP")
+!      endselect
+!!
+!    endsubroutine bc_onesided_z_orig
 !***********************************************************************
     subroutine bc_extrap_2_1(f,topbot,j)
 !
@@ -5254,7 +5363,7 @@ module Boundcond
 !  19-jun-03/wolf: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
 !
       select case (topbot)
@@ -5284,7 +5393,7 @@ module Boundcond
 !  19-jun-03/wolf: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
 !
       select case (topbot)
@@ -5314,7 +5423,7 @@ module Boundcond
 !  19-jun-03/wolf: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
 !
       select case (topbot)
@@ -5345,7 +5454,7 @@ module Boundcond
 !  01-jul-03/axel: introduced abbreviations n1p4,n2m4
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j,n1p4,n2m4
 !
 !  abbreviations, because otherwise the ifc compiler complains
@@ -5382,7 +5491,7 @@ module Boundcond
 !  01-jul-03/axel: introduced abbreviations n1p4,n2m4
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j,l1p4,l2m4
 !
 !  abbreviations, because otherwise the ifc compiler complains
@@ -5419,7 +5528,7 @@ module Boundcond
 !  01-jul-03/axel: introduced abbreviations n1p4,n2m4
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       real :: frac=0.8
       integer :: j,l1p4,l2m4,i
 !
@@ -5470,7 +5579,7 @@ module Boundcond
 !   01-jul-03/axel: introduced abbreviations n1p4,n2m4
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j,m1p4,m2m4
 !
 !  abbreviations, because otherwise the ifc compiler complains
@@ -5505,7 +5614,7 @@ module Boundcond
 !  18-dec-08/wlad: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j,l,i
 !
       select case (topbot)
@@ -5551,7 +5660,7 @@ module Boundcond
 !  09-oct-03/wolf: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
 !
       select case (topbot)
@@ -5595,7 +5704,7 @@ module Boundcond
 !  09-oct-03/wolf: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
 !
       select case (topbot)
@@ -5629,7 +5738,7 @@ module Boundcond
 !  09-oct-03/wolf: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j,n1p4,n2m4
 !
 !  abbreviations, because otherwise the ifc compiler complains
@@ -5672,7 +5781,7 @@ module Boundcond
 !  18-dec-08/wlad: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j,i
       real :: yl1,ypi,ymi,xl1,xmi,xpi,yyi,xl2,yl2
 !
@@ -5713,7 +5822,7 @@ module Boundcond
 !
 !  17-may-23/hongzhe: coded
 !
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer, intent(IN) :: topbot
       integer :: j
       real :: pj
@@ -5756,7 +5865,7 @@ module Boundcond
 !
 !  05-jun-18/ccyang: coded.
 !
-      real, dimension(:,:,:,:), intent(inout) :: f
+      real, contiguous, dimension(:,:,:,:), intent(inout) :: f
       integer, intent(IN) :: topbot
       integer, intent(in) :: j
 !
@@ -5793,7 +5902,7 @@ module Boundcond
 !  23-nov-10/Bourdin.KIS: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: i, j
 !
       real, dimension (size(f,1),size(f,2)) :: slope
@@ -5827,7 +5936,7 @@ module Boundcond
 !  23-nov-10/Bourdin.KIS: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: i, j
 !
       real, dimension (size(f,1),size(f,2)) :: m
@@ -5867,7 +5976,7 @@ module Boundcond
       use SharedVariables, only: get_shared_variable
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: i, j
 !
       real, dimension (size(f,1),size(f,2)) :: slope
@@ -5888,7 +5997,7 @@ module Boundcond
         if (t > tfade_start) then
           if (t < tdamp) then
             ! tau is a normalized t, the transition interval is [-0.5, 0.5]:
-            tau = (t-tfade_start) / (tdamp-tfade_start) - 0.5
+            tau = real((t-tfade_start) / (tdamp-tfade_start) - 0.5)
             fade_fact = 0.5 * (1 - tau * (3 - 4*tau**2))
             ! apply damping with fading:
             gamma_bot = 1.0 - abs (fbcz_bot(j)) * fade_fact
@@ -5935,7 +6044,7 @@ module Boundcond
 !  11-apr-11/Bourdin.KIS: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:), intent(inout) :: f
+      real, contiguous, dimension (:,:,:,:), intent(inout) :: f
       integer, intent(in) :: j
 !
       integer :: i
@@ -6008,7 +6117,7 @@ module Boundcond
 !  13-aug-2002/nils: moved into boundcond
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
 !
       real, dimension (size(f,1),size(f,2)) :: fder
@@ -6051,7 +6160,7 @@ module Boundcond
 !  13-aug-2002/nils: moved into boundcond
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
 !
       real, dimension (size(f,2),size(f,3)) :: fder
@@ -6094,7 +6203,7 @@ module Boundcond
       use EquationOfState, only: cs2top, cs2bot
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: sgn,i,j
 !
       select case (topbot)
@@ -6166,7 +6275,7 @@ module Boundcond
       use SharedVariables, only : get_shared_variable
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       real, pointer :: ampl_forc, k_forc, w_forc
       integer :: sgn, i, j
 !
@@ -6183,7 +6292,7 @@ module Boundcond
       case(BOT)
          select case (force_lower_bound)
          case ('vel_time')
-           f(l1,:,:,iuy) = spread(ampl_forc*sin(k_forc*y)*cos(w_forc*t), 2, size(f,3))
+           f(l1,:,:,iuy) = spread(ampl_forc*sin(k_forc*y)*cos(w_forc*real(t)), 2, size(f,3))
          case default
             call fatal_error('bc_force_x','no such force_lower_bound: '//trim(force_lower_bound))
          endselect
@@ -6197,7 +6306,7 @@ module Boundcond
       case(TOP)
          select case (force_upper_bound)
          case ('vel_time')
-            f(l2,:,:,iuy) = spread(ampl_forc*sin(k_forc*y)*cos(w_forc*t), 2, size(f,3))
+            f(l2,:,:,iuy) = spread(ampl_forc*sin(k_forc*y)*cos(w_forc*real(t)), 2, size(f,3))
          case default
             call fatal_error("bc_force_x","no such force_upper_bound: "//trim(force_upper_bound))
          endselect
@@ -6217,7 +6326,7 @@ module Boundcond
 !
 !  26-apr-2004/wolf: coded
 !
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: idz,j
       real :: kx,ky
 !
@@ -6242,7 +6351,7 @@ module Boundcond
 !  26-apr-2004/wolf: coded
 !  10-apr-2005/axel: adapted for A
 !
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: idz,j
       real :: kx,ky
 !
@@ -6266,7 +6375,7 @@ module Boundcond
 !
 !  11-jul-02/wolf: coded
 !
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
       integer, intent(IN) :: topbot
 !
@@ -6290,7 +6399,7 @@ module Boundcond
 !
 !  11-jul-02/wolf: coded
 !
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
       integer, intent(IN) :: topbot
 !
@@ -6314,7 +6423,7 @@ module Boundcond
 !
 !  11-jul-02/wolf: coded
 !
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
       integer, intent(IN) :: topbot
 !
@@ -6408,7 +6517,7 @@ module Boundcond
        use File_io, only : file_exists
        use Mpicomm, only : mpisend_real, mpirecv_real
 !
-       real, dimension (:,:,:,:), intent (inout) :: f
+       real, contiguous, dimension (:,:,:,:), intent (inout) :: f
        logical, optional :: quenching
 !
        real, allocatable, dimension(:,:), save :: uxl,uxr,uyl,uyr
@@ -6427,10 +6536,10 @@ module Boundcond
        integer, parameter :: unit=1
        integer(KIND=ikind8) :: rlen
 !
-       if(.not. allocated(uxl)) allocate(uxl(nx,ny))
-       if(.not. allocated(uxr)) allocate(uxr(nx,ny))
-       if(.not. allocated(uyl)) allocate(uyl(nx,ny))
-       if(.not. allocated(uyr)) allocate(uyr(nx,ny))
+       if (.not. allocated(uxl)) allocate(uxl(nx,ny))
+       if (.not. allocated(uxr)) allocate(uxr(nx,ny))
+       if (.not. allocated(uyl)) allocate(uyl(nx,ny))
+       if (.not. allocated(uyr)) allocate(uyr(nx,ny))
 
        if (ldownsampling) then
          call warning('uu_driver','Not available for downsampling')  !,lfirst_proc_xy)
@@ -6465,7 +6574,7 @@ module Boundcond
              read (unit,rec=frame+1,iostat=ierr) tr
              if (ierr /= 0) then
                frame=1
-               delta_t = t*unit_time                  ! EOF is reached => read again
+               delta_t = real(t*unit_time)                  ! EOF is reached => read again
                read (unit,rec=frame,iostat=ierr) tl
                read (unit,rec=frame+1,iostat=ierr) tr
                ierr=-1
@@ -6557,18 +6666,18 @@ module Boundcond
            call mpirecv_real (uyr, (/ nx, ny /), 0, tag_yr)
          endif
 !
-         uxl = uxl / 10. / unit_velocity
-         uxr = uxr / 10. / unit_velocity
-         uyl = uyl / 10. / unit_velocity
-         uyr = uyr / 10. / unit_velocity
+         uxl = real(uxl / 10. / unit_velocity)
+         uxr = real(uxr / 10. / unit_velocity)
+         uyl = real(uyl / 10. / unit_velocity)
+         uyr = real(uyr / 10. / unit_velocity)
 !
        endif
 !
 !   simple linear interploation between timesteps
 !
        if (tr /= tl) then
-         uxd  = (t*unit_time - (tl+delta_t)) * (uxr - uxl) / (tr - tl) + uxl
-         uyd  = (t*unit_time - (tl+delta_t)) * (uyr - uyl) / (tr - tl) + uyl
+         uxd  = real((t*unit_time - (tl+delta_t)) * (uxr - uxl) / (tr - tl) + uxl)
+         uyd  = real((t*unit_time - (tl+delta_t)) * (uyr - uyl) / (tr - tl) + uyl)
        else
          uxd = uxl
          uyd = uyl
@@ -6685,13 +6794,15 @@ module Boundcond
       use Fourier, only : setup_extrapol_fact, field_extrapol_z_parallel
       use Mpicomm, only : mpisend_real, mpirecv_real, &
                           mpisend_logical, mpirecv_logical
+      use General, only: idiv
 !
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       real, save :: t_l=0., t_r=0., delta_t=0.
       integer :: ierr, lend, frame, stat, rec_l, rec_r
       integer :: rec_vxl, rec_vxr, rec_vyl, rec_vyr ! l- and r-record position if file
-      integer, parameter :: bnx=nxgrid, bny=ny/nprocx ! data in pencil shape
-      integer, parameter :: enx=nygrid, eny=nx/nprocy ! transposed data in pencil shape
+      integer, parameter :: bnx=nxgrid ! data in pencil shape
+      integer, parameter :: enx=nygrid ! transposed data in pencil shape
+      integer :: bny,eny
       integer :: px, py, partner
       integer, parameter :: tag_l=208, tag_r=209, tag_dt=210
       logical, save :: luse_vel_field = .false., first_run = .true.
@@ -6717,6 +6828,8 @@ module Boundcond
       character (len=*), parameter :: mag_times_dat = 'driver/mag_times.dat'
       character (len=*), parameter :: mag_vel_field_dat = 'driver/mag_vel_field.dat'
 !
+      bny=idiv(ny,nprocx)
+      eny=idiv(nx,nprocy)
       if (ldownsampling) then
         call warning('bc_force_aa_time','Not available for downsampling')   !,lfirst_proc_xy)
         return
@@ -6783,7 +6896,7 @@ module Boundcond
       allocate(Bz0(bnx,bny),stat=stat)
       if (stat>0) call fatal_error('bc_force_aa_time','Could not allocate Bz0',.true.)
 !
-      time_SI = t*unit_time
+      time_SI = real(t*unit_time)
 !
       if (t_r+delta_t <= time_SI) then
 !
@@ -6913,14 +7026,14 @@ module Boundcond
         endif
 !
         ! Gauss to Tesla and SI to PENCIL units
-        Bz0_l = Bz0_l * 1e-4 / unit_magnetic
-        Bz0_r = Bz0_r * 1e-4 / unit_magnetic
+        Bz0_l = real(Bz0_l * 1e-4 / unit_magnetic)
+        Bz0_r = real(Bz0_r * 1e-4 / unit_magnetic)
 !
         if (luse_vel_field) then
-          vx_l = vx_l / unit_velocity
-          vy_l = vy_l / unit_velocity
-          vx_r = vx_r / unit_velocity
-          vy_r = vy_r / unit_velocity
+          vx_l = real(vx_l / unit_velocity)
+          vy_l = real(vy_l / unit_velocity)
+          vx_r = real(vx_r / unit_velocity)
+          vy_r = real(vy_r / unit_velocity)
         endif
 !
       endif
@@ -6957,7 +7070,7 @@ module Boundcond
 !
       use SharedVariables, only: get_shared_variable
 !
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer, intent(IN) :: topbot
 !
       real, pointer :: hcond0, hcond1, Fbot
@@ -7002,7 +7115,7 @@ module Boundcond
 !
       use SharedVariables, only: get_shared_variable
 !
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer, intent(IN) :: topbot
 !
       real, dimension (size(f,1),size(f,2)) :: tmp_xy
@@ -7051,7 +7164,7 @@ module Boundcond
       use EquationOfState, only: lnrho0, cs20, get_gamma_etc
       use SharedVariables, only: get_shared_variable
 !
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer, intent(IN) :: topbot
 !
       real, dimension (:,:), allocatable :: tmp_yz, work_yz, Krho1kr_yz
@@ -7226,8 +7339,8 @@ module Boundcond
           endif
 !
           if (lheatc_kramers.or.lheatc_chiconst) then
-            call get_shared_variable('Fbot',Fbot)
-            if ((headtt) .and. (lroot)) print*,'bc_ss_flux_x: Fbot=',Fbot
+            call get_shared_variable('Ftop',Ftop)
+            if ((headtt) .and. (lroot)) print*,'bc_ss_flux_x: Ftop=',Ftop
           endif
 !
           if (lheatc_kramers) then
@@ -7278,7 +7391,7 @@ module Boundcond
 !
       use Deriv, only: heatflux_deriv_x
 !
-      real, dimension(:,:,:,:),       intent(INOUT):: f
+      real, contiguous, dimension(:,:,:,:),       intent(INOUT):: f
       real, dimension(:,:),           intent(IN)   :: inh
       real, dimension(:,:), optional, intent(IN)   :: coef
       real                          , intent(IN)   :: fac
@@ -7319,7 +7432,7 @@ module Boundcond
 !
       use Fourier, only: fourier_transform_xy_xy, kx_fft, ky_fft
 !
-      real, dimension (:,:,:,:), intent (inout) :: f
+      real, contiguous, dimension (:,:,:,:), intent (inout) :: f
       integer, intent(IN) :: topbot
       integer, intent (in) :: j
 !
@@ -7409,7 +7522,7 @@ module Boundcond
 !
 !  11-aug-2009/anders: implemented
 !
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer, intent(IN) :: topbot
       integer :: j
 !
@@ -7439,7 +7552,7 @@ module Boundcond
 !
 !  13-jul-2011/Tijmen: adapted from bc_zero_x
 !
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer, intent(IN) :: topbot
       integer :: j
 !
@@ -7469,7 +7582,7 @@ module Boundcond
 !
 !  13-aug-2007/anders: implemented
 !
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer, intent(IN) :: topbot
       integer :: j
 !
@@ -7505,7 +7618,7 @@ module Boundcond
 !  25-dec-2010/Bourdin.KIS: adapted from 'bc_outflow_z'
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
       logical, optional :: lforce_ghost
 !
@@ -7571,7 +7684,7 @@ module Boundcond
 !  14-jun-2011/axel: adapted from bc_outflow_z
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
       logical, optional :: lforce_ghost
 !
@@ -7637,7 +7750,7 @@ module Boundcond
 !  25-jan-2026/TP: adapted from 'bc_outflow_x'
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
       logical, optional :: lforce_ghost
 !
@@ -7703,7 +7816,7 @@ module Boundcond
 !  14-jun-2011/axel: adapted from bc_outflow_x
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
       logical, optional :: lforce_ghost
 !
@@ -7774,7 +7887,7 @@ module Boundcond
 !  08-oct-2013/wlad: copied from z
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
       logical, optional :: lforce_ghost
 !
@@ -7841,7 +7954,7 @@ module Boundcond
 !  25-dec-2010/Bourdin.KIS: added forcing of boundary and ghost cell values
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
       logical, optional :: lforce_ghost
 !
@@ -7906,7 +8019,7 @@ module Boundcond
 !  27-dec-2010/Bourdin.KIS: adapted from 'bc_outflow_const_deriv_z'
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
 !
       integer :: i, ix, iy
@@ -7960,7 +8073,7 @@ module Boundcond
 !  27-dec-2010/Bourdin.KIS: adapted from 'bc_outflow_z'
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
 !
       integer :: i, ix, iy
@@ -8013,7 +8126,7 @@ module Boundcond
 !  10-jul-2012/Bourdin.KIS: adapted from 'bc_inflow_zero_deriv_z'
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
 !
       integer :: i, ix, iy
@@ -8060,7 +8173,7 @@ module Boundcond
 !  10-jul-2012/Bourdin.KIS: adapted from 'bc_outflow_zero_deriv_z'
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
 !
       integer :: i, ix, iy
@@ -8108,7 +8221,7 @@ module Boundcond
 !  14-mar-2011/fred: amended
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
 !
       integer :: i, ix, iy
@@ -8166,7 +8279,7 @@ module Boundcond
 !  11-aug-2009/anders: implemented
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
 !
       integer :: i
@@ -8198,7 +8311,7 @@ module Boundcond
 !  08-june-2010/wlyra: implemented
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
 !
       integer :: i
@@ -8236,7 +8349,7 @@ module Boundcond
 !  08-june-2010/wlyra: implemented
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       real :: value
       integer :: j,l,n
 !
@@ -8281,7 +8394,7 @@ module Boundcond
 !  15-aug-2007/anders: implemented
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
 !
       integer :: i
@@ -8309,7 +8422,7 @@ module Boundcond
     subroutine bc_expother_x(f,topbot,j,jsrc)
 
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j,jsrc
 
       select case (topbot)
@@ -8335,7 +8448,7 @@ module Boundcond
     subroutine bc_expother_y(f,topbot,j,jsrc)
 
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j,jsrc
 
       select case (topbot)
@@ -8361,7 +8474,7 @@ module Boundcond
     subroutine bc_expother_z(f,topbot,j,jsrc)
 
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j,jsrc
 
       select case (topbot)
@@ -8399,7 +8512,7 @@ module Boundcond
 !  22-mar-2018/piyali: copied from bc_copy_z_noinflow
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j
 !
       real :: value
@@ -8478,7 +8591,7 @@ module Boundcond
 !
       use SharedVariables, only: get_shared_variable
 !
-      real, dimension (:,:,:,:), intent (inout) :: f
+      real, contiguous, dimension (:,:,:,:), intent (inout) :: f
       integer, intent(IN) :: topbot
 !
       integer :: i
@@ -8524,7 +8637,7 @@ module Boundcond
 !
       use SharedVariables, only: get_shared_variable
 !
-      real, dimension (:,:,:,:), intent (inout) :: f
+      real, contiguous, dimension (:,:,:,:), intent (inout) :: f
       integer, intent(IN) :: topbot
 !
       integer :: i
@@ -8567,7 +8680,7 @@ module Boundcond
 !
       use General, only: keep_compiler_quiet
 !
-      real, dimension(:,:,:,:) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
 !
       call bc_aa_pot_field_extrapol(f,BOT,.true.)
       call bc_aa_pot_field_extrapol(f,TOP,.true.)
@@ -8588,7 +8701,7 @@ module Boundcond
       use Fourier, only: vect_pot_extrapol_z_parallel, kx_fft, ky_fft
       use General, only: loptest
 !
-      real, dimension (:,:,:,:), intent (inout) :: f
+      real, contiguous, dimension (:,:,:,:), intent (inout) :: f
       integer, intent(IN) :: topbot
       logical, optional :: lfinalize
 !
@@ -8596,6 +8709,7 @@ module Boundcond
       integer, parameter :: bnx=nygrid, bny=nx/nprocy
       integer :: kx_start, stat, pos_z
       real :: delta_z, reduce_factor=1.
+      integer :: ix,iy,iz
 !
       if (ldownsampling) then
         call warning('bc_force_aa_time','not available for downsampling')   !,lfirst_proc_xy)
@@ -8628,8 +8742,9 @@ module Boundcond
           if (stat > 0) call fatal_error ('bc_aa_pot_field_extrapol', 'could not allocate exp_fact_bot', .true.)
           ! Get wave numbers already in transposed pencil shape and calculate exp(|k|)
           kx_start = (ipx+ipy*nprocx)*bny
-          exp_fact_bot = spread (exp (sqrt (spread (ky_fft(1:bnx), 2, bny) ** 2 + &
-                                            spread (kx_fft(kx_start+1:kx_start+bny), 1, bnx) ** 2)), 3, nghost)
+          do ix=1,bnx; do iy=1,bny; do iz=1,nghost
+            exp_fact_bot(ix,iy,iz) = exp(sqrt(ky_fft(ix) ** 2 + kx_fft(kx_start+iy) ** 2 ))
+          enddo; enddo; enddo
           do pos_z = 1, nghost
             ! dz is positive => enhance structures or contrast
             delta_z = reduce_factor * (z(n1) - z(n1-nghost+pos_z-1))
@@ -8646,8 +8761,9 @@ module Boundcond
           if (stat > 0) call fatal_error ('bc_aa_pot_field_extrapol', 'could not allocate exp_fact_top', .true.)
           ! Get wave numbers already in transposed pencil shape and calculate exp(|k|)
           kx_start = (ipx+ipy*nprocx)*bny
-          exp_fact_top = spread (exp (sqrt (spread (ky_fft(1:bnx), 2, bny) ** 2 + &
-                                            spread (kx_fft(kx_start+1:kx_start+bny), 1, bnx) ** 2)), 3, nghost)
+          do ix=1,bnx; do iy=1,bny; do iz=1,nghost
+            exp_fact_top(ix,iy,iz) = exp(sqrt(ky_fft(ix) ** 2 + kx_fft(kx_start+iy) ** 2 ))
+          enddo; enddo; enddo
           do pos_z = 1, nghost
             ! dz is negative => decay of structures
             delta_z = z(n2) - z(n2+pos_z)
@@ -8675,7 +8791,7 @@ module Boundcond
 !
       use Fourier, only: fourier_transform_xy_xy, kx_fft, ky_fft
 !
-      real, dimension (:,:,:,:), intent (inout) :: f
+      real, contiguous, dimension (:,:,:,:), intent (inout) :: f
       integer, intent(IN) :: topbot
 !
       real, dimension (l2-l1+1,m2-m1+1,iax:iaz) :: aa_re,aa_im
@@ -8768,7 +8884,7 @@ module Boundcond
 !
       use Fourier, only: fourier_transform_xy_xy, fourier_transform_y_y, kx_fft, ky_fft
 !
-      real, dimension (:,:,:,:), intent (inout) :: f
+      real, contiguous, dimension (:,:,:,:), intent (inout) :: f
       integer, intent(IN) :: topbot
 !
       real, dimension (l2-l1+1,m2-m1+1,iax:iaz) :: aa_re,aa_im
@@ -8871,7 +8987,7 @@ module Boundcond
 !  14-jun-2002/axel: adapted from similar
 !   8-jul-2002/axel: introduced topbot argument
 !
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer, intent(IN) :: topbot
 !
       real, dimension (l2-l1+1,m2-m1+1) :: f2,f3
@@ -9032,7 +9148,7 @@ module Boundcond
 !  define wave vector
 !
       kx=cshift((/(i-nxl/2,i=0,nxl-1)/),+nxl/2)*2*pi/Lx
-      ky=cshift((/(i-nygrid/2,i=0,nygrid-1)/),+nygrid/2)*2*pi/Ly
+      ky=cshift((/(i-idiv(nygrid,2),i=0,nygrid-1)/),+idiv(nygrid,2))*2*pi/Ly
 !
 !  calculate 1/k^2, zero mean
 !
@@ -9079,7 +9195,7 @@ module Boundcond
 !  18-06-2008/bing: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: i,j,ipt,ntb=-1
       real :: massflux,u_add
       real :: local_flux,local_mass
@@ -9187,7 +9303,7 @@ module Boundcond
 !
       real, pointer :: Fbot
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       real, dimension (size(f,1)) :: tmp_x
       integer :: i
 !
@@ -9218,7 +9334,7 @@ module Boundcond
 !
       use SharedVariables, only : get_shared_variable
 !
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: idz, j
       real    :: kx
       real, pointer, save :: ampl_forc, k_forc, w_forc, x_forc, dx_forc
@@ -9243,9 +9359,9 @@ module Boundcond
 !
       if (k_forc /= impossible) then
         kx=2*pi/Lx*k_forc
-        f(:,:,idz,j) = spread(ampl_forc*sin(kx*x)*cos(w_forc*t), 2, size(f,2))
+        f(:,:,idz,j) = spread(ampl_forc*sin(kx*x)*cos(w_forc*real(t)), 2, size(f,2))
       else
-        f(:,:,idz,j) = spread(ampl_forc*exp(-((x-x_forc)/dx_forc)**2)*cos(w_forc*t), 2, size(f,2))
+        f(:,:,idz,j) = spread(ampl_forc*exp(-((x-x_forc)/dx_forc)**2)*cos(w_forc*real(t)), 2, size(f,2))
       endif
 !
     endsubroutine bc_force_ux_time
@@ -9262,7 +9378,7 @@ module Boundcond
 ! NB! Assumes y to have the range 0 < y < 2pi
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j,i
       real :: val
 !
@@ -9312,7 +9428,7 @@ module Boundcond
       use Gravity, only: gravz
       use EquationOfState, only : cs20
 !
-      real, dimension (:,:,:,:), intent (inout) :: f
+      real, contiguous, dimension (:,:,:,:), intent (inout) :: f
       integer, intent(IN) :: topbot
       real    :: haut
       integer :: i
@@ -9339,7 +9455,7 @@ module Boundcond
 !  25-Oct-10/tijmen & bing: coded
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: i,j
 !
       select case (topbot)
@@ -9375,7 +9491,7 @@ module Boundcond
 !
       use Fourier, only: fourier_transform_other, kx_fft
 !
-      real, dimension (:,:,:,:), intent (inout) :: f
+      real, contiguous, dimension (:,:,:,:), intent (inout) :: f
       integer, intent(IN) :: topbot
       real, dimension (nxgrid) :: fft_az_r,fft_az_i,A_r,A_i,exp_fact
       real, dimension (nxgrid) :: iay_global
@@ -9451,7 +9567,7 @@ module Boundcond
 !  14-mar-11/fred: check that 'cdz' is also set for bcz density.
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j,k
       real, dimension (size(f,1),size(f,2),size(f,3)) :: lnrho_
 !
@@ -9496,7 +9612,7 @@ module Boundcond
 !                  Eq.(5)
 !
       integer, intent(IN) :: topbot
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: j,k
 !
       select case (topbot)
@@ -9532,7 +9648,7 @@ module Boundcond
 !
 !  At the moment only the x-direction is implemented
 !
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       real, intent(in) :: rhob
       character (len=bclen), intent(in) :: boundtype,dirn
       integer, intent(IN) :: topbot
@@ -9589,7 +9705,7 @@ module Boundcond
 !***********************************************************************
     subroutine set_consistent_vel_boundary(f,dirn,boundtype,topbot,comp,lsuccess)
 !
-!  This subroutine checks, if the velocity paramters like type and  topbot
+!  This subroutine checks, if the velocity paramters like type and topbot
 !  are set consistently with eg. the initial condition.
 !
 !  14-sep-12/joern: coded, adapted from subroutine set_consistent_density_boundary
@@ -9602,7 +9718,7 @@ module Boundcond
 !
 !  At the moment only the x-direction is implemented
 !
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       character (len=bclen), intent(in) :: boundtype,dirn,comp
       integer, intent(in) :: topbot
       logical, intent(out) :: lsuccess
@@ -9688,7 +9804,7 @@ module Boundcond
 !
 ! sets periodic boundary condition on auxiliar variables
 !
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer :: ivar
 !
       call bc_per_x(f,TOP,ivar); call bc_per_x(f,BOT,ivar)
@@ -9699,7 +9815,7 @@ module Boundcond
 !***********************************************************************
     subroutine tayler_expansion(f,topbot,j,dir)
 !
-      real, dimension (:,:,:,:) :: f
+      real, contiguous, dimension (:,:,:,:) :: f
       integer, intent(IN) :: topbot
       integer :: j
       character :: dir

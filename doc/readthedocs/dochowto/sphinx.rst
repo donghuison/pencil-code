@@ -201,6 +201,11 @@ If you already have Python tooling installed, you can build the docs directly.
       sphinx-rtd-theme
       rstcloth
       six
+      latexcodec
+      bibtexparser
+      pybtex
+      sphinxcontrib.bibtex
+      matplotlib
 
 #. Build the documentation as follows:
 

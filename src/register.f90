@@ -256,7 +256,7 @@ module Register
 !$    use OMP_lib
 !!$    use mt
 !
-      real, dimension(mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
 !
 !  Defaults for some logicals; will later be set to true if needed.
 !
@@ -288,7 +288,7 @@ module Register
         if (lroot.and.leos_ionization.and.ip<14) print*,'initialize_modules: ' &
           //'unit_velocity, unit_density, etc, are in cgs'
         hbar=hbar_cgs/(unit_energy*unit_time)
-        mu0=mu0_cgs*unit_density*(unit_velocity/unit_magnetic)**2
+        mu0=real(mu0_cgs*unit_density*(unit_velocity/unit_magnetic)**2)
         if (unit_temperature/=impossible) then
           sigmaSB=sigmaSB_cgs/(unit_flux/unit_temperature**4)
           k_B=k_B_cgs/(unit_energy/unit_temperature)
@@ -309,7 +309,7 @@ module Register
         if (lroot.and.leos_ionization) print*, &
             'initialize_modules: unit_velocity, unit_density, etc, are in SI'
         hbar=hbar_cgs*1e-7/(unit_energy*unit_time)
-        mu0=1e-7*mu0_cgs*unit_density*(unit_velocity/unit_magnetic)**2
+        mu0=real(1e-7*mu0_cgs*unit_density*(unit_velocity/unit_magnetic)**2)
         if (unit_temperature/=impossible) then
           sigmaSB=sigmaSB_cgs*1e-3/(unit_flux/unit_temperature**4)
           k_B=1e-7*k_B_cgs/(unit_energy/unit_temperature)
@@ -428,12 +428,14 @@ module Register
       call initialize_shock(f)
       call initialize_viscosity
       call initialize_special(f)
-      call initialize_border_profiles
       call initialize_solid_cells(f)
       call initialize_implicit_physics(f)
       call initialize_heatflux(f)
       call initialize_pointmasses(f)
-      if (lrun) call initialize_training(f)
+      if (lrun) then
+        call initialize_training(f)
+        call initialize_border_profiles    ! has to come after all physics modules registering PDE variables
+      endif
 !
 !  Check if MAUX is consistent with what is required.
 !
@@ -462,7 +464,7 @@ module Register
       use Special,        only: finalize_special
       use Training,       only: finalize_training
 !
-      real, dimension(mx,my,mz,mfarray) :: f
+      real, contiguous, dimension(:,:,:,:) :: f
 !
       call particles_finalize
       call finalize_special(f)
@@ -1117,6 +1119,11 @@ module Register
         call parse_name(iname,cname(iname),cform(iname),'timeperstep',idiag_timeperstep)
         call parse_name(iname,cname(iname),cform(iname),'eps_rkf',idiag_eps_rkf)
       enddo
+      if (idiag_dtv /= 0 .or. &
+          idiag_dtdiffus /= 0 .or. &
+          idiag_dtdiffus2 /= 0 .or. &
+          idiag_dtdiffus3 /= 0 .or. &
+          idiag_Rmesh /= 0 .or. idiag_Rmesh3 /=0) ltimestep_diagnostics = .true.
 !
 !  phi-averages
 !

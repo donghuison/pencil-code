@@ -20,14 +20,12 @@
 
 #include "headers_c.h"
 
-void torch_train_c_api(REAL*, int, double); 
-void torch_infer_c_api(int);
 void registerGPU();
-void initializeGPU(REAL*, FINT, double, FINT, FINT, FINT);
+void initializeGPU(REAL*, FINT, double, FINT, FINT, FINT, FINT);
 void finalizeGPU();
 void getFArrayIn(REAL **);
 void substepGPU(int, double);
-void beforeBoundaryGPU(bool, int, double);
+void beforeBoundaryGPU(bool, int, double, bool);
 void afterSubStepGPU();
 void radTransfer();
 void copyFarray(REAL*);
@@ -37,12 +35,22 @@ void updateInConfigArr(int);
 int  updateInConfigArrName(char *);
 void updateInConfigScal(int,REAL);
 int  updateInConfigScalName(char *, REAL);
-void testRHS(REAL*,REAL*);
-void gpuSetDt(double t);
+void prepareForFirstSubstep(double t);
 void random_initial_condition(void);
 void getGPUReducedVars(REAL* dst);
 void testBCs(void);
 void splitUpdate(const REAL,const FINT);
+
+// Torchfort
+void tf_save_checkpoint_c_api(const char*, const char*);
+void tf_save_model_c_api(const char*, const char*);
+void tf_load_model_c_api(const char*, const char*);
+void tf_load_model_checkpoint_c_api(const char*, const char*);
+void tf_create_model_c_api(const char*, const char*, FINT, bool);
+void torch_train_c_api(REAL*, int, double); 
+void torch_infer_c_api(int);
+void print_debug();
+
 
 // for Gnu Compiler
 extern char *__cparam_MOD_coornames;
@@ -68,9 +76,38 @@ void FTNIZE(torchinfer_c)(FINT* itsub)
 	torch_infer_c_api(*itsub);
 }
 /* ---------------------------------------------------------------------- */
+void FTNIZE(tf_create_model_c)(const char *model_name, const char *config_file_path, FINT* comm_fint, FINT* lmpicomm){
+	tf_create_model_c_api(model_name, config_file_path, *comm_fint, (* lmpicomm ==1) ? true : false);
+}
+/* ---------------------------------------------------------------------- */
+void FTNIZE(print_snapshot_c)(){
+	print_debug();
+}
+/* ---------------------------------------------------------------------- */
+void FTNIZE(tf_load_model_c)(const char* model_name, const char* fname)
+{
+	tf_load_model_c_api(model_name, fname);
+}
+/* ---------------------------------------------------------------------- */
+void FTNIZE(tf_load_model_checkpoint_c)(const char* model_name, const char* checkpoint_dir)
+{
+	tf_load_model_checkpoint_c_api(model_name, checkpoint_dir);
+}
+/* ---------------------------------------------------------------------- */
+void FTNIZE(tf_save_model_c)(const char* model_name, const char* fname)
+{
+	tf_save_model_c_api(model_name, fname);
+}
+/* ---------------------------------------------------------------------- */
+void FTNIZE(tf_save_checkpoint_c)(const char* model_name, const char* checkpoint_dir)
+{
+	tf_save_checkpoint_c_api(model_name, checkpoint_dir);
+}
+/* ---------------------------------------------------------------------- */
 void FTNIZE(initialize_gpu_c)(REAL* f, FINT* comm_fint, double* t, FINT* nt,
 				FINT* lread_all_vars_from_device_,
-				FINT* lcpu_timestep_on_gpu_
+				FINT* lcpu_timestep_on_gpu_,
+				FINT* lac_sparse_autotuning_
 				)
 {
 // Initializes GPU.  
@@ -86,7 +123,7 @@ void FTNIZE(initialize_gpu_c)(REAL* f, FINT* comm_fint, double* t, FINT* nt,
   //printf("dz = %f\n", __cdata_MOD_dz);
 
   initializeGPU(f, *comm_fint,*t,*nt,*lread_all_vars_from_device_,
-		  *lcpu_timestep_on_gpu_);
+		  *lcpu_timestep_on_gpu_,*lac_sparse_autotuning_);
 /*
   printf("xmin = %e\n", x[4]);
   printf("xmax = %e\n", x[nx-1+3]);
@@ -116,11 +153,11 @@ void FTNIZE(get_farray_ptr_gpu_c)(REAL** p_f_in)
   getFArrayIn(p_f_in);
 }
 /* ---------------------------------------------------------------------- */
-void FTNIZE(before_boundary_gpu_c)(FINT *lrmv, FINT *isubstep, double *t)
+void FTNIZE(before_boundary_gpu_c)(FINT *lrmv, FINT *isubstep, double *t, FINT *lsubstepping_in_time)
 {
   beforeBoundaryGPU(
 		  (*lrmv == 1) ? true : false,
-		  *isubstep,*t);
+		  *isubstep,*t,*lsubstepping_in_time);
 }
 /* ---------------------------------------------------------------------- */
 void FTNIZE(update_after_substep_gpu_c)()
@@ -207,14 +244,9 @@ int FTNIZE(update_on_gpu_arr_by_name_c)(char *varname)
   return updateInConfigArrName(varname);
 }
 /* ---------------------------------------------------------------------- */
-void FTNIZE(test_rhs_c)(REAL* f_in, REAL* df_truth)
+void FTNIZE(gpu_prepare_for_first_substep_c)(double* t)
 {
-  testRHS(f_in,df_truth);
-}
-/* ---------------------------------------------------------------------- */
-void FTNIZE(gpu_set_dt_c)(double* t)
-{
-  gpuSetDt(*t);
+  prepareForFirstSubstep(*t);
 }
 /* ---------------------------------------------------------------------- */
 void FTNIZE(radtransfer_gpu_c)(){
@@ -236,3 +268,10 @@ void FTNIZE(split_update_gpu_c)(void)
 	splitUpdate(1e-15,1000000);
 }
 /* ------------------------------------------------------------------- */
+/*                                                                        
+void FTNIZE(torchfort_save_model)(const char* model_name, const char* fil ename)
+{                                                                         
+	torchFortSaveModel(model_name, filename);                               
+}                                                                         
+*/                                                                        
+/* ------------------------------------------------------------------- */ 
