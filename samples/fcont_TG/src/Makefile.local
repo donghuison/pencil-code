@@ -1,0 +1,6 @@
+MPICOMM   =   mpicomm
+FORCING   =   forcing
+HYDRO     =   hydro
+DENSITY   =   density
+REAL_PRECISION = double
+

@@ -1173,7 +1173,7 @@ module Dustvelocity
 !
         if (ldragforce_gas) then
           tausg1 = p%rhod(ix,k)*tausd1(ix,k)*p%rho1(ix)
-          if (tausgmin/=0.0 .and. tausg1 >= tausg1max) tausg1=tausg1max
+          if (tausgmin/=0.0) tausg1=min(tausg1,tausg1max)
           df(ix+nghost,m,n,iux:iuz) = df(ix+nghost,m,n,iux:iuz) - tausg1*(p%uu(ix,:)-p%uud(ix,:,k))
           if (lupdate_courant_dt) dt1_max(ix)=max(dt1_max(ix),(tausg1+tausd1(ix,k))/cdtd)
         else
@@ -1687,13 +1687,15 @@ module Dustvelocity
 !
     endsubroutine get_stoppingtime
 !***********************************************************************
-    subroutine read_dustvelocity_init_pars(iostat)
+    subroutine read_dustvelocity_init_pars(iomsg)
 !
       use File_io, only: parallel_unit
 !
-      integer, intent(out) :: iostat
+      character(LEN=*), intent(out) :: iomsg
+      integer :: iostat
 !
-      read(parallel_unit, NML=dustvelocity_init_pars, IOSTAT=iostat)
+      read(parallel_unit, NML=dustvelocity_init_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
 !
     endsubroutine read_dustvelocity_init_pars
 !***********************************************************************
@@ -1705,13 +1707,15 @@ module Dustvelocity
 !
     endsubroutine write_dustvelocity_init_pars
 !***********************************************************************
-    subroutine read_dustvelocity_run_pars(iostat)
+    subroutine read_dustvelocity_run_pars(iomsg)
 !
       use File_io, only: parallel_unit
 !
-      integer, intent(out) :: iostat
+      character(LEN=*), intent(out) :: iomsg
+      integer :: iostat
 !
-      read(parallel_unit, NML=dustvelocity_run_pars, IOSTAT=iostat)
+      read(parallel_unit, NML=dustvelocity_run_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
 !
     endsubroutine read_dustvelocity_run_pars
 !***********************************************************************
@@ -1919,6 +1923,7 @@ module Dustvelocity
      call copy_addr(nud_hyper3,p_par(56)) ! (ndustspec)
      call copy_addr(nud_shock,p_par(57)) ! (ndustspec)
      call copy_addr(nud_hyper3_mesh,p_par(58)) ! (ndustspec)
+     call copy_addr(md,p_par(59)) ! (ndustspec)
 
    endsubroutine pushpars2c
 !***********************************************************************

@@ -13,10 +13,6 @@
 #include "../entropy/after_boundary.h"
 #include "../implicit_diffusion.h"
 
-//TP: the training code needs to be improved that it can be included always (requires conditionals when to do the calculations)
-#if LTRAINING
-#include "../training/train.h"
-#endif
 
 
 input real AC_dt
@@ -84,6 +80,7 @@ ComputeSteps AC_before_boundary_steps(boundconds)
 	entropy_mean_derivs_x()
 	entropy_mean_derivs_z()
 	entropy_smooth(AC_lrmv)
+	kinematic_flow(AC_step_num,AC_dt,AC_t,AC_lrmv)
 }
 
 ComputeSteps AC_initialize_sums(boundconds)

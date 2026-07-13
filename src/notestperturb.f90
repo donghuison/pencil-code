@@ -31,11 +31,13 @@ module TestPerturb
 !
     endsubroutine initialize_testperturb
 !***********************************************************************
-    subroutine read_testperturb_run_pars(iostat)
+    subroutine read_testperturb_run_pars(iomsg)
 !
-      integer, intent(out) :: iostat
+      use Cparam, only: iomsglen
 !
-      iostat = 0
+      character(LEN=*), intent(out) :: iomsg
+!
+      iomsg=""
 !
     endsubroutine read_testperturb_run_pars
 !***********************************************************************

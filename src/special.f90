@@ -11,13 +11,14 @@
   module Special
 
     use Cparam
+    use Cdata, only: lroot, n_special_modules, special_modules
 
     implicit none
 
     include 'special.h'
 
     external caller, caller0, caller1, caller2, caller3, caller4, caller5, caller5_str5, caller6, &
-             func_int_caller0
+             caller_str, func_int_caller0
     integer(KIND=ikind8), external :: dlopen_c, dlsym_c
     external dlclose_c
 !
@@ -63,7 +64,6 @@
                           I_LOAD_VARIABLES_TO_GPU_SPECIAL=40
     
     integer, parameter :: n_subroutines=40
-    integer, parameter :: n_special_modules_max=2
 !
     character(LEN=256) :: special_modules_list = ''
     character(LEN=30), dimension(n_subroutines) :: special_subroutines=(/ &
@@ -110,8 +110,7 @@
                    /)
 
     integer(KIND=ikind8) :: libhandle
-    integer :: n_special_modules
-    integer(KIND=ikind8), dimension(n_special_modules_max,n_subroutines) :: special_sub_handles
+    integer(KIND=ikind8), dimension(n_special_modules,n_subroutines) :: special_sub_handles
     character(LEN=80) :: specific_subroutine
 
     contains
@@ -128,7 +127,6 @@
 
     character(LEN=128) :: line,parstr
     integer :: i,j,ipos,ind
-    character(LEN=40), dimension(n_special_modules_max) :: special_modules
     integer(KIND=ikind8) :: sub_handle
 
     if (lreloading) return
@@ -136,7 +134,9 @@
     call get_env_var("PC_MODULES_LIST", special_modules_list)
     ind = index(special_modules_list,'#')
     if (ind>0) special_modules_list(ind:)=''  ! remove trailing comment
-    n_special_modules=parser(trim(special_modules_list),special_modules,' ')
+    if (n_special_modules/=parser(trim(special_modules_list),special_modules,' ')) &
+      call fatal_error('initialize_mult_special','number of names in $PC_MODULES_LIST /= n_special_modules')
+
     !Remove trailing newlines
     do i=1,n_special_modules
         if (len_trim(special_modules(i)) > 0 .and. &
@@ -353,14 +353,22 @@
 !
     endsubroutine register_particles_special
 !*********************************************************************** 
-    subroutine read_special_init_pars(iostat)
+    subroutine read_special_init_pars(iomsg)
 !
-      integer, intent(out) :: iostat
+      use File_io, only: parallel_rewind
+
+      character(LEN=*), intent(out) :: iomsg
 !
       integer :: i
-!
+      character(LEN=iomsglen) :: msg
+
+      iomsg=''
       do i=1,n_special_modules
-        call caller1(special_sub_handles(i,I_READ_SPECIAL_INIT_PARS),iostat)
+        call caller2(special_sub_handles(i,I_READ_SPECIAL_INIT_PARS),msg,iomsglen)
+        if (msg/='') then
+          iomsg=trim(iomsg)//new_line('a')//trim(special_modules(i))//': '//trim(msg)
+          call parallel_rewind
+        endif
       enddo
 !
     endsubroutine read_special_init_pars
@@ -377,14 +385,22 @@
 !
     endsubroutine write_special_init_pars
 !***********************************************************************
-    subroutine read_special_run_pars(iostat)
+    subroutine read_special_run_pars(iomsg)
 !
-      integer, intent(out) :: iostat
+      use File_io, only: parallel_rewind
+
+      character(LEN=*), intent(out) :: iomsg
 !
       integer :: i
+      character(LEN=iomsglen) :: msg
 !
+      iomsg=''
       do i=1,n_special_modules
-        call caller1(special_sub_handles(i,I_READ_SPECIAL_RUN_PARS),iostat)
+        call caller2(special_sub_handles(i,I_READ_SPECIAL_RUN_PARS),msg,iomsglen)
+        if (msg/='') then
+          iomsg=trim(iomsg)//new_line('a')//trim(special_modules(i))//': '//trim(msg)
+          call parallel_rewind
+        endif
       enddo
 !
     endsubroutine read_special_run_pars

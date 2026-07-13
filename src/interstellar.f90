@@ -1468,13 +1468,15 @@ module Interstellar
 !
     endsubroutine get_slices_interstellar
 !***********************************************************************
-    subroutine read_interstellar_init_pars(iostat)
+    subroutine read_interstellar_init_pars(iomsg)
 !
       use File_io, only: parallel_unit
 !
-      integer, intent(out) :: iostat
+      character(LEN=*), intent(out) :: iomsg
+      integer :: iostat
 !
-      read(parallel_unit, NML=interstellar_init_pars, IOSTAT=iostat)
+      read(parallel_unit, NML=interstellar_init_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
 !
     endsubroutine read_interstellar_init_pars
 !***********************************************************************
@@ -1486,13 +1488,15 @@ module Interstellar
 !
     endsubroutine write_interstellar_init_pars
 !***********************************************************************
-    subroutine read_interstellar_run_pars(iostat)
+    subroutine read_interstellar_run_pars(iomsg)
 !
       use File_io, only: parallel_unit
 !
-      integer, intent(out) :: iostat
+      character(LEN=*), intent(out) :: iomsg
+      integer :: iostat
 !
-      read(parallel_unit, NML=interstellar_run_pars, IOSTAT=iostat)
+      read(parallel_unit, NML=interstellar_run_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
 !
     endsubroutine read_interstellar_run_pars
 !***********************************************************************
@@ -2420,9 +2424,10 @@ module Interstellar
 !***********************************************************************
     subroutine set_next_SNI(scaled_interval)
 !
-      use General, only:  random_seed_wrapper, random_number_wrapper
+      use General, only:  random_seed_wrapper
+      use Sub, only: sample_poisson_waiting_time
 !
-      real :: franSN, scaled_interval
+      real :: scaled_interval
 !
       intent(out) :: scaled_interval
 !
@@ -2444,12 +2449,10 @@ module Interstellar
       !if (lSN_mass_rate) then
       !  call set_interval(f,t_interval(SNI),SNI)
       !endif
-      call random_number_wrapper(franSN)
 !
 !  Time interval follows Poisson process with rate 1/interval_SNI
 !
-      scaled_interval=-log(franSN)*t_interval(SNI)
-!
+      scaled_interval = sample_poisson_waiting_time(1.0/t_interval(SNI))
       t_next_SNI=t+scaled_interval
       if (lroot) then
         open(1,file=trim(datadir)//'/sn_history.dat',position='append')

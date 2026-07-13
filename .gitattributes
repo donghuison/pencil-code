@@ -3095,6 +3095,7 @@ samples/bonnor_ebert_sphere/src/cparam.local -text
 samples/bonnor_ebert_sphere/start.in -text
 samples/bonnor_ebert_sphere/video.in -text
 samples/bonnor_ebert_sphere/video.insv -text
+samples/cartesian-convection-entropy-rain/NEVERLOCK -text
 samples/cartesian-convection-kramers/README -text
 samples/cartesian-convection-kramers/print.in -text
 samples/cartesian-convection-kramers/reference.out -text
@@ -5223,3 +5224,7 @@ utils/wolf/tests/t/Test/NumericFileComparator/t/data/time-series-3.dat -text
 utils/wolf/tests/t/run_tests.pl -text
 utils/xiangyu/restart-new-dir-VAR-PVAR -text
 utils/xiangyu/restart-new-dir-VAR-PVAR-h5 -text
+samples/decay-reconnection/NEVERLOCK -text
+utils/philippe/LCT/flow_reb_cube.pro -text
+utils/philippe/LCT/velocity_field_lct.pro -text
+utils/philippe/extras/signum.pro -text

@@ -69,7 +69,6 @@ module Testfield
        lin_testfield,lam_testfield,om_testfield,delta_testfield, &
        ltestfield_newz,leta_rank2,lphase_adjust, &
        ltestfield_taver,llorentzforce_testfield, &
-       ltestfield_profile_eta_z, &
        luxb_as_aux,ljxb_as_aux,lignore_uxbtestm, &
        ltest_uxb,ltest_jxb, &
        lforcing_cont_aatest,ampl_fcont_aatest, &
@@ -452,13 +451,15 @@ module Testfield
 !
     endsubroutine initialize_testfield
 !***********************************************************************
-    subroutine read_testfield_run_pars(iostat)
+    subroutine read_testfield_run_pars(iomsg)
 !
       use File_io, only: parallel_unit
 !
-      integer, intent(out) :: iostat
+      character(LEN=iomsglen), intent(out) :: iomsg
+      integer :: iostat
 !
-      read(parallel_unit, NML=testfield_run_pars, IOSTAT=iostat)
+      read(parallel_unit, NML=testfield_run_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
 !
     endsubroutine read_testfield_run_pars
 !***********************************************************************

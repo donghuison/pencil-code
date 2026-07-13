@@ -193,8 +193,10 @@ module Equ
       endif
 
       start_time = real(mpiwtime())
-      if (lgpu) then; call before_boundary_gpu(f,lrmv,itsub,t)
-      else;      call before_boundary_cpu(f)
+      if (lgpu) then
+        call before_boundary_gpu(f,lrmv,itsub,t)
+      else
+        call before_boundary_cpu(f)
       endif
       end_time = real(mpiwtime())
       before_and_after_boundary_sum_time = before_and_after_boundary_sum_time + end_time-start_time
@@ -315,7 +317,10 @@ module Equ
         start_time = real(mpiwtime())
         call rhs_gpu(f,itsub)
 !  Should be done after rhs_gpu since if doing testing against cpu want to get the right value of dt
-!$      if (ldiagnostic_output) call save_diagnostic_controls
+!$      if (ldiagnostic_output) then 
+!$        call save_diagnostic_controls
+!$        call hydro_save_diagnostic_controls
+!$      endif 
         end_time = real(mpiwtime())
         rhs_sum_time = rhs_sum_time + end_time-start_time
       else
@@ -561,7 +566,12 @@ module Equ
 !$      if (l2davgfirst) then
 !$        if (allocated(fnamexy)) p_fnamexy = p_fnamexy + fnamexy
 !$        if (allocated(fnamexz)) p_fnamexz = p_fnamexz + fnamexz
-!$        if (allocated(fnamerz)) p_fnamerz = p_fnamerz + fnamerz
+!$        if (allocated(fnamerz)) then 
+!$          if(.not. associated(p_fnamerz)) then
+!$            call fatal_error('diagnostic_reductions','p_fnamerz was not for some reason associated!')
+!$          endif
+!$          p_fnamerz = p_fnamerz + fnamerz
+!$        endif
 !$      endif
 !$
 !$      if (allocated(fname_keep)) p_fname_keep = p_fname_keep + fname_keep
@@ -575,7 +585,6 @@ module Equ
 !$    endsubroutine diagnostics_reductions
 !***********************************************************************
     subroutine calc_all_module_diagnostic_auxiliaries(f,p)
-!
 !
 !  Candidate implementation for the new concern of auxiliaries in snapshots.
 !  Subject to change.
@@ -591,6 +600,7 @@ module Equ
 !
       use Magnetic,only: calc_diagnostic_auxiliaries_magnetic
       use Diagnostics
+      use Hydro, only: hydro_restore_diagnostic_controls
 !$    use OMP_lib
 !$    use General, only: get_cpu, set_cpu
 
@@ -604,6 +614,7 @@ module Equ
 !$omp parallel if (.not. lsuppress_parallel_reductions) private(p) num_threads(num_helper_threads) &
 !$omp copyin(t,dxmax_pencil,fname,fnamex,fnamey,fnamez,fnamer,fnamexy,fnamexz,fnamerz,fname_keep,fname_sound,ncountsz,phiavg_norm)
 !$    call restore_diagnostic_controls
+!$    call hydro_restore_diagnostic_controls
 
       !$omp do
       do imn=1,nyz
@@ -646,7 +657,7 @@ module Equ
       use Forcing, only: calc_diagnostics_forcing
       use Gravity, only: calc_diagnostics_gravity
       use Heatflux, only: calc_diagnostics_heatflux
-      use Hydro, only: calc_diagnostics_hydro
+      use Hydro, only: calc_diagnostics_hydro, hydro_restore_diagnostic_controls
       use Interstellar, only: calc_diagnostics_interstellar
       use Lorenz_gauge, only: calc_diagnostics_lorenz_gauge
       use Magnetic, only: calc_diagnostics_magnetic
@@ -683,6 +694,7 @@ module Equ
 !$omp parallel if (.not. lsuppress_parallel_reductions) private(p) num_threads(num_helper_threads) &
 !$omp copyin(t,dxmax_pencil,fname,fnamex,fnamey,fnamez,fnamer,fnamexy,fnamexz,fnamerz,fname_keep,fname_sound,ncountsz,phiavg_norm)
 !$    call restore_diagnostic_controls
+!$    call hydro_restore_diagnostic_controls
 !      
 !     TP: on some nvfortan compilers copyin does not seem to be enough to ensure diagnostic arrays are allocated
 !         not sure was the copyin ever sufficient, but not that important since we can always explicitly check
@@ -774,6 +786,7 @@ module Equ
 !  Executed by the helper thread.
 !
         use Density, only: density_before_boundary_diagnostics
+        use Energy,  only: energy_after_boundary_diagnostics
 
         real, contiguous, dimension(:,:,:,:),intent(INOUT) :: f
 
@@ -782,6 +795,7 @@ module Equ
         !$omp MPI_COMM_XYPLANE,MPI_COMM_XZPLANE,MPI_COMM_YZPLANE)
 
         call density_before_boundary_diagnostics(f)
+        call energy_after_boundary_diagnostics(f)
         !$omp end parallel
 
       endsubroutine calc_all_before_boundary_diagnostics
@@ -998,6 +1012,7 @@ module Equ
 !
 !  6-jul-25/TP: carved from pde
 !
+      use Hydro, only: hydro_before_boundary
       use Shear, only: shear_before_boundary
       use Interstellar, only: interstellar_before_boundary
 
@@ -1005,6 +1020,7 @@ module Equ
 
       if (linterstellar) call interstellar_before_boundary(f)
       if (lshear)        call shear_before_boundary(f)
+      if (lhydro_kinematic) call hydro_before_boundary(f)
 !
     endsubroutine before_boundary_shared
 !***********************************************************************
@@ -1038,7 +1054,7 @@ module Equ
       if (ldustdensity)  call dustdensity_before_boundary(f)
       if (ldensity .and. ldiagnos) call density_before_boundary_diagnostics(f)
       if (ldensity.or.lboussinesq) call density_before_boundary(f)
-      if (lhydro.or.lhydro_kinematic) call hydro_before_boundary(f)
+      if (lhydro)        call hydro_before_boundary(f)
       if (lmagnetic)     call magnetic_before_boundary(f)
                          call energy_before_boundary(f)
       if (lchiral)       call chiral_before_boundary(f)
@@ -1083,7 +1099,7 @@ module Equ
       use Viscosity, only: viscosity_after_boundary
       use Magnetic, only: magnetic_after_boundary
       use Dustdensity, only: dustdensity_after_boundary
-      use Energy, only: energy_after_boundary
+      use Energy, only: energy_after_boundary,energy_after_boundary_diagnostics
       use Gravity, only: gravity_after_boundary
       use Forcing, only: forcing_after_boundary
       use Shock, only: calc_shock_profile_simple
@@ -1109,6 +1125,7 @@ module Equ
       if (lmagnetic)       call magnetic_after_boundary(f)
       if (ldustdensity)    call dustdensity_after_boundary(f)
       if (lenergy)         call energy_after_boundary(f)
+      if (lenergy)         call energy_after_boundary_diagnostics(f)
       if (lgrav)           call gravity_after_boundary(f)
       if (lforcing)        call forcing_after_boundary(f)
       if (lpolymer)        call calc_polymer_after_boundary(f)
@@ -1146,6 +1163,7 @@ module Equ
 !
         if (lupdate_courant_dt.and.(.not.ldt_paronly).and.ldiagnos) then
           if (idiag_dtv/=0) call max_mn_name(maxadvec/cdt,idiag_dtv,l_dt=.true.)
+          if (idiag_dtsrc/=0) call max_mn_name(maxsrc/cdtsrc,idiag_dtsrc,l_dt=.true.)
           if (idiag_dtdiffus/=0) call max_mn_name(maxdiffus/cdtv,idiag_dtdiffus,l_dt=.true.)
           if (idiag_dtdiffus2/=0) call max_mn_name(maxdiffus2/cdtv2,idiag_dtdiffus2,l_dt=.true.)
           if (idiag_dtdiffus3/=0) call max_mn_name(maxdiffus3/cdtv3,idiag_dtdiffus3,l_dt=.true.)
@@ -1160,7 +1178,7 @@ module Equ
 !
           call xymax_mn_name_z(maxadvec/cdt,idiag_dtvmaxz,l_dt=.true.)
         endif
-
+!
     endsubroutine timestep_diagnostics
 !***********************************************************************
     subroutine calc_time_integrals(f,p)
@@ -1884,6 +1902,7 @@ module Equ
         dt1_src = maxsrc/cdtsrc
 !
 !  Timestep combination from advection, diffusion and "source".
+!  Alternatively, we could use the maxima of all three contributions.
 !
         dt1_max_loc = sqrt(dt1_advec**2 + dt1_diffus**2 + dt1_src**2)
 !
@@ -1968,12 +1987,11 @@ module Equ
       type (pencil_case) :: p
       real, dimension(1), intent(inout) :: mass_per_proc
       logical ,intent(in) :: early_finalize
-      integer :: ncomponents
 
       real, dimension (:,:,:,:), allocatable :: f_copy,f_diff,df_tmp,df_copy,f_beta,f_abs_diff
       real, dimension(5) :: beta_ts,alpha_ts
 
-      integer :: i
+      integer :: i,ncomponents
 
       interface
         subroutine cpu_version(f,df,p,mass_per_proc,early_finalize)
@@ -2047,6 +2065,10 @@ module Equ
 
       f_diff = abs((f_copy-f)/(f_copy+tini))
       f_abs_diff = abs((f_copy-f))
+      where(f_copy == 0.0 .and. abs(f_abs_diff) < 1e-20)
+              f_diff     = 0.0
+              f_abs_diff = 0.0
+      endwhere
 
       if (nxgrid == 1 .and. nygrid == 1) then
         print*,"Max diff all: ",maxval(f_diff(l1,m1,n1:n2,1:mfarray))

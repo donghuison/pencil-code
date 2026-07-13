@@ -48,6 +48,7 @@ module Particles_cdata
   integer, dimension(ny*nz) :: npar_imn, k1_imn, k2_imn
   integer :: npvar=0, npar_loc=0, npar_total=0, npaux=0
   integer :: ixp=0, iyp=0, izp=0, ivpx=0, ivpy=0, ivpz=0, iap=0, iaps=0, irpbeta=0
+  integer :: itaup=0 
   integer :: ixp0=0, iyp0=0, izp0=0,ippersist=0, iborn=0
   integer :: inucl_Se=0, inucl_T=0, inucl_mix_frac=0
   integer :: incol=0, iint_Se=0, iint_T=0, iint_mix_frac=0
@@ -83,7 +84,7 @@ module Particles_cdata
   integer :: idlncc=0
   integer :: idfg=0,idfx=0,idfy=0,idfz=0
   integer :: ivpxt=0, ivpzt=0
-  integer :: imskh = 0, itbrt = 0, itbpe = 0
+  integer :: imskh = 0, itbrt = 0, itbpe = 0, itage = 0, imshg = 0, imech = 0
 
 
   integer :: npar_inserted_tot=0

@@ -57,6 +57,7 @@ module Cparam
   integer, parameter :: mx=nx+2*nghost,l1=1+nghost
   integer, parameter :: my=ny+2*nghost,m1=1+nghost
   integer, parameter :: mz=nz+2*nghost,n1=1+nghost
+
   integer, parameter :: mxgrid=nxgrid+2*nghost
   integer, parameter :: mygrid=nygrid+2*nghost
   integer, parameter :: mzgrid=nzgrid+2*nghost
@@ -71,7 +72,6 @@ module Cparam
   integer, parameter :: l1i=l1+nghost-1
   integer, parameter :: m1i=m1+nghost-1
   integer, parameter :: n1i=n1+nghost-1
-
 
   integer, parameter :: nrcyl=nxgrid/2
   integer, parameter :: nrcylrun=max(nx/20,1)
@@ -103,8 +103,9 @@ module Cparam
 !  datelen        date-and-time string
 !  max_col_width  diagnostic column
 !  nscbc_len      ?
+!  iomsglen       length of I/O error messages
 !
-  integer, parameter :: fnlen=135,intlen=21,bclen=3,labellen=40,linelen=256
+  integer, parameter :: fnlen=135,intlen=21,bclen=3,labellen=40,linelen=256,iomsglen=256
   integer, parameter :: datelen=30,max_col_width=64,nscbc_len=24,fmtlen=30
 !
 !  Significant length of random number generator state.
@@ -157,17 +158,22 @@ module Cparam
 !
 !  Diagnostic variable types.
 !
-!  Values > 0 get maxed across all processors before any
-!  transformation using mpi_reduce_max;
-!  values < 0 get summed over all processors before any transformation
-!  using mpi_reduce_sum;
-!  value 0 causes the value simply to be used from the root processor.
+!  labels < 0: values get maxed across all processors before any
+!              transformation using mpi_reduce_max;
+!              extrema-related diagnostics *with location* get internally a label of the form
+!              ilabel_max_* + ilabel_extr_lim*(index of location diagnostic), hence
+!              ATTENTION: new extrema-related (hence negative) labels must be bigger than ilabel_extr_lim
+!                         -> increase ilabel_extr_lim if necessary
+!  labels > 0: values get summed over all processors before any transformation
+!              using mpi_reduce_sum;
+!  label=0: causes the value simply to be used from the root processor.
+!  label=ilabel_ignore: diagnostic entry is ignored
 !
   integer, parameter :: ilabel_max=-1,ilabel_sum=1,ilabel_save=0
   integer, parameter :: ilabel_max_sqrt=-2,ilabel_sum_sqrt=2
   integer, parameter :: ilabel_sum_log10=10, ilabel_sum_masked=11
   integer, parameter :: ilabel_max_dt=-3,ilabel_max_neg=-4
-  integer, parameter :: ilabel_max_reciprocal=-5
+  integer, parameter :: ilabel_max_reciprocal=-5,ilabel_extr_lim=-9
   integer, parameter :: ilabel_integrate=3,ilabel_integrate_sqrt=30, ilabel_integrate_log10=40
   integer, parameter :: ilabel_surf=4
   integer, parameter :: ilabel_sum_par=5,ilabel_sum_sqrt_par=6, ilabel_sum_log10_par=20, ilabel_sum_plain=21

@@ -219,9 +219,13 @@ module Gravity
             if (lroot) print*, 'initialize_gravity: M5 dwarf gravity potential'
             cpot(:,j) = (/ 2.3401, 0.44219, 2.5952, 1.5986, 0.20851 /)
 !
+          case ('RGB-1Msun-11.7') ! 11.7bn yr old 1 Msun star, smoothed above r = 0.2
+            if (lroot) print*, 'initialize_gravity: RGB-1Msun-11.7 gravity potential'
+            cpot(:,j) = (/ 4.529, -41.132, 108.616, 10.219,-49.586 /)
+!
           case ('PMS-2Msun-star') ! Two solar mass pre-main sequence star
-             if (lroot) print*, 'initialize_gravity: 2 solar mass PMS gravity potential'
-             cpot(:,j) = (/ 1.3896, -1.7048, 0.3128, 1.0999, 0.1114 /)
+            if (lroot) print*, 'initialize_gravity: 2 solar mass PMS gravity potential'
+            cpot(:,j) = (/ 1.3896, -1.7048, 0.3128, 1.0999, 0.1114 /)
 !
 !  Experimental flattened potential for M5 star. Similar to M5-dwarf but
 !  includes 6th and 12th powers of r to obtain pot~const for r \gtrsim 1.2.
@@ -448,13 +452,15 @@ module Gravity
 !
     endsubroutine initialize_gravity
 !***********************************************************************
-    subroutine read_gravity_init_pars(iostat)
+    subroutine read_gravity_init_pars(iomsg)
 !
       use File_io, only: parallel_unit
 !
-      integer, intent(out) :: iostat
+      character(LEN=*), intent(out) :: iomsg
+      integer :: iostat
 !
-      read(parallel_unit, NML=grav_init_pars, IOSTAT=iostat)
+      read(parallel_unit, NML=grav_init_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
 !
     endsubroutine read_gravity_init_pars
 !***********************************************************************
@@ -466,13 +472,15 @@ module Gravity
 !
     endsubroutine write_gravity_init_pars
 !***********************************************************************
-    subroutine read_gravity_run_pars(iostat)
+    subroutine read_gravity_run_pars(iomsg)
 !
       use File_io, only: parallel_unit
 !
-      integer, intent(out) :: iostat
+      character(LEN=*), intent(out) :: iomsg
+      integer :: iostat
 !
-      read(parallel_unit, NML=grav_run_pars, IOSTAT=iostat)
+      read(parallel_unit, NML=grav_run_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
 !
     endsubroutine read_gravity_run_pars
 !***********************************************************************

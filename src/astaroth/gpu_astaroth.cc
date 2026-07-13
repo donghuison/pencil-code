@@ -52,6 +52,8 @@ const bool performance_logs = false;
 #define EXTERN
 #define FINT int
 
+
+
 #if DOUBLE_PRECISION
   #define REAL_MAX DBL_MAX
 #else
@@ -149,7 +151,6 @@ const bool performance_logs = false;
   #define input_channels  input_channels__mod__training
   #define output_channels output_channels__mod__training
 
-  #define lcuda_aware_mpi            lcuda_aware_mpi__mod__gpu
   #define lsecond_force lsecond_force__mod__forcing
   #define lforce_helical lforce_helical__mod__forcing
 
@@ -178,6 +179,7 @@ bool torch_load_CAPI(const char* name, const char* fname);
 bool torch_load_checkpoint_CAPI(const char* name, const char* checkpoint_dir, int64_t* step_train, int64_t* step_inference);
 bool torch_save_model_CAPI(const char* name, const char* fname);
 bool torch_save_checkpoint_CAPI(const char* name, const char* checkpoint_dir);
+void read_stats();
 
 void scaling();
 extern "C" void print_debug();
@@ -358,13 +360,36 @@ int same_path(const char *p1, const char *p2) {
 }
 static int lac_sparse_autotuning = 0;
 /***********************************************************************************************/
+void
+sortMaux()
+{
+    std::vector<int> used_maux;
+    for (int i = 0; i < mfarray; ++i) {
+        if (maux_vtxbuf_index[i] != -1)
+            used_maux.push_back(maux_vtxbuf_index[i]);
+    }
+    // Sort them
+    std::sort(used_maux.begin(), used_maux.end());
+    // Put them back
+    int j = 0;
+    for (int i = 0; i < mfarray; ++i) {
+        if (maux_vtxbuf_index[i] != -1)
+            maux_vtxbuf_index[i] = used_maux[j++];
+    }
+}
 void setupConfig(AcMeshInfo& config)
 {
   config = acInitInfo();
  
   #include "PC_modulepars.h"
 
-  PCLoad(config, AC_use_cuda_aware_mpi,lcuda_aware_mpi);
+  //TP: this is because we non-communicated auxs might be registered before communicated ones
+  //TP: the whole think with maux_vtxbuf_index is a bit of a mess...
+  //TP: would be great if I can come up with a better design.
+  sortMaux();
+
+  //CUDA_AWARE_MPI is true by default, to turn it off set CUDA_AWARE_MPI=OFF in your config
+  PCLoad(config, AC_use_cuda_aware_mpi,CUDA_AWARE_MPI);
   PCLoad(config, AC_bidiagonal_derij,lbidiagonal_derij);
 
   PCLoad(config, AC_x,x__mod__cdata);
@@ -439,7 +464,7 @@ void setupConfig(AcMeshInfo& config)
   AcRealSymmetricTensor tau_hydro_stds{};
 	
   //The statistics for doing the inverse are only needed when using the trained tau
-  if(ltrained) denormalize("data/training/normalizer.bin", tau_hydro_means, tau_hydro_stds);
+  if (ltrained) denormalize("data/training/normalizer.bin", tau_hydro_means, tau_hydro_stds);
 
   PCLoad(config,AC_tau_hydro_means,tau_hydro_means);
   PCLoad(config,AC_tau_hydro_stds ,tau_hydro_stds);
@@ -462,7 +487,7 @@ void setupConfig(AcMeshInfo& config)
 
   sprintf(build_path,"%s/src/astaroth",get_cwd());
   //This is here to skip the unnecessary make in case we run pc_newrun -s
-  if(!same_path(build_path,ORIGINAL_BUILD_PATH))
+  if (!same_path(build_path,ORIGINAL_BUILD_PATH))
   {
 	  config.runtime_compilation_skip_make_if_nothing_has_changed = true;
   }
@@ -500,7 +525,7 @@ AcReal GpuCalcDt(const AcReal t)
 extern "C" void radTransfer()
 {
 #if Lradiation_ray_MODULE
-	for(int inu = 1; inu <= nnu__mod__radiation; ++inu)
+	for (int inu = 1; inu <= nnu__mod__radiation; ++inu)
 	{
   		acDeviceSetInput(acGridGetDevice(), AC_frequency_bin,inu);
 
@@ -531,10 +556,10 @@ extern "C" void radTransfer()
 extern "C" void splitUpdate(const AcReal error_tolerance, const int max_steps)
 {
 #if LIMPLICIT_DIFFUSION
-	if(limplicit_diffusion_with_fft)
+	if (limplicit_diffusion_with_fft)
 	{
 #if LMAGNETIC
-		if(limplicit_resistivity && lbfield)
+		if (limplicit_resistivity && lbfield)
 		{
 			ac_fft_split_diffusion_update(acGetF_BX(),dt,eta,acGetSPLIT_DIFFUSION_UPDATE_BUFFER_REAL(),acGetSPLIT_DIFFUSION_UPDATE_BUFFER_IMAG(),acGetSPLIT_DIFFUSION_UPDATE_BUFFER_REAL(),acGetSPLIT_DIFFUSION_UPDATE_BUFFER_IMAG());
 			ac_fft_split_diffusion_update(acGetF_BY(),dt,eta,acGetSPLIT_DIFFUSION_UPDATE_BUFFER_REAL(),acGetSPLIT_DIFFUSION_UPDATE_BUFFER_IMAG(),acGetSPLIT_DIFFUSION_UPDATE_BUFFER_REAL(),acGetSPLIT_DIFFUSION_UPDATE_BUFFER_IMAG());
@@ -542,7 +567,7 @@ extern "C" void splitUpdate(const AcReal error_tolerance, const int max_steps)
 		}
 #endif
 #if LVISCOSITY
-		if(limplicit_viscosity)
+		if (limplicit_viscosity)
 		{
 			ac_fft_split_diffusion_update(acGetUUX(),dt,nu,acGetSPLIT_DIFFUSION_UPDATE_BUFFER_REAL(),acGetSPLIT_DIFFUSION_UPDATE_BUFFER_IMAG(),acGetSPLIT_DIFFUSION_UPDATE_BUFFER_REAL(),acGetSPLIT_DIFFUSION_UPDATE_BUFFER_IMAG());
 			ac_fft_split_diffusion_update(acGetUUY(),dt,nu,acGetSPLIT_DIFFUSION_UPDATE_BUFFER_REAL(),acGetSPLIT_DIFFUSION_UPDATE_BUFFER_IMAG(),acGetSPLIT_DIFFUSION_UPDATE_BUFFER_REAL(),acGetSPLIT_DIFFUSION_UPDATE_BUFFER_IMAG());
@@ -550,11 +575,11 @@ extern "C" void splitUpdate(const AcReal error_tolerance, const int max_steps)
 		}
 #endif
 	}
-	else if(limplicit_diffusion_with_cg)
+	else if (limplicit_diffusion_with_cg)
 	{
 		acGridExecuteTaskGraph(acGetOptimizedDSLTaskGraph(implicit_diffusion_init_cg),1);
 		acDeviceSetInput(acGridGetDevice(),AC_implicit_diffusion_coefficient,eta);
-		for(int field = 0; field < 3; ++field)
+		for (int field = 0; field < 3; ++field)
 		{
 			int step_num = 0;
 			acDeviceSetInput(acGridGetDevice(),AC_CG_FIELD,CG_FIELD(field));
@@ -572,7 +597,7 @@ extern "C" void splitUpdate(const AcReal error_tolerance, const int max_steps)
 			}
 		}
 		acDeviceSetInput(acGridGetDevice(),AC_implicit_diffusion_coefficient,nu);
-		for(int field = 3; field < 6; ++field)
+		for (int field = 3; field < 6; ++field)
 		{
 			acDeviceSetInput(acGridGetDevice(),AC_CG_FIELD,CG_FIELD(field));
 			AcReal residual = 1e100;
@@ -617,20 +642,139 @@ extern "C" void registerGPU()
 #endif
 }
 /***********************************************************************************************/
+void save_stats(std::string fileName){
+#if LTRAINING
+	#include "user_constants.h"
+    if (rank==0){
+        std::ofstream myFile;
+        std::string fileString = fileName;	
+        myFile.open(fileString);
+        myFile << "count,acc_count,";
+        
+
+    // Headers
+        if (lhydro){
+            myFile << "in_acc_sum_x,in_acc_sum_y,in_acc_sum_z,in_acc_sum_squared_x,in_acc_sum_squared_y,in_acc_sum_squared_z,out_acc_sum_xx,out_acc_sum_yy,out_acc_sum_zz,out_acc_sum_xy,out_acc_sum_yz,out_acc_sum_xz,out_acc_sum_squared_xx,out_acc_sum_squared_yy,out_acc_sum_squared_zz,out_acc_sum_squared_xy,out_acc_sum_squared_yz,out_acc_sum_squared_xz\n";
+        }
+
+        myFile << train_counter << "," << nxgrid*nygrid*nzgrid << ",";
+        
+
+    // Hydro statistics
+        if (lhydro){
+            auto in_acc_sum_x = acDeviceGetOutput(acGridGetDevice(), in_acc_sum[0]);
+            auto in_acc_sum_y = acDeviceGetOutput(acGridGetDevice(), in_acc_sum[1]);
+            auto in_acc_sum_z = acDeviceGetOutput(acGridGetDevice(), in_acc_sum[2]);
+
+            auto in_acc_sum_squared_x = acDeviceGetOutput(acGridGetDevice(), in_acc_sum_squared[0]);
+            auto in_acc_sum_squared_y = acDeviceGetOutput(acGridGetDevice(), in_acc_sum_squared[1]);
+            auto in_acc_sum_squared_z = acDeviceGetOutput(acGridGetDevice(), in_acc_sum_squared[2]);
+
+            auto out_acc_sum_xx = acDeviceGetOutput(acGridGetDevice(), out_acc_sum[0]);
+            auto out_acc_sum_yy = acDeviceGetOutput(acGridGetDevice(), out_acc_sum[1]);
+            auto out_acc_sum_zz = acDeviceGetOutput(acGridGetDevice(), out_acc_sum[2]);
+            auto out_acc_sum_xy = acDeviceGetOutput(acGridGetDevice(), out_acc_sum[3]);
+            auto out_acc_sum_yz = acDeviceGetOutput(acGridGetDevice(), out_acc_sum[4]);
+            auto out_acc_sum_xz = acDeviceGetOutput(acGridGetDevice(), out_acc_sum[5]);
+
+            auto out_acc_sum_squared_xx = acDeviceGetOutput(acGridGetDevice(), out_acc_sum_squared[0]);
+            auto out_acc_sum_squared_yy = acDeviceGetOutput(acGridGetDevice(), out_acc_sum_squared[1]);
+            auto out_acc_sum_squared_zz = acDeviceGetOutput(acGridGetDevice(), out_acc_sum_squared[2]);
+            auto out_acc_sum_squared_xy = acDeviceGetOutput(acGridGetDevice(), out_acc_sum_squared[3]);
+            auto out_acc_sum_squared_yz = acDeviceGetOutput(acGridGetDevice(), out_acc_sum_squared[4]);
+            auto out_acc_sum_squared_xz = acDeviceGetOutput(acGridGetDevice(), out_acc_sum_squared[5]);
+
+            myFile << in_acc_sum_x << "," << in_acc_sum_y << "," << in_acc_sum_z << "," << in_acc_sum_squared_x << "," << in_acc_sum_squared_y << "," << in_acc_sum_squared_z << "," <<  out_acc_sum_xx << "," <<  out_acc_sum_yy << "," <<  out_acc_sum_zz << "," <<  out_acc_sum_xy << "," << out_acc_sum_yz << "," << out_acc_sum_xz << "," << out_acc_sum_squared_xx << "," << out_acc_sum_squared_yy << "," << out_acc_sum_squared_zz << "," << out_acc_sum_squared_xy << "," << out_acc_sum_squared_yz << "," << out_acc_sum_squared_xz << "\n";
+        }
+
+        myFile.close();
+    }
+#endif
+}
+/***********************************************************************************************/
+void read_stats(){
+#if LTRAINING
+	#include "user_constants.h"
+    if(rank==0){
+        std::ifstream statistics("data/training/running_statistics.csv");
+        int count;
+        int domain;
+        std::vector<AcReal> in_sum;
+        std::vector<AcReal> in_sum_sq;
+        std::vector<AcReal> out_sum;
+        std::vector<AcReal> out_sum_sq;
+
+		if (!statistics.is_open()){
+			fprintf(stderr, "Could not open running_statistics file");
+			fflush(stderr);
+			exit(EXIT_FAILURE);
+		}
+        
+        std::string line;
+
+        // get rid of the headers
+        std::getline(statistics, line);
+
+        while(std::getline(statistics, line)){
+            std::stringstream ss(line);
+            std::string val;
+            std::vector<std::string> row;
+            
+            while (std::getline(ss, val, ',')){
+                row.push_back(val);
+            }
+            
+            train_counter = std::stoi(row[0]);
+            domain = std::stoi(row[1]);
+
+            if (lhydro){
+                auto res = acDeviceLoadRealReduceRes(acGridGetDevice(), STREAM_DEFAULT, in_acc_sum[0], (AcReal)std::stod(row[2]));
+                acDeviceLoadRealReduceRes(acGridGetDevice(), STREAM_DEFAULT, in_acc_sum[1], std::stod(row[3]));
+                acDeviceLoadRealReduceRes(acGridGetDevice(), STREAM_DEFAULT, in_acc_sum[2], std::stod(row[4]));
+                if (res == AC_SUCCESS) { 
+                
+                    fprintf(stderr, "Result\n");
+                    fflush(stderr);
+                }
+
+                acDeviceLoadRealReduceRes(acGridGetDevice(), STREAM_DEFAULT, in_acc_sum_squared[0], std::stod(row[5]));
+                acDeviceLoadRealReduceRes(acGridGetDevice(), STREAM_DEFAULT, in_acc_sum_squared[1], std::stod(row[6]));
+                acDeviceLoadRealReduceRes(acGridGetDevice(), STREAM_DEFAULT, in_acc_sum_squared[2], std::stod(row[7]));
+
+
+                acDeviceLoadRealReduceRes(acGridGetDevice(), STREAM_DEFAULT, out_acc_sum[0], std::stod(row[8]));
+                acDeviceLoadRealReduceRes(acGridGetDevice(), STREAM_DEFAULT, out_acc_sum[1], std::stod(row[9]));
+                acDeviceLoadRealReduceRes(acGridGetDevice(), STREAM_DEFAULT, out_acc_sum[2], std::stod(row[10]));
+                acDeviceLoadRealReduceRes(acGridGetDevice(), STREAM_DEFAULT, out_acc_sum[3], std::stod(row[11]));
+                acDeviceLoadRealReduceRes(acGridGetDevice(), STREAM_DEFAULT, out_acc_sum[4], std::stod(row[12]));
+                acDeviceLoadRealReduceRes(acGridGetDevice(), STREAM_DEFAULT, out_acc_sum[5], std::stod(row[13]));
+
+                acDeviceLoadRealReduceRes(acGridGetDevice(), STREAM_DEFAULT, out_acc_sum_squared[0], std::stod(row[14]));
+                acDeviceLoadRealReduceRes(acGridGetDevice(), STREAM_DEFAULT, out_acc_sum_squared[1], std::stod(row[15]));
+                acDeviceLoadRealReduceRes(acGridGetDevice(), STREAM_DEFAULT, out_acc_sum_squared[2], std::stod(row[16]));
+                acDeviceLoadRealReduceRes(acGridGetDevice(), STREAM_DEFAULT, out_acc_sum_squared[3], std::stod(row[17]));
+                acDeviceLoadRealReduceRes(acGridGetDevice(), STREAM_DEFAULT, out_acc_sum_squared[4], std::stod(row[18]));
+                acDeviceLoadRealReduceRes(acGridGetDevice(), STREAM_DEFAULT, out_acc_sum_squared[5], std::stod(row[19]));
+            }
+        }
+    }
+#endif
+}
+/***********************************************************************************************/
 extern "C" void tf_create_model_c_api(const char *model_name, const char* config_file_path, int comm_fint, bool ldist){
 #if LTRAINING
 	int ndevices = 0;
 	
-	if(acGetDeviceCount(&ndevices) != cudaSuccess)
+	if (acGetDeviceCount(&ndevices) != cudaSuccess)
 	{
-			fprintf(stderr, "initialize_training, acGetDeviceCount failed");
+			fprintf(stderr, "initialize_training, acgetdevicecount failed");
 			fflush(stderr);
 			exit(EXIT_FAILURE);
 	}
 
-  if(acSetDevice(rank % ndevices) != cudaSuccess)
+  if (acSetDevice(rank % ndevices) != cudaSuccess)
   {
-  		fprintf(stderr,"Was not able to set device id!\n");
+  		    fprintf(stderr,"Was not able to set device id!\n");
 			fflush(stderr);
  			exit(EXIT_FAILURE);
   }
@@ -638,9 +782,9 @@ extern "C" void tf_create_model_c_api(const char *model_name, const char* config
   acLogFromRootProc(rank,"CONFIG_FILE: %s\n", config_file_path);
   acLogFromRootProc(rank,"Model_NAME: %s\n", model_name);
 	
-	if(ldist){
-  	comm_pencil = MPI_Comm_f2c(comm_fint);
-		bool success = torch_create_distributed_model_CAPI(model_name, config_file_path, comm_pencil, 0);
+	if (ldist){
+  	    comm_pencil = MPI_Comm_f2c(comm_fint);
+		bool success = torch_create_distributed_model_CAPI(model_name, config_file_path, comm_pencil, rank % ndevices);
 		if (success != 0){
 			acLogFromRootProc(rank, "Error when creating distributed model: %s from config file: %s\n", model_name, config_file_path);
 		}
@@ -683,12 +827,15 @@ extern "C" void tf_load_model_checkpoint_c_api(const char* name, const char* che
 	int64_t step_train=0;
 	int64_t step_inference=0;
 	bool success = torch_load_checkpoint_CAPI(name, checkpoint_dir, &step_train, &step_inference);
+    read_stats();
 	if (success != 0){
 		acLogFromRootProc(rank, "Error when loading model %s\n", name);
 	}
 	else{
 		acLogFromRootProc(rank, "Torchfort model %s loaded succesfully\n", name);
 	}
+    
+
 	fflush(stdout);
 	fflush(stderr);
 #endif
@@ -697,10 +844,11 @@ extern "C" void tf_load_model_checkpoint_c_api(const char* name, const char* che
 extern "C" void tf_save_model_c_api(const char* name, const char* fname){
 #if LTRAINING
 	bool success = torch_save_model_CAPI(name, fname);
-	if(success != 0){
+	if (success != 0){
 		acLogFromRootProc(rank, "save_model: Error when saving ML model: %s\n", name);
 	}
 	else{
+        save_stats("data/training/running_statistics.csv");
 		acLogFromRootProc(rank, "save_model: Saving ML model to: %s\n", fname);
 	}
 	fflush(stdout);
@@ -711,10 +859,11 @@ extern "C" void tf_save_model_c_api(const char* name, const char* fname){
 extern "C" void tf_save_checkpoint_c_api(const char* name, const char* checkpoint_dir){
 #if LTRAINING
 	bool success = torch_save_checkpoint_CAPI(name, checkpoint_dir);
-	if(success != 0){
+	if (success != 0){
 		acLogFromRootProc(rank, "save_checkpoint: Error when checkpointing ML model: %s in directory: %s\n", name, checkpoint_dir);
 	}
 	else{
+        save_stats("data/training/running_statistics.csv");
 		acLogFromRootProc(rank, "save_checkpoint: Checkpoint ML model to: %s\n", checkpoint_dir);
 	}
 	fflush(stdout);
@@ -741,7 +890,7 @@ bool snap_print = false;
 /***********************************************************************************************/
 void denormalize(std::string filename, AcRealSymmetricTensor &tau_means, AcRealSymmetricTensor &tau_stds)
 {
-	if(!loaded_stats){
+	if (!loaded_stats){
 		loaded_stats = true;
 		std::ifstream f(filename, std::ios::binary);
 		if (!f.is_open()){
@@ -784,7 +933,7 @@ void denormalize(std::string filename, AcRealSymmetricTensor &tau_means, AcRealS
 				num_acc = data[0];
 			}
 
-			if(name == "acc_sum"){
+			if (name == "acc_sum"){
 				acc_sum = data;
 			}
 
@@ -847,8 +996,8 @@ extern "C" void torch_infer_c_api(int itsub)
 {	
 #if LTRAINING
 	#include "user_constants.h"
-	if(!ltrained) return;
-	if(!calling_infer){
+	if (!ltrained) return;
+	if (!calling_infer){
 		AcRealSymmetricTensor tau_means = mesh.info[AC_tau_hydro_means];
 		AcRealSymmetricTensor tau_stds  = mesh.info[AC_tau_hydro_stds];
     acLogFromRootProc(rank,"Doing inference\n");
@@ -904,39 +1053,66 @@ extern "C" void torch_train_c_api(AcReal *loss_val, int itsub, double t) {
 #if LTRAINING
   #include "user_constants.h"
   #include <stdlib.h>
+  #include <cfloat>
   if(itsub != 1) return;
   
-  if(!calling_train){
+  if (!calling_train){
     acLogFromRootProc(rank,"Doing training\n");
   	fflush(stderr);
   	fflush(stdout);
   }
-
-
-  called_training = true;
+  
+  called_training=true;
   calling_train = true;
-
-
   acGridExecuteTaskGraph(acGetOptimizedDSLTaskGraph(get_taus),1);
 
   auto bcs = acGetOptimizedDSLTaskGraph(boundconds);	
   acGridExecuteTaskGraph(bcs,1);
   	
-
-  AcReal* out = NULL;
-  AcReal* uumean_ptr = NULL;
-  AcReal* TAU_ptr = NULL;
-  *loss_val = 0.1;
-  
-  acDeviceGetVertexBufferPtrs(acGridGetDevice(), tau_hydro.xx, &TAU_ptr, &out);
-  acDeviceGetVertexBufferPtrs(acGridGetDevice(), uumean.x, &uumean_ptr, &out);
-  
   acGridHaloExchange();
-  torch_train_CAPI((int[]){mx,my,mz}, uumean_ptr, TAU_ptr, loss_val,input_channels,output_channels,"stationary");
-  train_loss.push_back(*loss_val);
-	train_nts.push_back(it);
+
   train_counter++;
-  print_debug();
+  acDeviceSetInput(acGridGetDevice(), AC_count, train_counter);
+
+  acGridExecuteTaskGraph(acGetOptimizedDSLTaskGraph(normalize),1);
+  acGridExecuteTaskGraph(acGetOptimizedDSLTaskGraph(boundconds),1);
+  *loss_val=DBL_MAX;
+  if(lhydro){
+    AcReal* out = NULL;
+    AcReal* feature = NULL;
+    AcReal* label = NULL;
+    
+
+    if(AC_lconservative__mod__hydro){
+        // dynamic field handel acGetmomentum_sgs_Xx()
+        acDeviceGetVertexBufferPtrs(acGridGetDevice(), acGetviscous_sgs_Xx(), &label, &out);
+        acDeviceGetVertexBufferPtrs(acGridGetDevice(), acGetmom_mean_X(), &feature, &out);
+    }
+    else {
+        acDeviceGetVertexBufferPtrs(acGridGetDevice(), tau_hydro.xx, &label, &out);
+        acDeviceGetVertexBufferPtrs(acGridGetDevice(), uumean.x, &feature, &out);
+    }
+
+    acGridHaloExchange();
+    torch_train_CAPI((int[]){mx,my,mz}, feature, label, loss_val,3,6,"stationary");
+    train_loss.push_back(*loss_val);
+    train_nts.push_back(it);
+  }
+  else if(AC_ltrain_mag__mod__training){
+    AcReal* out = NULL;
+    AcReal* feature = NULL;
+    AcReal* label = NULL;
+
+    
+    acDeviceGetVertexBufferPtrs(acGridGetDevice(), F_SGS_EMFVEC.x, &label, &out);
+    acDeviceGetVertexBufferPtrs(acGridGetDevice(), uumean.x, &feature, &out);
+
+    acGridHaloExchange();
+    torch_train_CAPI((int[]){mx,my,mz}, feature, label, loss_val,3,3,"stationary");
+    train_loss.push_back(*loss_val);
+    train_nts.push_back(it);
+  }
+  //print_debug();
   if (it==nt){
   	std::ofstream myFile;
   	std::string fileString = "train_loss_" + std::to_string(my_rank)  + ".csv";	
@@ -954,9 +1130,7 @@ extern "C" void torch_train_c_api(AcReal *loss_val, int itsub, double t) {
   		myFile << train_nts[i] << "\n";
   	}
   	myFile.close();
-
   }
-
 #endif
 }
 /***********************************************************************************************/
@@ -991,7 +1165,7 @@ void load_f_ode()
                 acDeviceSynchronizeStream(acGridGetDevice(),STREAM_DEFAULT);
                 acDeviceLoad(acGridGetDevice(), STREAM_DEFAULT, mesh.info, AC_f_ode);
                 acDeviceSynchronizeStream(acGridGetDevice(),STREAM_DEFAULT);
-	        if(performance_logs) acLogFromRootProc(rank,"Loading ode variables took: %.14e\n",MPI_Wtime()-start);
+	        if (performance_logs) acLogFromRootProc(rank,"Loading ode variables took: %.14e\n",MPI_Wtime()-start);
         }
 }
 /***********************************************************************************************/
@@ -1056,7 +1230,7 @@ extern "C" void beforeBoundaryGPU(bool lrmv, int isubstep, double t, bool lsubst
 #if LNEWTON_COOLING
 	acGridExecuteTaskGraph(acGetOptimizedDSLTaskGraph(AC_integrate_tau),1);
 #endif
-	if(performance_logs) acLogFromRootProc(rank,"BeforeBoundary took: %.14e\n",MPI_Wtime()-start_time);
+	if (performance_logs) acLogFromRootProc(rank,"BeforeBoundary took: %.14e\n",MPI_Wtime()-start_time);
 }
 /***********************************************************************************************/
 bool idx_init = false;
@@ -1077,7 +1251,7 @@ extern "C" void print_debug() {
 #if LTRAINING
     #include "user_constants.h"
 		
-		std::string fname = "snapshots/snapshot_294_rank_" + std::to_string(my_rank) + "_it_" + std::to_string(it) + ".bin";
+		std::string fname = "snapshots/snapshot_multi_normalized_"+ std::to_string(nxgrid*nygrid*nzgrid)  +"_rank_" + std::to_string(rank) + "_it_" + std::to_string(it) + ".bin";
 		std::ifstream infile(fname, std::ios::binary);
 		if (infile.good()) return;
 		
@@ -1108,7 +1282,7 @@ extern "C" void print_debug() {
 		const size_t n_points =  x_size * y_size * z_size;
 		const int n_fields = 22;
 		
-		if(!idx_init){
+		if (!idx_init){
 			idx_cache.reserve(n_points);
 			buffer.reserve(n_points * n_fields);
 
@@ -1146,7 +1320,7 @@ extern "C" void print_debug() {
     const double it_double = static_cast<double>(it);
     const int yz_size = y_size * z_size;
 
-		for(size_t idx_i=0; idx_i < idx_cache.size(); ++idx_i){
+		for (size_t idx_i=0; idx_i < idx_cache.size(); ++idx_i){
 			
 			const size_t idx = idx_cache[idx_i];
 
@@ -1196,7 +1370,7 @@ extern "C" void print_debug() {
     out.close();
 
 	#endif
-	if(called_training) called_training = false;
+	if (called_training) called_training = false;
 }
 /***********************************************************************************************/
 void
@@ -1204,7 +1378,7 @@ GW_update(const AcReal dt_gw)
 {
 #if LGRAVITATIONAL_WAVES_HTXK
 	//We set the device id here since another thread than the master might be executing this
-  	if(acSetDevice(device_id) != cudaSuccess)
+  	if (acSetDevice(device_id) != cudaSuccess)
   	{
   	        fprintf(stderr,"Was not able to set device id!\n");
   	        exit(EXIT_FAILURE);
@@ -1226,7 +1400,7 @@ extern "C" void afterSubStepGPU()
 	if (acDeviceGetInput(acGridGetDevice(), AC_step_num) == PC_FIRST_SUB_STEP)
 	{
 	   dt_gw += dt;
-	   if((it+1) % ntimesteps_per_gw_step__mod__gravitational_waves_htxk == 0)
+	   if ((it+1) % ntimesteps_per_gw_step__mod__gravitational_waves_htxk == 0)
 	   {
 	     GW_update(dt_gw);
 	     dt_gw = 0.0;
@@ -1243,14 +1417,14 @@ extern "C" void afterSubStepGPU()
 void
 fourier_boundary_conditions()
 {
-	if(luses_aa_pwd_top)
+	if (luses_aa_pwd_top)
 	{
 		acKernelInputParams params{};
 		params.bc_aa_pwd_kernel.boundary = BOUNDARY_Z_TOP;
 		params.bc_aa_pwd_kernel.topbot  = AC_top;
 		const AcKernel kernel = acGetOptimizedKernel(bc_aa_pwd_kernel,params);
 		const size_t boundary_z = (size_t)mesh.info[AC_nlocal_max].z-1;
-		for(int ghost = 1; ghost <= NGHOST; ++ghost)
+		for (int ghost = 1; ghost <= NGHOST; ++ghost)
 		{
 			acDeviceFFTR2PlanarXY(acGridGetDevice(), acGetAAX(), acGetAX_FOURIER_REAL(), acGetAX_FOURIER_IMAG(), boundary_z-ghost);
 			acDeviceFFTR2PlanarXY(acGridGetDevice(), acGetAAY(), acGetAY_FOURIER_REAL(), acGetAY_FOURIER_IMAG(), boundary_z-ghost);
@@ -1260,7 +1434,7 @@ fourier_boundary_conditions()
 				(Volume){(size_t)mesh.info[AC_nlocal_max].x,(size_t)mesh.info[AC_nlocal_max].y, boundary_z+2}
 				);
   		acDeviceSynchronizeStream(acGridGetDevice(),STREAM_DEFAULT);
-		for(int ghost = 1; ghost <= NGHOST; ++ghost)
+		for (int ghost = 1; ghost <= NGHOST; ++ghost)
 		{
 			acDeviceFFTBackwardTransformPlanar2RXY(acGridGetDevice(),  acGetAX_FOURIER_REAL(), acGetAX_FOURIER_IMAG(), acGetAAX(), boundary_z+ghost);
 			acDeviceFFTBackwardTransformPlanar2RXY(acGridGetDevice(),  acGetAY_FOURIER_REAL(), acGetAY_FOURIER_IMAG(), acGetAAY(), boundary_z+ghost);
@@ -1268,7 +1442,7 @@ fourier_boundary_conditions()
 		}
 		acGridExecuteTaskGraph(boundary_z_halo_exchange_graph,1);
 	}
-	if(luses_aa_pot2_top)
+	if (luses_aa_pot2_top)
 	{
 		acKernelInputParams params{};
 		params.bc_aa_pot_kernel.boundary = BOUNDARY_Z_TOP;
@@ -1282,7 +1456,7 @@ fourier_boundary_conditions()
 				(Volume){(size_t)mesh.info[AC_nlocal_max].x,(size_t)mesh.info[AC_nlocal_max].y, boundary_z+2}
 				);
   		acDeviceSynchronizeStream(acGridGetDevice(),STREAM_DEFAULT);
-		for(int ghost = 1; ghost <= NGHOST; ++ghost)
+		for (int ghost = 1; ghost <= NGHOST; ++ghost)
 		{
 			acDeviceFFTBackwardTransformPlanar2RXY(acGridGetDevice(),  acGetAX_FOURIER_REAL(), acGetAX_FOURIER_IMAG(), acGetAAX(), boundary_z+ghost);
 			acDeviceFFTBackwardTransformPlanar2RXY(acGridGetDevice(),  acGetAY_FOURIER_REAL(), acGetAY_FOURIER_IMAG(), acGetAAY(), boundary_z+ghost);
@@ -1385,14 +1559,14 @@ extern "C" void substepGPU(int isubstep, double t)
   if (isubstep == 1) 
   {
 #if LGRAVITATIONAL_WAVES_HTXK
-    if(GW_thread.joinable())
+    if (GW_thread.joinable())
     {
             GW_thread.join();
     }
 #endif
     set_timestep(t);
 #if LGRAVITATIONAL_WAVES_HTXK
-    if(lsplit_gw_rhs_from_rest_on_gpu)
+    if (lsplit_gw_rhs_from_rest_on_gpu)
     {
           acGridExecuteTaskGraph(acGetOptimizedDSLTaskGraph(AC_GW_rhs),1);
     }
@@ -1415,7 +1589,7 @@ extern "C" void substepGPU(int isubstep, double t)
 	calc_timestep(t);
   }
 #if LTIMEAVGS
-  if(isubstep == num_substeps)
+  if (isubstep == num_substeps)
   {
 	  acGridExecuteTaskGraph(acGetOptimizedDSLTaskGraph(AC_update_timeavgs));
   }
@@ -1676,22 +1850,22 @@ extern "C" void loadFarray()
 /***********************************************************************************************/
 void generate_bcs()
 {
-	if(rank != 0) return;
+	if (rank != 0) return;
 	bool bc2ast_exists = (system("ls src/scripts/bc2ast > /dev/null 2>&1") == 0);
-	if(!bc2ast_exists)
+	if (!bc2ast_exists)
 	{
 		fprintf(stderr,"AC Warning: Did not find src/scripts/bc2ast so skipping possible bc generation!\n");
 		return;
 	}
-	if(system("cd src && scripts/bc2ast 1> ../tmp_bcs 2> /dev/null && cd .."))
+	if (system("cd src && scripts/bc2ast 1> ../tmp_bcs 2> /dev/null && cd .."))
 	{
 		fprintf(stderr,"AC Error: Was not able to generate bcs!\n");
 		exit(EXIT_FAILURE);
 	}
 	const int different = system("diff tmp_bcs src/astaroth/DSL/local/boundconds.h");
-	if(different)
+	if (different)
 	{
-		if(system("mv tmp_bcs src/astaroth/DSL/local/boundconds.h"))
+		if (system("mv tmp_bcs src/astaroth/DSL/local/boundconds.h"))
 		{
 			fprintf(stderr,"AC Error: Was not able move bcs to DSL/local!\n");
 			exit(EXIT_FAILURE);
@@ -1700,7 +1874,7 @@ void generate_bcs()
 	}
 	else
 	{
-		if(system("rm tmp_bcs"))
+		if (system("rm tmp_bcs"))
 		{
 			fprintf(stderr,"AC Error: Was not able to remove tmp_bcs!\n");
 			exit(EXIT_FAILURE);
@@ -1716,8 +1890,8 @@ extern "C" void initializeGPU(AcReal *farr, int comm_fint, double t, int nt_,
 				int lac_sparse_autotuning_)  // MPI_Fint comm_fint
 {
   lac_sparse_autotuning = lac_sparse_autotuning_;
-  if(lread_all_vars_from_device_) lread_all_vars_from_device = true;
-  if(lcpu_timestep_on_gpu_) lcpu_timestep_on_gpu = true;
+  if (lread_all_vars_from_device_) lread_all_vars_from_device = true;
+  if (lcpu_timestep_on_gpu_) lcpu_timestep_on_gpu = true;
   //Setup configurations used for initializing and running the GPU code
   nt = nt_;
   comm_pencil = MPI_Comm_f2c(comm_fint);
@@ -1729,7 +1903,7 @@ extern "C" void initializeGPU(AcReal *farr, int comm_fint, double t, int nt_,
 
   //Not worth it to get this working inside the container
   const bool inside_container = ltraining;
-  if(!inside_container) generate_bcs();
+  if (!inside_container) generate_bcs();
   MPI_Barrier(MPI_COMM_WORLD);
   acCompile(cmake_options,mesh.info);
   acLoadLibrary(rank == 0 ? stderr : NULL,mesh.info);
@@ -1775,7 +1949,7 @@ extern "C" void initializeGPU(AcReal *farr, int comm_fint, double t, int nt_,
   }
   if (rank==0 && ldebug) printf("memusage grid_init= %f MBytes\n", acMemUsage()/1024.);
   acGridInit(mesh);
-  if(acGetDevice(&device_id) != cudaSuccess)
+  if (acGetDevice(&device_id) != cudaSuccess)
   {
 	  fprintf(stderr,"Was not able to get device id!\n");
 	  exit(EXIT_FAILURE);
@@ -1789,7 +1963,7 @@ extern "C" void initializeGPU(AcReal *farr, int comm_fint, double t, int nt_,
   acDeviceSetInput(acGridGetDevice(), AC_t,AcReal(t));
   acDeviceSetInput(acGridGetDevice(), AC_shear_delta_y,deltay);
   GW_timestep_graph = acGetOptimizedDSLTaskGraph(AC_gravitational_waves_solve_and_stress);
-  if(luses_aa_pwd_top || luses_aa_pot2_top)
+  if (luses_aa_pwd_top || luses_aa_pot2_top)
   {
 	Field AA_fields[3];
 	AA_fields[0] = acGetAAX();
@@ -1831,7 +2005,7 @@ extern "C" void reloadConfig()
 	  {
 		  fprintf(stderr,"Was not successful in closing Astaroth lib!\n");
 		  int err = system("touch ERROR");
-		  if(err)
+		  if (err)
 		    fprintf(stderr,"Unable to create ERROR file!\n");
 	  }
   	  MPI_Barrier(MPI_COMM_WORLD);
@@ -1840,13 +2014,13 @@ extern "C" void reloadConfig()
 #include "cmake_options.h"
   generate_bcs();
   MPI_Barrier(MPI_COMM_WORLD);
-  if(acCompile(cmake_options,mesh.info) != AC_SUCCESS)
+  if (acCompile(cmake_options,mesh.info) != AC_SUCCESS)
   {
-	  if(rank == 0) 
+	  if (rank == 0) 
 	  {
 		  fprintf(stderr,"Was not able to compile Astaroth!\n");
 		  int err = system("touch ERROR");
-		  if(err)
+		  if (err)
 		    fprintf(stderr,"Unable to create ERROR file!\n");
 	  }
   	  MPI_Barrier(MPI_COMM_WORLD);
@@ -1884,6 +2058,13 @@ extern "C" void updateInConfigScal(int index, AcReal value)
      acDeviceSynchronizeStream(acGridGetDevice(),STREAM_DEFAULT);
 }
 /***********************************************************************************************/
+extern "C" void updateInConfigVec(int index, AcReal* value_)
+{
+     const AcReal3 value = (AcReal3){value_[0],value_[1],value_[2]};
+     acDeviceLoadVectorUniform(acGridGetDevice(),STREAM_DEFAULT,static_cast<AcReal3Param>(index),value);
+     acDeviceSynchronizeStream(acGridGetDevice(),STREAM_DEFAULT);
+}
+/***********************************************************************************************/
 extern "C" int updateInConfigArrName(char *name)
 {
     int index = -1;
@@ -1914,34 +2095,50 @@ extern "C" int updateInConfigScalName(char *name, AcReal value)
     return index;
 }
 /**********************************************************************************************/
+extern "C" int updateInConfigVecName(char *name, AcReal* value_)
+{
+    int index = -1;
+    for (int i=0; i<NUM_REAL3_PARAMS; i++){
+       if (strcmp(real3param_names[i],name)==0) index=i;
+    }
+    if (index>-1) updateInConfigVec(index, value_);
+    else
+    {
+       fprintf(stderr,"Astaroth WARNING: Did not entry named %s in config!!\n",name);
+       fflush(stderr);
+    }
+    return index;
+}
+/**********************************************************************************************/
 extern "C" void finalizeGPU()
 {
   // Deallocate everything on the GPUs and reset
   AcResult res = acGridQuit();
-  if(GW_thread.joinable())
+  if (GW_thread.joinable())
   {
-          GW_thread.join();
+    GW_thread.join();
   }
 	
-	// write the loss values to a file
+// write the loss values to a file
 
-	std::ofstream myFile;
-
-	std::string fileString = "train_loss_" + std::to_string(my_rank)  + ".csv";	
-	myFile.open(fileString);
+#if LTRAINING
+  std::ofstream myFile;
+  std::string fileString = "train_loss_" + std::to_string(my_rank)  + ".csv";	
+  myFile.open(fileString);
   myFile << "epoch,train_loss\n";
-	for (int i=0;i<train_loss.size();i++){
-		myFile << i << "," << train_loss[i] << "\n";
-	}
+  for (int i=0;i<train_loss.size();i++){
+    myFile << i << "," << train_loss[i] << "\n";
+  }
   myFile.close();
 
-	std::string train_sample = "train_sample_" + std::to_string(my_rank) + ".csv";
+  std::string train_sample = "train_sample_" + std::to_string(my_rank) + ".csv";
   myFile.open(train_sample);
   myFile << "train_sample_nts\n";
   for (int i=0;i<train_nts.size();i++){
   	myFile << train_nts[i] << "\n";
   }
-	myFile.close();
+  myFile.close();
+#endif
 }
 /***********************************************************************************************/
 extern "C" void random_initial_condition()
@@ -1955,6 +2152,7 @@ extern "C" void random_initial_condition()
 /***********************************************************************************************/
 void testBCs()
 {
+
   //if (dimensionality != 3) return;
   // Set random seed for reproducibility
   srand(321654987);

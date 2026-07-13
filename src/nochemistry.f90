@@ -151,13 +151,13 @@ module Chemistry
 !
     endsubroutine chemistry_clean_up
 !***********************************************************************
-    subroutine read_chemistry_init_pars(iostat)
+    subroutine read_chemistry_init_pars(iomsg)
 !
       use File_io, only: parallel_unit
 !
-      integer, intent(out) :: iostat
+      character(LEN=*), intent(out) :: iomsg
 !
-      iostat=0
+      iomsg=""
 
     endsubroutine read_chemistry_init_pars
 !***********************************************************************
@@ -168,13 +168,13 @@ module Chemistry
 !
     endsubroutine write_chemistry_init_pars
 !***********************************************************************
-    subroutine read_chemistry_run_pars(iostat)
+    subroutine read_chemistry_run_pars(iomsg)
 !
       use File_io, only: parallel_unit
 !
-      integer, intent(out) :: iostat
+      character(LEN=*), intent(out) :: iomsg
 !
-      iostat=0
+      iomsg=""
 
     endsubroutine read_chemistry_run_pars
 !***********************************************************************
@@ -370,6 +370,84 @@ module Chemistry
       call keep_compiler_quiet(dapdt)
 !
     end subroutine cond_spec_cond_lagr
+!***********************************************************************
+    subroutine cond_spec_film_rate(p,ix,Tdrop,ap,urel,dapdt)
+!
+      type (pencil_case) :: p
+      integer :: ix
+      real :: Tdrop,ap,urel,dapdt
+!
+      call keep_compiler_quiet(p)
+      call keep_compiler_quiet(ix)
+      call keep_compiler_quiet(Tdrop)
+      call keep_compiler_quiet(ap)
+      call keep_compiler_quiet(urel)
+      call keep_compiler_quiet(dapdt)
+!
+    end subroutine cond_spec_film_rate
+!***********************************************************************
+    subroutine cond_spec_Lmass(Lmass)
+!
+      real :: Lmass
+!
+      Lmass = 0.
+      call keep_compiler_quiet(Lmass)
+!
+    end subroutine cond_spec_Lmass
+!***********************************************************************
+    subroutine cond_spec_transfer_cv(ix0,cv_cond,cv_absorb)
+!
+      integer :: ix0
+      real :: cv_cond, cv_absorb
+!
+      cv_cond = 0.; cv_absorb = 0.
+      call keep_compiler_quiet(ix0)
+      call keep_compiler_quiet(cv_cond,cv_absorb)
+!
+    end subroutine cond_spec_transfer_cv
+!***********************************************************************
+    subroutine cond_spec_absorb_rate(p,ix,Tdrop,ap,mN,mW,urel,mdotN)
+!
+      type (pencil_case) :: p
+      integer :: ix
+      real :: Tdrop,ap,mN,mW,urel,mdotN
+!
+      mdotN = 0.
+      call keep_compiler_quiet(p)
+      call keep_compiler_quiet(ix)
+      call keep_compiler_quiet(Tdrop)
+      call keep_compiler_quiet(ap)
+      call keep_compiler_quiet(mN)
+      call keep_compiler_quiet(mW)
+      call keep_compiler_quiet(urel)
+      call keep_compiler_quiet(mdotN)
+!
+    end subroutine cond_spec_absorb_rate
+!***********************************************************************
+    subroutine absorb_spec_lagr(f,df,p,ix0,ix,np_swarm,mdotN)
+!
+      real, dimension (mx,my,mz,mfarray) :: f
+      real, dimension (mx,my,mz,mvar) :: df
+      type (pencil_case) :: p
+      real :: np_swarm,mdotN
+      integer :: ix0,ix
+!
+      call keep_compiler_quiet(f)
+      call keep_compiler_quiet(df)
+      call keep_compiler_quiet(p)
+      call keep_compiler_quiet(np_swarm,mdotN)
+      call keep_compiler_quiet(ix0,ix)
+!
+    end subroutine absorb_spec_lagr
+!***********************************************************************
+    subroutine absorb_spec_Lsol(Lsol)
+!
+      real :: Lsol
+!
+      Lsol = 0.
+      call keep_compiler_quiet(Lsol)
+!
+    end subroutine absorb_spec_Lsol
 !***********************************************************************
     subroutine cond_spec_nucl_lagr(f,df,p)
 !

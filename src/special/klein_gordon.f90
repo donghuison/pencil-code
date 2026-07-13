@@ -41,11 +41,15 @@
 ! MAUX CONTRIBUTION 0
 !
 ! PENCILS PROVIDED phi; dphi; gphi(3); cov_der(4,4)
+! PENCILS PROVIDED del2phi;
 ! PENCILS PROVIDED phi_doublet(3); dphi_doublet(3); phi_doublet_mod
-! PENCILS PROVIDED Vprime
+! PENCILS PROVIDED Vprime; Vthermal_prime
+! PENCILS PROVIDED plasma_friction;
+! PENCILS PROVIDED psi; dpsi; gpsi(3); Vprimepsi
+! PENCILS PROVIDED omega_phi
 ! PENCILS EXPECTED GammaY, GammaW1, GammaW2, GammaW3
 ! PENCILS EXPECTED W1(3); W2(3); W3(3), aa(3)
-! PENCILS PROVIDED psi; dpsi; gpsi(3); Vprimepsi
+! PENCILS EXPECTED lorentz, ext_force(4);
 !
 !***************************************************************
 !
@@ -82,7 +86,7 @@ module Special
 !
   use Cdata
   use General, only: keep_compiler_quiet
-  use Messages, only: svn_id, fatal_error
+  use Messages, only: svn_id, fatal_error, warning
 !
   implicit none
 !
@@ -96,9 +100,11 @@ module Special
   integer :: iphi_up_re=0, iphi_up_im=0, iphi_down_re=0, iphi_down_im=0
   integer :: idphi_up_re=0, idphi_up_im=0, idphi_down_re=0, idphi_down_im=0
   real :: ncutoff_phi=1., phi_v=.1
-  real :: phimass=1.06e-6, phimass2, ascale_ini=1.
+  real :: phimass=1.06e-6, phimass2, ascale_ini=1., sign_phimass2=1.
   real :: psimass=1., psimass2
-  real :: phi0=.44, dphi0=-1.69e-7, c_phi=1., lambda_phi=0., eps=.01
+  real :: phi0=.44, dphi0=-1.69e-7, c_phi=1., delta_phi=0.,lambda_phi=0., eps=.01
+  real :: delta_phi_prefactor=1.0,lambda_phi_prefactor=1.0
+  real :: chi_quartic=impossible   ! normalized variable for quartic potential
   real :: lambda_psi=0., coupl_phipsi=0., c_psi=1.
   real :: amplphi=.1, ampldphi=.0, kx_phi=1., ky_phi=0., kz_phi=0., phase_phi=0., width_phi=.1, offset=0.
   real :: amplpsi=0., ampldpsi=0.
@@ -125,6 +131,13 @@ module Special
   real, pointer :: sigE_prefactor, sigB_prefactor, mass_chi
   real, dimension (nx) :: dt1_special
   real, dimension (nx, 4, 3) :: dfdxs=0.
+  real :: bubble_size_factor = 1.0
+  real :: bubble_size = impossible
+  real :: bubble_wall_width = impossible
+  real :: bubble_wall_width_factor = 1.0
+  integer :: number_of_bubbles = 1
+  logical :: lspeed_of_light_dt = .false.
+  integer :: seed_reset=1963
   !Whether the sums needed for the ODE and rhs advancement are done in the together in the same kernel as the rhs
   !advancement. Benchmarks seem to suggest that combining them is indeed more performant.
   !This approach is however strictly approximative since we effectively take the value of Hscript from the preceeding substep
@@ -137,17 +150,52 @@ module Special
   logical, pointer :: lphi_linear_regime, lnoncollinear_EB, lnoncollinear_EB_aver
   logical, pointer :: lcollinear_EB, lcollinear_EB_aver, lmass_suppression
   logical, pointer :: lallow_bprime_zero
+  logical, pointer :: lconservative
   logical :: lhiggs_friction=.false., lwaterfall=.false.
   real :: higgs_friction=0.
   logical :: lphi_doublet=.false., lphi_weakcharge=.false., lphi_hypercharge=.false.
   character (len=labellen) :: Vprime_choice='quadratic', Hscript_choice='set'
   character (len=labellen), dimension(ninit) :: initspecial='nothing'
   character (len=50) :: echarge_type='const', init_rho_chi='zero'
+  logical :: lphi_normalized_units = .false.
+  real :: t_next_bubble = 0.0
+  real :: max_bubble_nucleation_rate = 1.0
+  real :: tf = 0.0
+  logical :: lnucleate_bubbles = .false.
+  character (len=50) :: nucleation_method='cutting'
+  character (len=50) :: bubble_position_criteria='cutting'
+  real :: nucleation_threshold = 1e-4
+  character (len=50) :: nucleation_rate_choice='constant'
+  integer, parameter :: max_bubbles = 10000
+  real, dimension(max_bubbles,3) :: bubble_positions=impossible
+  real, dimension(max_bubbles)   :: bubble_times=impossible
+  real :: beta = impossible
+  logical :: lgenerate_bubble_times = .false.
+  integer :: bubble_counter = 1
+  !TP: for backwards compatibility the setting of the random seed can be suppressed
+  logical :: linitialize_seed=.true.
+  real :: plasma_coupling_coeff=0.0
+  logical :: lplasma_coupling=.false.
+  integer :: continuation_offset = 0
+
+! Video data
+ integer :: ivid_del2phi=0,ivid_Vprime=0,ivid_gphi1=0,ivid_g2phi1=0,ivid_V=0
+ real, dimension(:,:), allocatable :: del2phi_xy,del2phi_xz,del2phi_yz,del2phi_xy2,del2phi_xy3,del2phi_xy4,del2phi_xz2
+ real, dimension(:,:), allocatable :: gphi1_xy,gphi1_xz,gphi1_yz,gphi1_xy2,gphi1_xy3,gphi1_xy4,gphi1_xz2
+ real, dimension(:,:), allocatable :: g2phi1_xy,g2phi1_xz,g2phi1_yz,g2phi1_xy2,g2phi1_xy3,g2phi1_xy4,g2phi1_xz2
+ real, dimension(:,:), allocatable :: Vprime_xy,Vprime_xz,Vprime_yz,Vprime_xy2,Vprime_xy3,Vprime_xy4,Vprime_xz2
+ real, dimension(:,:), allocatable :: V_xy,V_xz,V_yz,V_xy2,V_xy3,V_xy4,V_xz2
+ real, dimension(:,:,:,:,:), allocatable :: del2phi_r,V_r,Vprime_r, gphi1_r, g2phi1_r
 !
+!
+
+  real, dimension(nx) :: del2phi
+  !$omp threadprivate(del2phi)
+
   namelist /special_init_pars/ &
-      initspecial, phi0, dphi0, phimass, eps, ascale_ini, &
+      initspecial, phi0, dphi0, phimass, sign_phimass2, eps, ascale_ini, &
       lcompute_dphi0, lem_backreact, &
-      c_phi, lambda_phi, Vprime_choice, amplphi, ampldphi, lno_noise_phi, lno_noise_dphi, &
+      c_phi, delta_phi, lambda_phi, Vprime_choice, amplphi, ampldphi, lno_noise_phi, lno_noise_dphi, &
       kx_phi, ky_phi, kz_phi, phase_phi, width_phi, offset, &
       initpower_phi, initpower2_phi, cutoff_phi, kgaussian_phi, kpeak_phi, &
       initpower_dphi, initpower2_dphi, cutoff_dphi, kpeak_dphi, &
@@ -156,15 +204,21 @@ module Special
       echarge_type, init_rho_chi, rho_chi_init, eta_phi, lphi_doublet, &
       lphi_weakcharge, lphi_hypercharge, lhiggs_friction, higgs_friction, &
       lwaterfall, lambda_psi, coupl_phipsi, c_psi, amplpsi, ampldpsi, psimass, &
-      V0_usr, v_usr, alpha_usr, beta_usr
+      V0_usr, v_usr, alpha_usr, beta_usr, lphi_normalized_units, bubble_size_factor, &
+      bubble_wall_width_factor,number_of_bubbles,bubble_positions, &
+      beta,bubble_size,bubble_wall_width,linitialize_seed, &
+      chi_quartic, continuation_offset
 !
   namelist /special_run_pars/ &
-      initspecial, phi0, dphi0, phimass, eps, ascale_ini, &
-      lem_backreact, c_phi, lambda_phi, Vprime_choice, &
+      initspecial, phi0, dphi0, phimass, sign_phimass2, eps, ascale_ini, &
+      lem_backreact, c_phi, delta_phi, lambda_phi, Vprime_choice, &
       ldt_klein_gordon, Ndiv, Hscript0, Hscript_choice, &
       lflrw, lrho_chi, scale_rho_chi_Heqn, echarge_type, cdt_rho_chi, &
       phi_v, lhiggs_friction, higgs_friction, lwaterfall, lambda_psi, &
-      coupl_phipsi, c_psi
+      coupl_phipsi, c_psi, lspeed_of_light_dt,lnucleate_bubbles, bubble_size_factor,&
+      max_bubble_nucleation_rate, bubble_wall_width_factor,number_of_bubbles,&
+      lgenerate_bubble_times,beta,nucleation_rate_choice,bubble_position_criteria,tf,&
+      bubble_size,bubble_wall_width,plasma_coupling_coeff,lplasma_coupling
 !
 ! Diagnostic variables (needs to be consistent with reset list below).
 !
@@ -180,6 +234,7 @@ module Special
   integer :: idiag_dpsim=0      ! DIAG_DOC: $\left<\psi'\right>$
   integer :: idiag_dpsi2m=0     ! DIAG_DOC: $\left<(\psi')^2\right>$
   integer :: idiag_dpsirms=0    ! DIAG_DOC: $\left<(\psi')^2\right>^{1/2}$
+  integer :: idiag_gphirms =0       ! DIAG_DOC: $\left<\ |\partial phi| \right>$
   integer :: idiag_Hscriptm=0   ! DIAG_DOC: $\left<{\cal a*H}\right>$
   integer :: idiag_lnam=0       ! DIAG_DOC: $\left<\ln a\right>$
   integer :: idiag_Vprimem=0    ! DIAG_DOC: $\left<V_{,\phi}\right>$
@@ -195,6 +250,10 @@ module Special
   integer :: idiag_sigEma=0     ! DIAG_DOC: $\rho_\chi$
   integer :: idiag_sigBma=0     ! DIAG_DOC: $\rho_\chi$
   integer :: idiag_count_eb0a=0 ! DIAG_DOC: $f_\mathrm{EB0}$
+  integer :: idiag_plasma_frictm=0 ! DIAG_DOC: $\left<\eta_{\phi}U_{\nu}\partial^{\nu}\phi\right>$
+  integer :: idiag_wall_vel = 0 ! DIAG_DOC: $v_{w}$
+  integer :: idiag_wall_pos = 0 ! DIAG_DOC: $r_{w}$
+  integer :: idiag_wall_lorentz = 0 ! DIAG_DOC: $\frac{1}{\sqrt{1-v_{w}^2}}$
 !
   integer :: enum_hscript_choice = 0
   integer :: enum_vprime_choice = 0
@@ -270,6 +329,109 @@ module Special
 !
     endsubroutine register_special
 !***********************************************************************
+    subroutine nucleate_a_bubble(f,pos)
+!
+!  Adds a bubble of phi in the broken phase
+!
+!  30-jun-26/TP: coded
+!
+      use Sub, only: solve3x3
+      real,  dimension (mx,my,mz,mfarray) :: f
+      real, dimension (3) :: pos
+      integer :: l,m,n
+      real :: x_local, y_local, z_local
+      real :: r,bubble_profile
+      real, dimension(3,3) :: A
+      real, dimension(3) :: b, c
+      integer :: offset
+      real :: tanh_val, sech2
+!
+
+      if(iphi == 0) then
+        call fatal_error("nucleate_a_bubble: ","Cannot nucleate a bubble without phi!")
+      endif
+
+      offset = 0
+      if(lspherical_coords .and. ny==1 .and. nz==1) then
+        !This is for simulating the expansion of a single bubble in 1d radial,
+        !where tanh is not a proper solution since dphi/dr at r=0 is not 0.
+        !Thus we smoothly (continuos second derivative) connect a polynomial from l1 to continuation_offset
+        !that has dphi/dr 0 at r=0 to not produce any possible numerical problems
+        offset = continuation_offset
+        r = x(l1+offset)
+
+        A(1,1) = r**2
+        A(1,2) = r**3
+        A(1,3) = r**4
+
+        A(2,1) = 2*r
+        A(2,2) = 3*r**2
+        A(2,3) = 4*r**3
+
+        A(3,1) = 2
+        A(3,2) = 6*r
+        A(3,3) = 12*r**2
+
+        tanh_val = tanh((r-bubble_size)/bubble_wall_width)
+        b(1) = 0.5*(1-tanh_val)-1
+        sech2 = 1-tanh_val**2
+        b(2) = -(0.5/bubble_wall_width)*sech2
+        b(3) = (1/bubble_wall_width**2)*sech2*tanh_val
+        call solve3x3(A,b,c)
+      endif
+
+      do l = l1,l2; do m = m1,m2; do n = n1,n2
+        if(lcartesian_coords) then
+          x_local = x(l)
+          y_local = y(m)
+          z_local = z(n)
+        else if(lspherical_coords) then
+          x_local = x(l)*sin(y(m))*cos(z(n))
+          y_local = x(l)*sin(y(m))*sin(z(n))
+          z_local = x(l)*cos(y(m))
+        else
+          x_local = x(l)*cos(y(m))
+          y_local = x(l)*sin(y(m))
+          z_local = z(n)
+        endif
+        r = sqrt((x_local-pos(1))**2+(y_local-pos(2))**2+(z_local-pos(3))**2)
+        bubble_profile = 0.5*(1-tanh((r-bubble_size)/bubble_wall_width))
+        if(l < l1+offset) then
+          bubble_profile = 1 + c(1)*r**2 + c(2)*r**3 + c(3)*r**4
+        endif
+
+        select case (nucleation_method)
+        case ('max')
+          f(l,m,n,iphi) = max(f(l,m,n,iphi),bubble_profile)
+        !Cutting method refers to the method used in this paper: https://arxiv.org/pdf/1802.05712
+        case ('cutting')
+          f(l,m,n,iphi) = sqrt(f(l,m,n,iphi)**2 + bubble_profile**2)
+        case default
+          call fatal_error("nucleate_a_bubble: No such nucleation method: ", trim(nucleation_method))
+        endselect
+      enddo; enddo; enddo
+      bubble_positions(bubble_counter,:) = pos
+      bubble_times(bubble_counter)       = t
+      bubble_counter = bubble_counter + 1
+      if(bubble_counter > max_bubbles) then
+        call fatal_error('nucleate_a_bubble', 'Too many bubbles!')
+      endif
+    endsubroutine nucleate_a_bubble
+!***********************************************************************
+    subroutine initialize_seed
+      use General, only: random_seed_wrapper
+!
+!  TP:   The random numbers must be synchronized on all processors or
+!        else the treatment of bubbles shall diverge and the MPI will
+!        break or worse hang. The same as in interstellar and supernova explosions
+!
+!
+      if(linitialize_seed) then
+        seed(1)=seed_reset
+        call random_seed_wrapper(PUT=seed)
+      endif
+    endsubroutine initialize_seed
+!***********************************************************************
     subroutine initialize_special(f)
 !
 !  Called after reading parameters, but before the time loop.
@@ -278,10 +440,18 @@ module Special
 !
       use SharedVariables, only: get_shared_variable, put_shared_variable
       use FArrayManager, only: farray_index_by_name_ode, farray_index_by_name
+      use General, only: random_number_wrapper
+      use Slices_methods, only: alloc_slice_buffers
 !
-      real, dimension (mx,my,mz,mfarray) :: f
-      integer :: iLCDM_lna
-!
+      real,  dimension (mx,my,mz,mfarray) :: f
+      integer :: iLCDM_lna,i
+      real :: broken_mass,phi_tilde,u
+      real :: critical_bubble_size
+      real :: thin_bubble_wall_width,sign_m2
+
+
+      call initialize_seed
+
       if (lflrw) then
         iLCDM_lna=farray_index_by_name_ode('iLCDM_lna')
         if (iLCDM_lna>0) call fatal_error('initialize_special', 'there is a conflict with iLCDM_lna')
@@ -289,8 +459,52 @@ module Special
 !
 !  set phimass**2
 !
-      phimass2=phimass**2
+      phimass2=phimass**2*sign_phimass2
       if (lwaterfall) psimass2=psimass**2
+!
+!     alberto: lphi_normalized_units seems too generic, should we call it lphi_normalized_quartic or similar?
+      if(lphi_normalized_units .and. Vprime_choice=='quartic') then
+        ! phimass = 1.0
+        sign_m2 = sign(1.0, phimass2)
+        phimass2 = sign_m2
+        ! alberto: we can allow phimass2 to be positive or negative (or zero)
+        ! phi_tilde = (-delta_phi + sqrt(delta_phi**2 - 4*lambda_phi)) / (2*lambda_phi)
+        ! alberto: we can use chi variable (see updated notes)
+        if (chi_quartic == impossible) then
+          if (lambda_phi <= 0) then
+            call fatal_error('initialize_special',&
+                      'choose lambda_phi > 0 for quartic potential with lphi_normalized_units')
+          endif
+          chi_quartic = (-delta_phi + sqrt(delta_phi**2 - sign_m2*4*lambda_phi)) / (2*sqrt(lambda_phi))
+          chi_quartic = chi_quartic**2 - 1
+        endif
+        print*,"Chi quartic: ",chi_quartic
+        if (chi_quartic <= 0) then
+          call fatal_error('initialize_special',&
+                    'choose chi_quartic > 0 for quartic potential with lphi_normalized_units')
+        elseif (chi_quartic < 1 .and. sign_m2 > 0) then
+          call warning('initialize_special',&
+                    'chi_quartic < 1 and sign_m2 > 0: potential does not present a broken phase')
+        endif
+        phi_tilde = sqrt(1 + chi_quartic)
+        ! delta_phi_prefactor = phi_tilde
+        ! lambda_phi_prefactor = phi_tilde**2 / 6.
+        ! alberto: we can directly give delta and lambda in normalized unit chi
+        delta_phi = - 1 - chi_quartic - sign_m2
+        lambda_phi = 1 + chi_quartic
+        ! broken_mass = sqrt(-delta_phi - 2/phi_tilde)
+        broken_mass = sqrt(1 + chi_quartic - sign_m2)
+        if(bubble_size == impossible) then
+          ! critical_bubble_size = 12.0/(broken_mass**4*phi_tilde**2-1)
+          critical_bubble_size = 12.0/(broken_mass**4-1)
+          bubble_size = bubble_size_factor*critical_bubble_size
+        endif
+        if(bubble_wall_width == impossible) then
+          ! thin_bubble_wall_width = 2/sqrt(1+2*delta_phi*phi_tilde+3*lambda_phi*phi_tilde**2)
+          thin_bubble_wall_width = 2/broken_mass
+          bubble_wall_width = bubble_wall_width_factor*thin_bubble_wall_width
+        endif
+      endif
 !
       if (lmagnetic .and. lem_backreact) then
         call get_shared_variable('alpf',alpf,caller='initialize_klein_gordon')
@@ -362,6 +576,42 @@ module Special
       if (lphi_weakcharge) then
         iW0 = farray_index_by_name('W0')
       endif
+
+      !Generates bubble times in advance
+      if(lgenerate_bubble_times) then
+        do i = 1,number_of_bubbles
+          call random_number_wrapper(u)
+          bubble_times(i) = (1/beta)*log(exp(beta*tstart) + u*(exp(beta*tmax) - exp(beta*tstart)))
+        enddo
+        t_next_bubble = bubble_times(1)
+      endif
+
+      if (plasma_coupling_coeff /= 0.0) then
+        lplasma_coupling = .true.
+      endif
+!
+      if (.not.lhydro .and. lplasma_coupling) then
+        call warning('initialize_special', &
+                'setting lplasma_coupling to False; call hydro module to use plasma coupling')
+        lplasma_coupling = .false.
+      endif
+      if (lhydro) then
+        call get_shared_variable('lconservative',lconservative,caller='initialize_klein_gordon')
+      else
+        allocate(lconservative)
+        lconservative=.false.
+      endif
+
+      if (ivid_del2phi/=0) call alloc_slice_buffers(del2phi_xy,del2phi_xz,del2phi_yz,&
+                                  del2phi_xy2,del2phi_xy3,del2phi_xy4,del2phi_xz2,del2phi_r)
+      if (ivid_gphi1/=0) call alloc_slice_buffers(gphi1_xy,gphi1_xz,gphi1_yz,&
+                                  gphi1_xy2,gphi1_xy3,gphi1_xy4,gphi1_xz2,gphi1_r)
+      if (ivid_g2phi1/=0) call alloc_slice_buffers(g2phi1_xy,g2phi1_xz,g2phi1_yz,&
+                                  g2phi1_xy2,g2phi1_xy3,g2phi1_xy4,g2phi1_xz2,g2phi1_r)
+      if (ivid_Vprime/=0) call alloc_slice_buffers(Vprime_xy,Vprime_xz,Vprime_yz,&
+                                   Vprime_xy2,Vprime_xy3,Vprime_xy4,Vprime_xz2,Vprime_r)
+      if (ivid_V/=0) call alloc_slice_buffers(V_xy,V_xz,V_yz,&
+                                   V_xy2,V_xy3,V_xy4,V_xz2,V_r)
 !
     endsubroutine initialize_special
 !***********************************************************************
@@ -372,13 +622,16 @@ module Special
 !
       use Initcond, only: gaunoise, sinwave_phase, hat, power_randomphase_hel, power_randomphase, bunch_davies
       use Mpicomm, only: mpibcast_real
-!
-      real, dimension (mx,my,mz,mfarray) :: f
+      use General, only: random_number_wrapper
+      real,  dimension (mx,my,mz,mfarray) :: f
       real :: Vpotential, Hubble_ini, phi_gam, amplphi_BD, amplee_BD, deriv_prefactor
-      integer :: j
+      integer :: i,j
       real :: lnascale
+      real, dimension(3) :: pos
 !
       intent(inout) :: f
+
+      call initialize_seed
 !
 !  SAMPLE IMPLEMENTATION
 !
@@ -497,10 +750,22 @@ module Special
               +spread(spread(amplphi*sin(kx_phi*x),2,my),3,mz)
             f(:,:,:,iphi_down_re)=f(:,:,:,iphi_down_re) &
               +spread(spread(amplphi*sin(kx_phi*x),2,my),3,mz)
+          case ('bubbles')
+            if (lroot) print*,'init_special: bubbles'
+            do i = 1,number_of_bubbles
+              !The initial bubble positions have been given
+              if(bubble_positions(i,1) /= impossible) then
+                pos = bubble_positions(i,:)
+              else
+                pos = get_random_bubble_pos(f)
+              endif
+              call nucleate_a_bubble(f,pos)
+            enddo
           case default
             call fatal_error("init_special: No such initspecial: ", trim(initspecial(j)))
         endselect
       enddo
+
 !
 !  initial condition for energy density of charged particles
 !
@@ -538,6 +803,7 @@ module Special
         ! if (lrho_chi .or. lnoncollinear_EB .or. lnoncollinear_EB_aver .or. &
         !   lcollinear_EB .or. lcollinear_EB_aver) lpenc_requested(i_e2)=.true.
       endif
+      
 !
 !  Call pencils phi and dphi
 !
@@ -573,6 +839,18 @@ module Special
         lpenc_requested(i_dpsi)=.true.
         lpenc_requested(i_Vprimepsi)=.true.
       endif
+
+      if (lhydro .and. lplasma_coupling) then
+        lpenc_requested(i_lorentz)=.true.
+        if (plasma_coupling_coeff /= 0.0) then
+          lpenc_requested(i_plasma_friction)= .true.
+        endif
+        lpenc_requested(i_ext_force) = .true.
+      endif
+
+      if(lpenc_requested(i_ext_force)) then
+        lpenc_requested(i_gphi) = .true.
+      endif
 !
     endsubroutine pencil_criteria_special
 !***********************************************************************
@@ -583,15 +861,18 @@ module Special
 !
 !  24-nov-04/tony: coded
 !
-      use Sub, only: grad, div
+      use Sub, only: grad, div, dot_mn,u_dot_grad
       use Deriv, only: der
 !
-      real, dimension (mx,my,mz,mfarray) :: f
+      real,  dimension (mx,my,mz,mfarray) :: f
       type (pencil_case) :: p
 !
       intent(in) :: f
       intent(inout) :: p
       integer ::  i, j
+      real, dimension(nx) :: friction_coeff
+      real, dimension(nx) :: u_dot_gphi
+      real, parameter :: T=1.
 
 ! phi
       if (lpencil(i_phi)) p%phi = f(l1:l2,m,n,iphi)
@@ -742,9 +1023,12 @@ module Special
 !  Choice of different potentials.
 !  For the 1-cos profile, -Vprime (on the rhs) enters with -sin().
 !
+      p%Vthermal_prime=0.0
       select case (Vprime_choice)
         case ('quadratic'); p%Vprime=phimass2*p%phi
-        case ('quartic'); p%Vprime=phimass2*p%phi+(lambda_phi/6.)*p%phi**3
+        ! alberto: do we need the prefactor variables lambda_phi_prefactor and delta_phi_prefactor?
+        case ('quartic'); p%Vprime=phimass2*p%phi+delta_phi_prefactor*delta_phi*p%phi**2&
+                                   +lambda_phi_prefactor*lambda_phi*p%phi**3
         case ('cos-profile'); p%Vprime=phimass2*lambda_phi*sin(lambda_phi*p%phi)
         ! option for ultra-slow-roll (USR) potential based on arxiv:2008.12202
         case ('ultra_slow_roll1')
@@ -765,6 +1049,29 @@ module Special
         case default
           call fatal_error("dspecial_dt: No such Vprime_choice: ", trim(Vprime_choice))
       endselect
+
+      if(lpencil(i_plasma_friction)) then
+        friction_coeff = plasma_coupling_coeff*p%phi**2/T
+        call dot_mn(p%uu,p%gphi,u_dot_gphi)
+        if(lconservative) then
+          if(ivv /= 0) then
+            call u_dot_grad(f,ivv,p%gphi,f(l1:l2,m,n,ivx:ivz),u_dot_gphi,UPWIND=.true.)
+          else
+            call fatal_error("dspecial_dt: ","Need velocity for u_dot_grad")
+          endif
+        else
+          call u_dot_grad(f,iuu,p%uij,p%uu,p%ugu,UPWIND=.true.)
+        endif
+        p%plasma_friction = friction_coeff*p%lorentz_gamma*(p%dphi + u_dot_gphi)
+      endif
+
+      if(lpencil(i_ext_force) .and. lplasma_coupling) then
+        p%omega_phi = -p%Vthermal_prime-p%plasma_friction
+        p%ext_force(:,1)   = p%ext_force(:,1) -p%dphi*(p%omega_phi)
+        do i=1,3
+          p%ext_force(:,i+1) = p%ext_force(:,i+1) + p%gphi(:,i)*p%omega_phi
+        enddo
+      endif
 !
     endsubroutine calc_pencils_special
 !***********************************************************************
@@ -808,16 +1115,17 @@ module Special
 !   4-sep-25/alberto: adapted from backreact_infl
 !   6-sep-25/alberto: added Higgs doublet case
 !   14-sep-25/alberto: added second scalar field psi for waterfall potential
+!   jul-26/touko/alberto: added plasma friction
 !
       use Diagnostics, only: sum_mn_name, max_mn_name, save_name
       use Sub, only: dot_mn, del2, div
       use Deriv, only: der
 !
-      real, dimension (mx,my,mz,mfarray) :: f
-      real, dimension (mx,my,mz,mvar) :: df
+      real,  dimension (mx,my,mz,mfarray) :: f
+      real,  dimension (mx,my,mz,mvar) :: df
       real, dimension (nx) :: Vprime_aux, total_fric
       real, dimension (nx, 4) :: del2phi_doublet=0.
-      real, dimension (nx) :: tmp, del2phi, del2psi
+      real, dimension (nx) :: tmp, del2psi
       real :: pref_Vprime=1., pref_Hubble=2., pref_del2=1., pref_alpf
       type (pencil_case) :: p
       integer :: i
@@ -982,6 +1290,12 @@ module Special
         df(l1:l2,m,n,iphi)=df(l1:l2,m,n,iphi)+p%dphi
         df(l1:l2,m,n,idphi)=df(l1:l2,m,n,idphi) - &
               pref_Hubble*Hscript*p%dphi-pref_Vprime*p%Vprime
+!
+!       added coupling with plasma
+        if (lplasma_coupling) then
+          df(l1:l2,m,n,idphi)=df(l1:l2,m,n,idphi)+p%omega_phi
+        endif
+!
         if (c_phi/=0 .and. .not. lphi_hom) then
           call del2(f, iphi, del2phi)
           df(l1:l2,m,n,idphi)=df(l1:l2,m,n,idphi) + c_phi**2*pref_del2*del2phi
@@ -1029,8 +1343,11 @@ module Special
 !  If Ndiv=0 is set, we compute instead an advective timestep based on the Alfven speed.
 !  vA=B/sqrt(rho_chi), so dt=C_M*dx/vA. In practice, C_M (=cdt_rho_chi) can be 20.
 !
-      if (lfirst.and.ldt.and.ldt_klein_gordon) then
-        if (Ndiv==0.) then
+      if (lfirst.and.lcourant_dt.and.ldt_klein_gordon) then
+        if(lspeed_of_light_dt) then
+          dt1_special = 0.
+          maxadvec=max(maxadvec,maxval(dline_1,2))
+        else if (Ndiv==0.) then
           if (lrho_chi) then
             advec2=advec2+(b2m_all/f_ode(iinfl_rho_chi))*dxyz_2/cdt_rho_chi**2
           else
@@ -1116,9 +1433,17 @@ module Special
 !***********************************************************************
     subroutine calc_diagnostics_special(f,p)
 
+      use Sub, only: dot2_mn
       use Diagnostics
-      real, dimension(mx,my,mz,mfarray) :: f
+      use Deriv, only: der2
+      use Slices_methods, only: store_slices
+
+      real,  dimension(mx,my,mz,mfarray) :: f
       type(pencil_case) :: p
+      integer :: l
+      real, dimension (nx) :: gphi2
+      real, dimension (nx) :: g2phi1, Vpotential
+      real :: v
 
       call keep_compiler_quiet(f)
       if (ldiagnos) then
@@ -1138,17 +1463,54 @@ module Special
           if (idiag_dpsirms/=0) call sum_mn_name(p%dpsi**2,idiag_dpsirms,lsqrt=.true.)
           if (idiag_Vprimepsim/=0) call sum_mn_name(p%Vprimepsi,idiag_Vprimepsim)
         endif
+        if (idiag_plasma_frictm/=0) call sum_mn_name(p%plasma_friction,idiag_plasma_frictm)
+
+        if(idiag_gphirms/=0) then
+          call dot2_mn(p%gphi,gphi2)
+          call sum_mn_name(gphi2,idiag_gphirms,lsqrt=.true.)
+        endif
+
+        if(lspherical_coords) then
+          do l=l1,l2
+           if(abs(0.5-f(l,m,n,iphi))<1e-2) then
+             v= -f(l,m,n,idphi)/p%gphi(l-nghost,1)
+             if (idiag_wall_vel/=0)     call save_name(v,idiag_wall_vel)
+             if (idiag_wall_pos/=0)     call save_name(x(l),idiag_wall_pos)
+             if (idiag_wall_lorentz/=0) call save_name(1/sqrt(1-v**2),idiag_wall_lorentz)
+           endif
+          enddo
+        endif
+      endif
+      if(lvideo .and. lfirst) then
+        if (ivid_del2phi /=0) call store_slices(del2phi,del2phi_xy,del2phi_xz,&
+                            del2phi_yz,del2phi_xy2,del2phi_xy3,del2phi_xy4,del2phi_xz2,del2phi_r)
+        if (ivid_gphi1 /=0) call store_slices(p%gphi(:,1),gphi1_xy,gphi1_xz,&
+                            gphi1_yz,gphi1_xy2,gphi1_xy3,gphi1_xy4,gphi1_xz2,gphi1_r)
+        if (ivid_g2phi1 /=0) then
+           call der2(f,iphi,g2phi1,1)
+           call store_slices(g2phi1,g2phi1_xy,g2phi1_xz,&
+           g2phi1_yz,g2phi1_xy2,g2phi1_xy3,g2phi1_xy4,g2phi1_xz2,g2phi1_r)
+        endif
+        if (ivid_Vprime/=0) call store_slices(p%Vprime,Vprime_xy,Vprime_xz,&
+                            Vprime_yz,Vprime_xy2,Vprime_xy3,Vprime_xy4,Vprime_xz2,Vprime_r)
+        if (ivid_V/=0) then
+                call get_Vpotential(f,Vpotential)
+                call store_slices(Vpotential,V_xy,V_xz,&
+                            V_yz,V_xy2,V_xy3,V_xy4,V_xz2,V_r)
+        endif
       endif
 
     endsubroutine calc_diagnostics_special
 !***********************************************************************
-    subroutine read_special_init_pars(iostat)
+    subroutine read_special_init_pars(iomsg)
 !
       use File_io, only: parallel_unit
 !
-      integer, intent(out) :: iostat
+      character(LEN=iomsglen), intent(out) :: iomsg
+      integer :: iostat
 !
-      read(parallel_unit, NML=special_init_pars, IOSTAT=iostat)
+      read(parallel_unit, NML=special_init_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
 !
     endsubroutine read_special_init_pars
 !***********************************************************************
@@ -1160,13 +1522,15 @@ module Special
 !
     endsubroutine write_special_init_pars
 !***********************************************************************
-    subroutine read_special_run_pars(iostat)
+    subroutine read_special_run_pars(iomsg)
 !
       use File_io, only: parallel_unit
 !
-      integer, intent(out) :: iostat
+      character(LEN=iomsglen), intent(out) :: iomsg
+      integer :: iostat
 !
-      read(parallel_unit, NML=special_run_pars, IOSTAT=iostat)
+      read(parallel_unit, NML=special_run_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
 !
     endsubroutine read_special_run_pars
 !***********************************************************************
@@ -1186,7 +1550,7 @@ module Special
 !
       use Diagnostics, only: parse_name
 !
-      integer :: iname
+      integer :: iname,inamev
       logical :: lreset,lwrite
 !
 !  reset everything in case of reset
@@ -1204,6 +1568,7 @@ module Special
         idiag_dpsim=0; idiag_dpsi2m=0; idiag_dpsirms=0
         idiag_a2rhogpsim=0; idiag_a2rhopsim=0
         idiag_Vprimem=0; idiag_Vprimepsim=0
+        ivid_del2phi=0; ivid_Vprime=0; ivid_gphi1=0; ivid_g2phi1=0; ivid_V=0
       endif
 !
       do iname=1,nname
@@ -1213,6 +1578,7 @@ module Special
         call parse_name(iname,cname(iname),cform(iname),'dphim',idiag_dphim)
         call parse_name(iname,cname(iname),cform(iname),'dphi2m',idiag_dphi2m)
         call parse_name(iname,cname(iname),cform(iname),'dphirms',idiag_dphirms)
+        call parse_name(iname,cname(iname),cform(iname),'gphirms',idiag_gphirms)
         call parse_name(iname,cname(iname),cform(iname),'Hscriptm',idiag_Hscriptm)
         call parse_name(iname,cname(iname),cform(iname),'lnam',idiag_lnam)
         call parse_name(iname,cname(iname),cform(iname),'ddotam',idiag_ddotam)
@@ -1234,12 +1600,30 @@ module Special
         call parse_name(iname,cname(iname),cform(iname),'a2rhogpsim',idiag_a2rhogpsim)
         call parse_name(iname,cname(iname),cform(iname),'Vprimem',idiag_Vprimem)
         call parse_name(iname,cname(iname),cform(iname),'Vprimepsim',idiag_Vprimepsim)
+        call parse_name(iname,cname(iname),cform(iname),'plasma_frictm',idiag_plasma_frictm)
+        call parse_name(iname,cname(iname),cform(iname),'wall_vel',idiag_wall_vel)
+        call parse_name(iname,cname(iname),cform(iname),'wall_lorentz',idiag_wall_lorentz)
+        call parse_name(iname,cname(iname),cform(iname),'wall_pos',idiag_wall_pos)
+      enddo
+!
+!  check for those quantities for which we want video slices
+!
+      do inamev=1,nnamev
+        call parse_name(inamev,cnamev(inamev),cformv(inamev),'del2phi',  ivid_del2phi)
+        call parse_name(inamev,cnamev(inamev),cformv(inamev),'gphi1',  ivid_gphi1)
+        call parse_name(inamev,cnamev(inamev),cformv(inamev),'g2phi1',  ivid_g2phi1)
+        call parse_name(inamev,cnamev(inamev),cformv(inamev),'Vprime',  ivid_Vprime)
+        call parse_name(inamev,cnamev(inamev),cformv(inamev),'V',  ivid_V)
       enddo
 !
 !  check for those quantities for which we want video slices
 !
       if (lwrite_slices) then
         where(cnamev=='phi'.or.cnamev=='dphi') cformv='DEFINED'
+        where(cnamev=='del2phi'.or.cnamev=='Vprime') cformv='DEFINED'
+        where(cnamev=='V') cformv='DEFINED'
+        where(cnamev=='gphi1') cformv='DEFINED'
+        where(cnamev=='g2phi1') cformv='DEFINED'
       endif
 !
     endsubroutine rprint_special
@@ -1264,6 +1648,18 @@ module Special
 !
       case ('phi');  call assign_slices_scal (slices,f,iphi)
       case ('dphi'); call assign_slices_scal (slices,f,idphi)
+      case ('del2phi')
+          call assign_slices_scal(slices,del2phi_xy,del2phi_xz,del2phi_yz,del2phi_xy2,del2phi_xy3,del2phi_xy4,del2phi_xz2,del2phi_r)
+      case ('gphi1')
+          call assign_slices_scal(slices,gphi1_xy,gphi1_xz,gphi1_yz,&
+                                 gphi1_xy2,gphi1_xy3,gphi1_xy4,gphi1_xz2,gphi1_r)
+      case ('g2phi1')
+          call assign_slices_scal(slices,g2phi1_xy,g2phi1_xz,g2phi1_yz,&
+                                 g2phi1_xy2,g2phi1_xy3,g2phi1_xy4,g2phi1_xz2,g2phi1_r)
+      case ('Vprime')
+          call assign_slices_scal(slices,Vprime_xy,Vprime_xz,Vprime_yz,Vprime_xy2,Vprime_xy3,Vprime_xy4,Vprime_xz2,Vprime_r)
+      case ('V')
+          call assign_slices_scal(slices,V_xy,V_xz,V_yz,V_xy2,V_xy3,V_xy4,V_xz2,V_r)
 !
       endselect
 !
@@ -1373,6 +1769,125 @@ module Special
 
     endsubroutine get_a2
 !***********************************************************************
+    function get_bubble_nucleation_rate() result(rate)
+
+      real :: rate
+      select case (nucleation_rate_choice)
+        case ('constant')
+          rate = max_bubble_nucleation_rate
+        case ('exponential')
+          rate = exp(beta*(t-tf))
+        case default
+          call fatal_error("get_bubble_nucleation-rate: No such nucleation rate: ",trim(nucleation_rate_choice))
+      endselect
+    endfunction  get_bubble_nucleation_rate
+!***********************************************************************
+    function get_random_bubble_pos(f) result(pos)
+      use General, only: random_number_wrapper, find_proc
+      use Mpicomm, only: ipx,ipy,ipz, mpibcast
+      real,  dimension(mx,my,mz,mfarray) :: f
+
+      real, dimension(3) :: pos
+      real :: u,distance
+      integer(kind=ikind8) :: idx
+      integer :: ix,iy,iz
+      integer :: px,py,pz
+      integer :: local_ix, local_iy, local_iz
+      logical :: found
+      integer :: i
+      integer :: broadcaster
+
+      found = .false.
+      do while(.not. found)
+        call random_number_wrapper(u)
+        idx = int(nwgrid*u)
+        ix = mod(idx,int(nxgrid,8))
+        iy = mod(idx/nxgrid,int(nygrid,8))
+        iz = idx/(nxgrid*nygrid)
+
+        px = ix/nx
+        py = iy/ny
+        pz = iz/nz
+
+
+        local_ix = mod(ix, nx)
+        local_iy = mod(iy, ny)
+        local_iz = mod(iz, nz)
+        
+
+        !The +1 in indexing is because the sampling samples points in C-indexing i.e. starting from 0
+        !which needs to be translated to Fortran indexes
+        if(px /= ipx .or. py /= ipy .or. pz /= ipz) then
+          broadcaster = find_proc(px,py,pz)
+          call mpibcast(found,broadcaster)
+        else
+          select case(bubble_position_criteria)
+          case('threshold')
+            found = f(local_ix+nghost+1,local_iy+nghost+1,local_iz+nghost+1,iphi) < nucleation_threshold
+          !Cutting method refers to the method used in this paper: https://arxiv.org/pdf/1802.05712
+          case('cutting')
+            found = .true.
+            pos = (/xgrid(ix+1), ygrid(iy+1), zgrid(iz+1)/)
+            do i=bubble_counter-1,1,-1
+              distance = sqrt((pos(1)-bubble_positions(i,1))**2 + (pos(2)-bubble_positions(i,2))**2&
+                                + (pos(3)-bubble_positions(i,3))**2)
+              if(distance <= bubble_size + sqrt(bubble_size + (t-bubble_times(i))**2)) then
+                      found = .false.
+              endif
+            enddo
+          case('all-valid')
+            found = .true.
+          case default
+            call fatal_error("get_random_bubble_pos: No such bubble position criteria: ", trim(bubble_position_criteria))
+          end select
+          call mpibcast(found,iproc)
+        endif
+      enddo
+      pos = (/xgrid(ix+1), ygrid(iy+1), zgrid(iz+1)/)
+
+    endfunction get_random_bubble_pos
+!***********************************************************************
+    subroutine special_before_boundary(f)
+      use General, only: random_number_wrapper
+      use Sub, only: sample_poisson_waiting_time 
+!
+!
+!
+      real,  dimension (mx,my,mz,mfarray), intent(in) :: f
+      real, dimension(3) :: pos
+      real :: acceptance_ran, acceptance_probability
+
+      if(lnucleate_bubbles) then
+        !TP: could be more precise taking substeps into account
+        do while(t+dt >= t_next_bubble)
+          call random_number_wrapper(acceptance_ran)
+          acceptance_probability = get_bubble_nucleation_rate()/max_bubble_nucleation_rate
+          if(acceptance_probability >= acceptance_ran) then
+            pos = get_random_bubble_pos(f)
+            call nucleate_a_bubble(f,pos)
+            if(bubble_times(bubble_counter) /= impossible) then
+              t_next_bubble = bubble_times(bubble_counter)
+            else if(.not. lgenerate_bubble_times) then
+              if(get_bubble_nucleation_rate() > max_bubble_nucleation_rate) then
+                if(lroot) then
+                  print*,"Rate: ",get_bubble_nucleation_rate()
+                  print*,"Max rate: ",max_bubble_nucleation_rate
+                endif
+                call fatal_error("special_before_boundary",&
+                                 "Rate rose over prescribed max rate! Means that sampling in time is not anymore accurate")
+               endif
+               t_next_bubble = t+sample_poisson_waiting_time(max_bubble_nucleation_rate)
+            !Used up all bubbles so set next bubble after the end of the simulation
+            else
+              t_next_bubble = tmax+1.0
+            endif
+          endif
+        enddo
+      endif
+!
+!
+    endsubroutine special_before_boundary
+!***********************************************************************
     subroutine special_after_boundary(f)
 !
 !  Possibility to modify the f array after the boundaries are
@@ -1383,7 +1898,7 @@ module Special
       use Mpicomm, only: mpireduce_sum, mpiallreduce_sum, mpibcast_real
       use Sub, only: dot2_mn, grad, curl, dot_mn
 !
-      real, dimension (mx,my,mz,mfarray), intent(in) :: f
+      real,  dimension (mx,my,mz,mfarray), intent(in) :: f
       real :: sigE1m,sigB1m
 !
 !  If requested, calculate here <dphi**2+gphi**2+(4./3.)*(E^2+B^2)/a^2>.
@@ -1466,11 +1981,39 @@ module Special
 
     endsubroutine special_after_boundary
 !***********************************************************************
+    subroutine get_Vpotential(f,Vpotential)
+      real, dimension(mx,my,mz,mfarray), intent(in) :: f
+      real, dimension(nx), intent(out) :: Vpotential
+      real, dimension(nx) :: psi, phi
+!
+!  Choice of different potentials
+!
+      phi=f(l1:l2,m,n,iphi)
+      select case (Vprime_choice)
+        case ('quadratic')  ; Vpotential=.5*phimass2*phi**2
+        case ('quartic')    ; Vpotential=.5*phimass2*phi**2+(1.0/3.0)*delta_phi_prefactor*delta_phi*phi**3&
+                                          +.25*lambda_phi_prefactor*lambda_phi*phi**4
+        case ('cos-profile'); Vpotential=phimass2*lambda_phi*sin(lambda_phi*phi)  !(to be corrected)
+        case ('ultra_slow_roll1')
+          Vpotential=V0_usr*(6*(phi/v_usr)**2 + 3.*(phi/v_usr)**4 - 4.*alpha_usr*(phi/v_usr)**3)
+          Vpotential=Vpotential/(1.+(phi/v_usr)**2*beta_usr**2)**2
+        case ('waterfall')
+          psi=f(l1:l2,m,n,ipsi)
+          Vpotential=0.5*phimass2*phi**2 + .25*lambda_psi*psi**4
+          if (lambda_psi /= 0.) then
+            Vpotential=Vpotential+.25*psimass2**2/lambda_psi
+          endif
+          Vpotential=Vpotential-0.5*psimass2*psi**2+.5*coupl_phipsi**2*phi**2*psi**2
+        case default
+          call fatal_error("special_after_boundary: No such Vprime_choice: ",trim(Vprime_choice))
+      endselect
+    endsubroutine get_Vpotential
+!***********************************************************************
     subroutine prep_ode_right(f,sigE1m,sigB1m)
 !
       use Sub, only: dot2_mn, grad, curl, dot_mn
 !
-      real, dimension (mx,my,mz,mfarray), intent(in) :: f
+      real,  dimension (mx,my,mz,mfarray), intent(in) :: f
       real, intent(inout) :: sigE1m,sigB1m
       real, dimension (nx,3) :: el, bb, gphi, gpsi
       real, dimension (nx) :: e2, b2, gphi2, dphi, a2rhop, a2rho
@@ -1536,25 +2079,7 @@ module Special
       endif
 !
       a2rhopm=a2rhopm+sum(a2rhop)
-!
-!  Choice of different potentials
-!
-      select case (Vprime_choice)
-        case ('quadratic')  ; Vpotential=.5*phimass2*phi**2
-        case ('quartic')    ; Vpotential=phimass2*phi+(lambda_phi/6.)*phi**3  !(to be corrected)
-        case ('cos-profile'); Vpotential=phimass2*lambda_phi*sin(lambda_phi*phi)  !(to be corrected)
-        case ('ultra_slow_roll1')
-          Vpotential=V0_usr*(6*(phi/v_usr)**2 + 3.*(phi/v_usr)**4 - 4.*alpha_usr*(phi/v_usr)**3)
-          Vpotential=Vpotential/(1.+(phi/v_usr)**2*beta_usr**2)**2
-        case ('waterfall')
-          Vpotential=0.5*phimass2*phi**2 + .25*lambda_psi*psi**4
-          if (lambda_psi /= 0.) then
-            Vpotential=Vpotential+.25*psimass2**2/lambda_psi
-          endif
-          Vpotential=Vpotential-0.5*psimass2*psi**2+.5*coupl_phipsi**2*phi**2*psi**2
-        case default
-          call fatal_error("special_after_boundary: No such Vprime_choice: ",trim(Vprime_choice))
-      endselect
+      call get_Vpotential(f,Vpotential)
 !
 !  compute ddotam = a"/a (needed for GW module)
 !
@@ -1648,6 +2173,7 @@ module Special
       endif
 !
     endsubroutine prep_ode_right
+!***********************************************************************
 !********************************************************************
 ! Subroutines below needed only for GPUs, if you do not care about GPUs don't worry about them
 !***********************************************************************
@@ -1750,6 +2276,12 @@ module Special
     call keep_compiler_quiet(eps)
     call keep_compiler_quiet(phase_phi)
 
+    call copy_addr(delta_phi,p_par(59))
+    call copy_addr(delta_phi_prefactor,p_par(60))
+    call copy_addr(lambda_phi_prefactor,p_par(61))
+    call copy_addr(lspeed_of_light_dt,p_par(62)) ! bool
+    call copy_addr(plasma_coupling_coeff,p_par(63))
+    call copy_addr(lplasma_coupling,p_par(64)) ! bool
     endsubroutine pushpars2c
 !********************************************************************
 !********************************************************************

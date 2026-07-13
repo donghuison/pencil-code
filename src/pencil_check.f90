@@ -60,10 +60,9 @@ module Pencil_check
       logical :: lconsistent=.true., lconsistent_allproc=.false.
       logical, dimension(mfarray) :: lconsistent_var =.true.
       logical, dimension(nname) :: lconsistent_diagnos
-      integer :: ncomponents
       character(len=30) :: name
       logical :: ldie=.false.
-      integer :: mem_stat1, mem_stat2
+      integer :: mem_stat1, mem_stat2,ncomponents
       real :: save_dt
 !
       if (lroot) print*, 'pencil_consistency_check: checking pencil case'
@@ -97,8 +96,8 @@ module Pencil_check
       lfirst=.true.
       headt=.false.
       itsub=1  ! some modules like dustvelocity.f90 reference dt_beta_ts(itsub)
+      call random_seed_wrapper(GET=iseed_org)
       if (lpencil_check_no_zeros) then
-        call random_seed_wrapper(GET=iseed_org)
         call random_seed_wrapper(PUT=iseed_org)
         do i=1,mfarray
           if (maxval(abs(f(l1:l2,m1:m2,n1:n2,i)))==0.0) then
@@ -117,6 +116,7 @@ module Pencil_check
 !  Calculate reference results with all requested pencils on.
 !
       lpencil=lpenc_requested
+      call random_seed_wrapper(PUT=iseed_org)
 !  This initial call to pde is to set dt.
 !  It is important that dt has nonzero value for example for correct testing
 !  when using running average of entropy
@@ -126,6 +126,7 @@ module Pencil_check
       df_ref=0.0
       f_other = f_ref
       call initialize_pencils(p,penc0)
+      call random_seed_wrapper(PUT=iseed_org)
       call pde(f_other,df_ref,p)
       dt1_max_ref=dt1_max
 !
@@ -183,6 +184,7 @@ module Pencil_check
           lpencil=.true.
         endif
 
+        call random_seed_wrapper(PUT=iseed_org)
         call pde(f_other,df,p)
         lfound_nan=.false.
         do iv=1,mvar; do n=n1,n2; do m=m1,m2
@@ -235,7 +237,8 @@ f_loop:   do iv=1,mvar
                   trim(pencil_names(penc))//' (',penc,')'// &
                   ' is not requested, but calculating it changes the results!'
               do iv =1,mvar
-                if(.not. lconsistent_var(iv)) then
+                if (.not. lconsistent_var(iv)) then
+                  !name = farray_get_name(iv)
                   ncomponents = farray_get_name(iv,name)
                   print '(a,i4,a)',' pencil_consistency_check: '// &
                   'Value changed for field: '// name
@@ -289,6 +292,7 @@ f_loop:   do iv=1,mvar
       call initialize_pencils(p,0.5*penc0)
 !
       lpencil=lpenc_requested
+      call random_seed_wrapper(PUT=iseed_org)
       call pde(f_other,df,p)
       lfound_nan=.false.
       do iv=1,mvar; do n=n1,n2; do m=m1,m2
@@ -448,7 +452,7 @@ f_lop:  do iv=1,mvar
                   ' is not requested for diagnostics, '// &
                   'but calculating it changes the diagnostics!'
               do k=1,nname
-                 if(.not. lconsistent_diagnos(k)) then
+                 if (.not. lconsistent_diagnos(k)) then
                    print '(a,i4,a)','pencil_consistency_check: '// &
                   'diagnos changed: ' // cname(k)
                  endif

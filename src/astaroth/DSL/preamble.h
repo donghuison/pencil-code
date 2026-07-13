@@ -138,6 +138,10 @@ maxval(real[] arr)
 	}
 	return res
 }
+maxval(real3 vec)
+{
+	return max(vec)
+}
 minval(real x) {return x}
 
 #define notanumber(x) (false)
@@ -276,4 +280,8 @@ const real ul0  = 0.0
 const real tl0  = 0.0
 const real tl01  = tl0/(tl0+tini)
 const real teta1 = teta/(teta+tini)
+#endif
+
+#if LTRAINING
+#include "../training/train.h"
 #endif

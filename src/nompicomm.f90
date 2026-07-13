@@ -3200,12 +3200,13 @@ module Mpicomm
 
       integer, intent(in) :: size
       real, dimension(size), intent(inout) :: array
-      real, dimension(size), intent(in) :: mask
+      logical, dimension(size), intent(in) :: mask
       integer, dimension(size), intent(in) :: ranks
       integer, optional, intent(in) :: irank
 
       call keep_compiler_quiet(size,irank)
-      call keep_compiler_quiet(array,mask)
+      call keep_compiler_quiet(array)
+      call keep_compiler_quiet(mask)
       call keep_compiler_quiet(ranks)
 
     endsubroutine fetch_to_process_masked

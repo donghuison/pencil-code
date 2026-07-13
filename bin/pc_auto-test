@@ -159,7 +159,14 @@ my %tests = (
                          1d-tests/conduction/cTrho
                          1d-tests/jeans-drag-dustpar-x
                          1d-tests/jeans-x
+                         1d-tests/sod_100
                          1d-tests/sod_10s
+                         1d-tests/sod_10y
+                         1d-tests/sod_1000
+                         1d-tests/sod_100s
+                         1d-tests/sod_10sy
+                         1d-tests/sod_10sz
+                         1d-tests/sod_10sho
                          1d-tests/toomre-x
                          2d-tests/bubble
                          2d-tests/conv-slab-MLT
@@ -178,6 +185,8 @@ my %tests = (
                          interlocked-fluxrings
                          conv-slab-flat
                          coronae_heatflux_boris
+		         decay-reconnection
+			 fcont_TG
                          helical-MHDturb_HDF5
                          helical-MHDturb-noncube
                          power_xy/complex
@@ -187,6 +196,7 @@ my %tests = (
                          power_xy/complex_nprocz_2
                          power_xy/integrate_shell
                          power_xy/integrate_shell_z
+                         renovating-flow
                          testfield_nonlin_z
                          test_farray_alloc
                          spherical-convection
@@ -196,6 +206,9 @@ my %tests = (
                          dust-accretion
                          superparticle_condensation
                          mdwarf-ss-running-aver-gpu
+			 star-in-a-box-giant-Kprof
+			 cartesian-convection-entropy-rain
+			 
                      )],
              # Level 4 for now contains all non-canonical tests that run,
              # but produce wrong results - and need immediate action (fixme)
@@ -218,16 +231,9 @@ my %tests = (
                          MHD-ABCforcing
                          taylor-couette
                          potential_field
-                         1d-tests/sod_100
-                         1d-tests/sod_10y
                          geodynamo-noequi
-                         1d-tests/sod_1000
-                         1d-tests/sod_100s
-                         1d-tests/sod_10sy
-                         1d-tests/sod_10sz
                          2d-tests/GMSW1976
                          1d-tests/sod_1000s
-                         1d-tests/sod_10sho
                          taylor-couette-cyl
                          2d-tests/GMSW1976_cpne1
                          0d-tests/coag_kernel_lin
@@ -264,13 +270,16 @@ my %tests = (
 	    # the test machine
 my @gpu_tests = qw(
                          1d-tests/sine-Gordon_doublet
-                         decay-reconnection #not in %tests
+                         decay-reconnection
+			 debris-photoelectric-fluid
+			 fcont_TG
                          spherical-gdisk-planet-thermo
 			 interstellar
+                         renovating-flow
                          #chiral-diffusion
 			 #1d-tests/rel-shock
 			 #1d-tests/ambipolar_diffusion
-			 #cosmicray
+			 cosmicray
 			 #1d-tests/inflationary-B-genesis #Has to be excluded until the weird start issue is resolved (Can't reproduce it by running auto-test locally on norlx51)
                          1d-tests/jeans-x
 			 #1d-tests/toomre-x
@@ -314,6 +323,8 @@ my @gpu_tests = qw(
 			 MRI-turbulence_hyper
 			 1d-tests/axionU1back
 			 #1d-tests/axionSU2back
+			 star-in-a-box-giant-Kprof
+			 cartesian-convection-entropy-rain
                    );
 
 		   #Was tested to work but need multi-gpu Fourier 1d-tests/horndeski_choiceIII
@@ -1193,8 +1204,12 @@ sub test_shell_cmd {
 
     if ($auto_clean && ($phase eq 'compilation') && ($cmdstatus != 0)) {
         # Retry compilation after cleaning
-        test_shell_cmd("@pc_build --cleanall", $dir, "cleaning up", QUIET);
-        return "ERROR running @pc_build --cleanall" if ($test_status);
+        my $cleanmsg = cleansrc($dir);
+        return $cleanmsg if ($test_status);
+
+        my $setupmsg = setupsrc($dir);
+        return $setupmsg if ($test_status);
+
         print STDERR "\nRetrying `$env$nice $cmd`\n" if ($debug);
         $! = 0;                     # reset
         $res = `$env$nice $cmd 2>&1`;
@@ -1363,6 +1378,27 @@ sub call_sub_catch_output {
     return @retval, $output;
 }
 # ---------------------------------------------------------------------- #
+sub cleansrc {
+# clean src directory
+    my $dir = shift;
+
+    test_shell_cmd("@pc_build --cleanall", $dir, "cleaning up", QUIET);
+    return "ERROR running @pc_build --cleanall" if ($test_status);
+}
+# ---------------------------------------------------------------------- #
+sub setupsrc {
+# wrapper for pc_setupsrc
+    my $dir = shift;
+
+    my $setupsrc_cmd = "pc_setupsrc --pencil-home $pencil_home";
+    $setupsrc_cmd .= " --force-astaroth" if ($gpu);
+    test_shell_cmd($setupsrc_cmd,
+                    $dir,
+                    "setting up directory",
+                    QUIET);
+    return 'ERROR calling pc_setupsrc' if ($test_status);
+}
+# ---------------------------------------------------------------------- #
 sub test_compile {
 # Test compilation only
     if ($t_comp) {
@@ -1372,17 +1408,13 @@ sub test_compile {
 
         print "    Compiling..            ";
 
-        # First pc_setupsrc, then make clean (if requested). Must be done
-        # in this order as pc_setupsrc links the Makefile to the run directory.
-        test_shell_cmd("pc_setupsrc --pencil-home $pencil_home",
-                       $dir,
-                       "setting up directory",
-                       QUIET);
-        return 'ERROR calling pc_setupsrc' if ($test_status);
         if ($clean) {
-            test_shell_cmd("@pc_build --cleanall", $dir, "cleaning up", QUIET);
-            return "ERROR running @pc_build --cleanall" if ($test_status);
+            my $cleanmsg = cleansrc($dir);
+            return $cleanmsg if ($test_status);
         }
+
+        my $setupmsg = setupsrc($dir);
+        return $setupmsg if ($test_status);
 
         # Compile in double precision if we have data for that
         if (-r 'print.in.double' && -r 'reference.out.double') {
@@ -2135,7 +2167,7 @@ sub mark_failed {
         print "===> Test failed at latest with revision:\n";
         print "SVN: ".get_SVN_revision ($last)."\n";
         my $commit = get_GIT_commit ($last);
-        if ($log_dir) {
+        if ($log_dir && ($commit !~ /[ \.\-]/s)) {
             print 'GIT: <a href="'.$base_URL.'commit/'.$commit.'">'.$commit."</a>\n";
         }
         else {

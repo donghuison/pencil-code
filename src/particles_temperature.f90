@@ -32,6 +32,7 @@ module Particles_temperature
   logical :: lrad_part=.false.,lconv_heating=.true.
   logical :: lpart_nuss_const=.false.
   logical :: lstefan_flow = .true.
+  real, dimension(:), pointer :: mdot_film => null()
   logical :: ldiffuse_backtemp = .false.,ldiffTT=.false.
   logical :: lconst_part_temp=.false.
   logical :: lrayleigh_rad_limit=.false.
@@ -66,6 +67,7 @@ module Particles_temperature
 !  27-aug-14/jonas+nils: coded
 !
       use FArrayManager, only: farray_register_auxiliary
+      use SharedVariables, only: put_shared_variable
 !
       if (lroot) call svn_id( &
           "$Id: particles_temperature.f90 21950 2014-07-08 08:53:00Z jonas.kruger $")
@@ -73,6 +75,11 @@ module Particles_temperature
 !  Indices for particle position.
 !
       call append_npvar('iTp',iTp)
+!
+!  Share the droplet heat capacity so particles_radius can add the latent
+!  (evaporative) cooling to the droplet temperature equation.
+!
+      call put_shared_variable('cp_part',cp_part,caller='register_particles_TT')
 !
 !  We need to register an auxiliary array to dmp
 !
@@ -91,11 +98,20 @@ module Particles_temperature
 !
 !  28-aug-14/jonas+nils: coded
 !
+      use SharedVariables, only: get_shared_variable
+!
       real, dimension(mx,my,mz,mfarray) :: f
       integer :: ndimx,ndimy,ndimz
-! 
+      integer :: ierr
+!
       if (lpart_temp_backreac .and. ldiffuse_backtemp .and. ldensity_nolog .and. ltemperature_nolog) &
         call not_implemented('initialize_particles_TT', 'for ldensity_nolog=T, ltemperature_nolog=T')
+!
+!  Fetch the film mass-loss rate shared by particles_radius. It is only present
+!  when the Sherwood-film model is active; otherwise mdot_film stays
+!  unassociated and the Stefan-flow branch below falls back accordingly.
+!
+      if (lstefan_flow) call get_shared_variable('mdot_film',mdot_film,ierr=ierr)
 !
       call find_weight_array_dims(ndimx,ndimy,ndimz)
 !
@@ -324,6 +340,11 @@ module Particles_temperature
           if (lconv_heating) then
             if (lstefan_flow .and. lparticles_chemistry) then
               stefan_b = mass_loss(k)*p%cv(inx0)/(2*pi*fp(k,iap)*Nuss_p(k)*cond)
+            elseif (lstefan_flow .and. associated(mdot_film)) then
+!  Stefan-flow blowing from the Sherwood-film (evaporation/absorption) net mass
+!  efflux supplied by particles_radius (mdot_film), for liquid droplets without
+!  the surface-chemistry module.
+              stefan_b = mdot_film(k)*p%cv(inx0)/(2*pi*fp(k,iap)*Nuss_p(k)*cond)
             else
               stefan_b=0.0
             endif
@@ -496,13 +517,15 @@ module Particles_temperature
 !
     endsubroutine dpTT_dt_pencil
 !***********************************************************************
-    subroutine read_particles_TT_init_pars(iostat)
+    subroutine read_particles_TT_init_pars(iomsg)
 !
       use File_io, only: parallel_unit
 !
-      integer, intent(out) :: iostat
+      character(LEN=*), intent(out) :: iomsg
+      integer :: iostat
 !
-      read(parallel_unit, NML=particles_TT_init_pars, IOSTAT=iostat)
+      read(parallel_unit, NML=particles_TT_init_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
 !
     endsubroutine read_particles_TT_init_pars
 !***********************************************************************
@@ -514,13 +537,15 @@ module Particles_temperature
 !
     endsubroutine write_particles_TT_init_pars
 !***********************************************************************
-    subroutine read_particles_TT_run_pars(iostat)
+    subroutine read_particles_TT_run_pars(iomsg)
 !
       use File_io, only: parallel_unit
 !
-      integer, intent(out) :: iostat
+      character(LEN=*), intent(out) :: iomsg
+      integer :: iostat
 !
-      read(parallel_unit, NML=particles_TT_run_pars, IOSTAT=iostat)
+      read(parallel_unit, NML=particles_TT_run_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
 !
     endsubroutine read_particles_TT_run_pars
 !***********************************************************************

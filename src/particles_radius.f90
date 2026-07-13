@@ -44,7 +44,9 @@ module Particles_radius
   real :: xi_accretion = 0., lambda = 1.
   real :: coeff_Kelvin = 0.,  coeff_kappa = 0.
   real :: n0 = 1., alpha = 1., b=1.
-  real :: r_CCN = 1.e-6, kappa_aerosol = 0.1, Rv=461.5, sigma_w = 7.2e-2     
+  real :: r_CCN = 1.e-6, kappa_aerosol = 0.1, Rv=461.5, sigma_w = 7.2e-2
+  real :: rr_d = 0.0
+  real :: rr_q = 2.5
   integer :: nbin_initdist=20, ip1=npar/2
   logical :: lsweepup_par=.false., lcondensation_par=.false.
   logical :: llatent_heat=.true., lborder_driving_ocean=.false.
@@ -56,6 +58,13 @@ module Particles_radius
   logical :: ltauascalar = .false., ldust_condensation=.false.
   logical :: ldust_accretion = .false., lreinitialize_ap=.false.
   logical :: lfree_molecule=.false.
+  logical :: lsherwood_film=.false.
+  logical :: ldroplet_evapcool=.false.
+  logical :: labsorbing_species=.false.
+  logical :: lgas_enthalpy_flux=.false.
+  integer :: iabsm=0
+  real, pointer :: cp_part_evap
+  real, allocatable, dimension (:), target :: mdot_film
   character(len=labellen), dimension(ninit) :: initap='nothing'
   character(len=labellen) :: condensation_coefficient_type='constant'
 !
@@ -68,7 +77,9 @@ module Particles_radius
       aplow, apmid, aphigh, mbar, ap1, ip1, qplaw, eps_dtog, nbin_initdist, &
       sigma_initdist, a0_initdist, rpbeta0, lparticles_radius_rpbeta, &
       lfixed_particles_radius, lambda, &
-      n0, b, alpha, lcondensing_species
+      rr_d, rr_q, &
+      n0, b, alpha, lcondensing_species, lsherwood_film, ldroplet_evapcool, &
+      labsorbing_species, lgas_enthalpy_flux
 !
   namelist /particles_radius_run_pars/ &
       rhopmat, vthresh_sweepup, deltavp12_floor, &
@@ -86,9 +97,12 @@ module Particles_radius
       ltauascalar, modified_vapor_diffusivity, ldt_evaporation, &
       ldt_condensation, ldt_condensation_off, &
       ldust_condensation, xi_accretion, ldust_accretion, &
-      tstart_condensation_par, lfree_molecule,lcondensing_species
+      rr_d, rr_q, &
+      tstart_condensation_par, lfree_molecule,lcondensing_species, &
+      lsherwood_film, ldroplet_evapcool, labsorbing_species, lgas_enthalpy_flux
 !
   integer :: idiag_apm=0, idiag_ap2m=0, idiag_ap3m=0,idiag_apmin=0, idiag_apmax=0
+  integer :: idiag_mNm=0
   integer :: idiag_dvp12m=0, idiag_dtsweepp=0, idiag_npswarmm=0
   integer :: idiag_ieffp=0
 !
@@ -117,9 +131,16 @@ module Particles_radius
 !
       if (lparticles_radius_rpbeta) call append_npvar('irpbeta',irpbeta)
 !
+!  Dissolved-mass of the absorbing species (e.g. NH3 in a water droplet).
+!  The extra evolved variable is reserved with "! MPVAR CONTRIBUTION 1" in the
+!  run-directory cparam.local when labsorbing_species=T.
+!
+      if (labsorbing_species) call append_npvar('iabsm',iabsm)
+!
       call put_shared_variable('ap0',ap0,caller='register_particles_radius')
       if (lchemistry) then
         call put_shared_variable('lcondensing_species',lcondensing_species,caller='register_particles_radius')
+        call put_shared_variable('labsorbing_species',labsorbing_species,caller='register_particles_radius')
       endif
 !
     endsubroutine register_particles_radius
@@ -133,7 +154,7 @@ module Particles_radius
 !
       use EquationOfState, only: get_gamma_etc
       use General, only: random_number_wrapper
-      use SharedVariables, only: get_shared_variable
+      use SharedVariables, only: get_shared_variable, put_shared_variable
 !
       real, dimension(mx,my,mz,mfarray) :: f
       real, dimension(mpar_loc,mparray) :: fp
@@ -226,6 +247,37 @@ module Particles_radius
         if (lcondensation_rate) call get_shared_variable('ssat0', ssat0)
       endif
 !
+!  The Sherwood film / d^2-law model evaluates the saturation at the droplet
+!  temperature fp(:,iTp), so particles_temperature must be active, and it only
+!  makes sense together with the condensing-species coupling.
+!
+      if (lsherwood_film) then
+        if (.not. lcondensing_species) call fatal_error('initialize_particles_radius', &
+            'lsherwood_film requires lcondensing_species=T')
+        if (.not. lparticles_temperature) call fatal_error('initialize_particles_radius', &
+            'lsherwood_film requires the particles_temperature module (iTp)')
+!  Storage for the per-droplet film mass-loss rate, used by the convective-heat
+!  Stefan-flow correction in particles_temperature (lstefan_flow).
+        if (.not. allocated(mdot_film)) allocate(mdot_film(mpar_loc))
+        mdot_film = 0.0
+!  Share the film mass-loss rate with particles_temperature (Stefan-flow
+!  correction).
+        call put_shared_variable('mdot_film',mdot_film,caller='initialize_particles_radius')
+      endif
+!
+!  Droplet evaporative cooling needs the droplet heat capacity (shared by
+!  particles_temperature) and an active droplet-temperature equation.
+!
+      if (ldroplet_evapcool .or. labsorbing_species .or. lgas_enthalpy_flux) then
+        if (.not. lparticles_temperature) call fatal_error('initialize_particles_radius', &
+            'ldroplet_evapcool/labsorbing_species/lgas_enthalpy_flux require the '// &
+            'particles_temperature module (iTp)')
+        call get_shared_variable('cp_part',cp_part_evap,caller='initialize_particles_radius')
+      endif
+      if (labsorbing_species .and. .not. lcondensing_species) &
+          call fatal_error('initialize_particles_radius', &
+          'labsorbing_species currently assumes the droplet solvent is the condensing species')
+!
     endsubroutine initialize_particles_radius
 !***********************************************************************
     subroutine set_particle_radius(f,fp,npar_low,npar_high,init)
@@ -254,6 +306,10 @@ module Particles_radius
       if (present(init)) then
         if (init) initial = .true.
       endif
+!
+!  New droplets start free of dissolved absorbing species (clean water).
+!
+      if (labsorbing_species .and. iabsm/=0) fp(npar_low:npar_high,iabsm) = 0.0
 !
       do j = 1,ninit
 !
@@ -492,6 +548,24 @@ module Particles_radius
           fp(npar_low:npar_high,iap) = ((aphigh**(qplaw+1.0)-aplow**(qplaw+1.0)) &
               *fp(npar_low:npar_high,iap)+aplow**(qplaw+1.0))**(1.0/(qplaw+1.0))
 !
+!  Rosin-Rammler (Weibull-3) initial droplet-size distribution, written
+!  in terms of *diameter*:  P(d > D) = exp(-(D/rr_d)^rr_q).
+!  Inverse-CDF sampling: d = rr_d * (-ln(u))^(1/rr_q),  u ~ U(0,1].
+!  We then convert d to radius (fp(:,iap) holds the radius).  Used by
+!  the multi-hole gasoline injector validation in Li, He & Zhao 2014
+!  (Applied Thermal Eng., 65, 282-292) with q = 2.5.
+        case ('rosin-rammler')
+          if (rr_d <= 0.0) call fatal_error('set_particle_radius', &
+              'initap=rosin-rammler requires rr_d > 0 (characteristic diameter)')
+          if (rr_q <= 0.0) call fatal_error('set_particle_radius', &
+              'initap=rosin-rammler requires rr_q > 0 (shape parameter)')
+          if (initial .and. lroot) print*, &
+              'set_particles_radius: rosin-rammler  d_X=', rr_d, '  q=', rr_q
+          call random_number_wrapper(fp(npar_low:npar_high,iap))
+          fp(npar_low:npar_high,iap) = max(fp(npar_low:npar_high,iap), tini)
+          fp(npar_low:npar_high,iap) = 0.5 * rr_d * &
+              (-log(fp(npar_low:npar_high,iap)))**(1.0/rr_q)
+!
         case default
           call fatal_error('init_particles_radius','no such initap: '//trim(initap(j)))
         endselect
@@ -728,7 +802,9 @@ module Particles_radius
 !
       use EquationOfState, only: rho0
       use Particles_number
-      use Chemistry, only: condensing_species_rate, cond_spec_cond_lagr
+      use Chemistry, only: condensing_species_rate, cond_spec_cond_lagr, &
+                           cond_spec_film_rate, cond_spec_Lmass, cond_spec_transfer_cv, &
+                           cond_spec_absorb_rate, absorb_spec_lagr, absorb_spec_Lsol
 !
       real, dimension(mx,my,mz,mfarray) :: f
       real, dimension(mx,my,mz,mvar) :: df
@@ -741,7 +817,8 @@ module Particles_radius
       real, dimension(nx) :: total_surface_area, ppsat
       real, dimension(nx) :: rhocond_tot, rhosat, np_total, mfluxcond
       real, dimension(nx) :: tau_phase1, tau_evaporation1, tau_evaporation
-      real :: dapdt, drhocdt, alpha_cond_par,rp, dmpdt, mp
+      real :: dapdt, drhocdt, alpha_cond_par,rp, dmpdt, mp, urel, Lmass
+      real :: Lsol, mdotN, mN, mW, massflux, Qenth, cv_cond, cv_absorb
       integer :: k, ix, ix0, kkk, ichem
 !
       intent(in) :: f, fp
@@ -780,9 +857,26 @@ module Particles_radius
             call condensing_species_rate(p,mfluxcond)
           endif
           !
+          ! Latent heat per unit mass for the droplet evaporative cooling.
+          !
+          if (ldroplet_evapcool) call cond_spec_Lmass(Lmass)
+          ! Heat of solution per unit mass for the absorbing species.
+          !
+          if (labsorbing_species) call absorb_spec_Lsol(Lsol)
+          !
           do k = k1_imn(imn),k2_imn(imn)
             ix0 = ineargrid(k,1)
             ix = ix0-nghost
+!
+!  Number of physical particles in the swarm (used by the gas back-reactions
+!  further down) and the relative gas-droplet speed for the Ranz-Marshall
+!  convective correction (Sherwood film and absorption models).
+!
+            if (lparticles_number) np_swarm = fp(k,inpswarm)
+            if (lsherwood_film .or. labsorbing_species) &
+                urel = sqrt((f(ix0,m,n,iux)-fp(k,ivpx))**2 &
+                           +(f(ix0,m,n,iuy)-fp(k,ivpy))**2 &
+                           +(f(ix0,m,n,iuz)-fp(k,ivpz))**2)
 !
 !  The condensation/evaporation mass flux is
 !
@@ -852,7 +946,11 @@ module Particles_radius
                 endif
                 if (lcondensation_rate .and. ldust_condensation) dapdt = G_condensation*f(ix,m,n,issat)
               elseif (lcondensing_species) then
-                if (lfree_molecule) then
+                if (lsherwood_film) then
+                  ! Sherwood film / d^2-law, with saturation evaluated at the
+                  ! droplet (surface) temperature fp(k,iTp).  urel set above.
+                  call cond_spec_film_rate(p,ix,fp(k,iTp),fp(k,iap),urel,dapdt)
+                elseif (lfree_molecule) then
                   !print*,"NNN: mfluxcond,dapdt=",mfluxcond(ix),dapdt,fp(k,iap)
                   dapdt = mfluxcond(ix)
                   !dapdt=0.0
@@ -878,6 +976,87 @@ module Particles_radius
 !
             dfp(k,iap) = dfp(k,iap)+dapdt
 !
+!  Per-droplet mass-loss rate for the convective-heat Stefan-flow correction
+!  (particles_temperature).  Evaporation (dapdt<0) gives mdot_film>0 (mass
+!  leaving the droplet); the absorption block below adds the absorbing species'
+!  outward flux (<0 for absorption) so mdot_film is the NET surface mass efflux.
+!
+            if (allocated(mdot_film)) &
+                mdot_film(k) = -dapdt*4.*pi*fp(k,iap)**2*rhopmat
+!
+!  Droplet evaporative cooling: m_p c_p dT_p/dt += L dm_p/dt, with
+!  dm_p/dt = 4 pi a^2 rho_liq dapdt and m_p = 4/3 pi a^3 rho_liq, so the
+!  density cancels and dT_p/dt += 3 L dapdt/(a c_p).  dapdt<0 (evaporation)
+!  cools the droplet; this drives it toward its wet-bulb temperature.
+!
+            if (ldroplet_evapcool .and. iTp/=0) then
+              dfp(k,iTp) = dfp(k,iTp) + 3.*Lmass*dapdt/(fp(k,iap)*cp_part_evap)
+            endif
+!
+!  Gas-side interfacial sensible-energy flux of the transferred condensing
+!  mass, for EXACT total-energy conservation.  The droplet accounts the mass
+!  at the liquid heat capacity cp_part (debited as the droplet shrinks), while
+!  the phase-change mass source makes the eos credit the gas only with the
+!  species internal energy cv_cond*T_g (added vapour at the gas temperature).
+!  The mismatch (cp_part*T_p - cv_cond*T_g) per unit mass is the sensible energy
+!  the liquid carried that the gas did not receive.  It is accumulated into
+!  Qenth here (the absorption block below adds its own contribution) and
+!  deposited once into the gas energy equation after both, so the gas gains
+!  exactly what the droplet lost.  (The latent heat is a separate reservoir: it
+!  is removed from the droplet by the evapcool term above and stored as the
+!  vapour's phase energy, so it must NOT appear here.)  The sign is correct for
+!  both evaporation (dapdt<0, mass into gas) and condensation (dapdt>0, out).
+!  cond_spec_transfer_cv returns BOTH species' gas cv in one call (cv_absorb is
+!  reused by the absorption block).
+!
+            if (lgas_enthalpy_flux .and. iTp/=0) then
+              call cond_spec_transfer_cv(ix0,cv_cond,cv_absorb)
+              massflux = -dapdt*4.*pi*fp(k,iap)**2*rhopmat*np_swarm  ! mass/vol/time INTO gas
+              Qenth = massflux*(cp_part_evap*fp(k,iTp)-cv_cond*p%TT(ix))  ! [erg/vol/s]
+            endif
+!
+!  Absorption of a soluble gas (e.g. NH3) into the droplet.  cond_spec_absorb_rate
+!  returns mdotN as the OUTWARD (leaving-drop) flux -- mdotN<0 for absorption,
+!  the same sign convention as dapdt/the condensing species -- so the dissolved
+!  mass obeys d(mN)/dt = -mdotN (it grows when mdotN<0).  The added mass grows
+!  the radius, the heat of solution heats the droplet, and the gas loses the
+!  absorbed species (absorb_spec_lagr).
+!
+            if (labsorbing_species .and. iabsm/=0) then
+              mp = 4.*pi/3.*fp(k,iap)**3*rhopmat     ! total droplet mass
+              mN = fp(k,iabsm)
+              mW = max(mp-mN,0.0)
+              call cond_spec_absorb_rate(p,ix,fp(k,iTp),fp(k,iap),mN,mW,urel,mdotN)
+              dfp(k,iabsm) = dfp(k,iabsm) - mdotN
+!  Net surface mass efflux: add the absorbing species' outward flux (<0 for
+!  absorption), so mdot_film = dot m_W + dot m_N is the net efflux.
+              if (allocated(mdot_film)) mdot_film(k) = mdot_film(k) + mdotN
+!  Radius change from the added/removed dissolved mass (d(mN)/dt = -mdotN).
+              dfp(k,iap) = dfp(k,iap) - mdotN/(4.*pi*fp(k,iap)**2*rhopmat)
+!  Heat of solution (exothermic) on the droplet temperature: -dHsol/M_N * mdotN
+!  (>0 heating when mdotN<0, i.e. absorption).
+              if (iTp/=0) dfp(k,iTp) = dfp(k,iTp) - Lsol*mdotN/(mp*cp_part_evap)
+!  Gas-phase sink for the absorbed species.
+              call absorb_spec_lagr(f,df,p,ix0,ix,np_swarm,mdotN)
+!  Add the absorbed mass's interfacial sensible-energy flux to Qenth (same
+!  conservation argument and outward-flux convention as the evaporation term
+!  above): mdotN<0 (absorption) removes the cp/cv mismatch.  cv_absorb was
+!  computed in the lgas_enthalpy_flux block above.
+              if (lgas_enthalpy_flux .and. iTp/=0) &
+                  Qenth = Qenth + mdotN*np_swarm*(cp_part_evap*fp(k,iTp)-cv_absorb*p%TT(ix))
+            endif
+!
+!  Deposit the accumulated interfacial sensible-energy flux (evaporation +
+!  absorption) into the gas energy equation, once per droplet.
+!
+            if (lgas_enthalpy_flux .and. iTp/=0) then
+              if (ltemperature_nolog) then
+                df(ix0,m,n,iTT)   = df(ix0,m,n,iTT)   + Qenth*p%rho1(ix)*p%cv1(ix)
+              else
+                df(ix0,m,n,ilnTT) = df(ix0,m,n,ilnTT) + Qenth*p%rho1(ix)*p%cv1(ix)*p%TT1(ix)
+              endif
+            endif
+!
 !  Evolve some variables realted to condensing species
 !
             if (lcondensing_species .and. lcondspec_details) then
@@ -897,8 +1076,8 @@ module Particles_radius
             endif          
 !
 !  Vapor monomers are added to the gas or removed from the gas.
+!  (np_swarm is set at the top of the particle loop.)
 !
-            if (lparticles_number) np_swarm = fp(k,inpswarm)
             if (lcondensation_simplified .or. lcondensation_rate) then
               drhocdt = 0.
             elseif (lcondensing_species) then
@@ -1029,6 +1208,8 @@ module Particles_radius
           if (idiag_npswarmm/=0.and.npar_loc>0) call sum_par_name(rhop_swarm/ &
               (four_pi_rhopmat_over_three*fp(1:npar_loc,iap)**3),idiag_npswarmm,len=npar_loc)
         endif
+        if (labsorbing_species .and. iabsm/=0) &
+            call sum_par_name(fp(1:npar_loc,iabsm),idiag_mNm,len=npar_loc)
         if (lparticles_chemistry) then
           call sum_par_name(fp(1:npar_loc,ieffp),idiag_ieffp,len=npar_loc)
         endif
@@ -1040,14 +1221,16 @@ module Particles_radius
 !
     endsubroutine dap_dt
 !***********************************************************************
-    subroutine read_particles_rad_init_pars(iostat)
+    subroutine read_particles_rad_init_pars(iomsg)
 !
       use File_io, only: parallel_unit
 !
-      integer, intent(out) :: iostat
+      character(LEN=*), intent(out) :: iomsg
+      integer :: iostat
       integer :: pos
 !
-      read (parallel_unit, NML=particles_radius_init_pars, IOSTAT=iostat)
+      read (parallel_unit, NML=particles_radius_init_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
 !
 !  Find how many different particle radii we are using. This must be done
 !  because not all parts of the code are adapted to work with more than one
@@ -1069,13 +1252,15 @@ module Particles_radius
 !
     endsubroutine write_particles_rad_init_pars
 !***********************************************************************
-    subroutine read_particles_rad_run_pars(iostat)
+    subroutine read_particles_rad_run_pars(iomsg)
 !
       use File_io, only: parallel_unit
 !
-      integer, intent(out) :: iostat
+      character(LEN=*), intent(out) :: iomsg
+      integer :: iostat
 !
-      read (parallel_unit, NML=particles_radius_run_pars, IOSTAT=iostat)
+      read (parallel_unit, NML=particles_radius_run_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
 !
     endsubroutine read_particles_rad_run_pars
 !***********************************************************************
@@ -1112,6 +1297,7 @@ module Particles_radius
         idiag_dtsweepp = 0
         idiag_npswarmm = 0
         idiag_ieffp = 0
+        idiag_mNm = 0
       endif
 !
 !  Run through all possible names that may be listed in print.in.
@@ -1119,6 +1305,7 @@ module Particles_radius
       if (lroot .and. ip < 14) print*, 'rprint_particles_radius: run through parse list'
       do iname = 1,nname
         call parse_name(iname,cname(iname),cform(iname),'apm',idiag_apm)
+        call parse_name(iname,cname(iname),cform(iname),'mNm',idiag_mNm)
         call parse_name(iname,cname(iname),cform(iname),'ap2m',idiag_ap2m)
         call parse_name(iname,cname(iname),cform(iname),'ap3m',idiag_ap3m)
         call parse_name(iname,cname(iname),cform(iname),'apmin',idiag_apmin)

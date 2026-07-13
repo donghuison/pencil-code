@@ -12,10 +12,6 @@
 # License version 3 or later; see $PENCIL_HOME/license/GNU_public_license.txt.
 #
 
-# TODO:
-# - We currently assume that either no or all accuracies are specified.
-#   Need to implement the mixed case.
-
 package Test::NumericFileComparator;
 
 use warnings;
@@ -148,8 +144,9 @@ or '1.2e-3:a'). Numbers followed by ':r' indicate relative precision (e.g.
 this case, two numbers are considered sufficiently equal if they are close
 enough by either absolute or relative accuracy.
 
-If no accuracy is specified, for each column / line, an absolute accuracy
-of 1.5 times the last digit of the largest number (by modulus) is used.
+If no accuracy is specified for a particular column / line (or the keyword
+'auto' is given in place of the accuracy), an absolute accuracy of 1.5 times
+the last digit of the largest number (by modulus) is used.
 
 
 =head2 Methods
@@ -502,7 +499,7 @@ sub _read_file_in_line_format {
             }
 
             if ($mixed_accuracies) {
-                croak "Accuracies must either be specified for no variables, or for all variables (file: $file)\n";
+                croak "If you do not want to specify the accuracy for a particular variable, use the keyword 'auto' (file: $file)\n";
             }
 
             if (defined $acc) {
@@ -527,10 +524,14 @@ sub _extract_data {
     croak("No data found in $file") unless @$cols_ref;
 
     my %accuracies;
-    if (%$accs_ref) {
-        %accuracies = %$accs_ref;
-    } else {
-        %accuracies = _infer_accuracies($vars_ref, $cols_ref);
+    my %inferred_accuracies = _infer_accuracies($vars_ref, $cols_ref);
+    foreach (@$vars_ref) {
+        my $var = $_;
+        if ((%$accs_ref) && ($accs_ref->{$var} ne "auto")) {
+            $accuracies{$var} = $accs_ref->{$var};
+        } else {
+            $accuracies{$var} = $inferred_accuracies{$var};
+        }
     }
     my %values = _numerical_values($vars_ref, $cols_ref);
 
@@ -575,6 +576,10 @@ sub _parse_accuracy {
 # Parse an accuracy string like '1e-3', '1e-3:r', or '1e-6:a|1e-3:r' to a
 # pair of numbers like (), (), or ()
     my ($string) = @_;
+
+    if ($string eq "auto") {
+        return $string;
+    }
 
     my ($abs, $rel) = (0, 0);
     foreach my $acc (split(/\|/, $string)) {

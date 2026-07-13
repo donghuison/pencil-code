@@ -99,6 +99,7 @@ module Special
    real :: source5_input=0., t1_source5=0., t2_source5=0.
    real :: source5_expt=0., source5_expt2=0.
    real :: muS_const=0., coef_muS=0., coef_mu5=0., Cw=0.
+   real :: Cflow=0., muSdrag=0., lcme = 1.
    real, dimension(1) :: meanmu5=0.
    !real :: flucmu5=0., meanB2=0., Brms=0.
    real :: initpower_mu5=0., cutoff_mu5=0.
@@ -113,7 +114,7 @@ module Special
    real :: cdtchiral=0.4
    real, dimension (nx) :: dt1_lambda5, dt1_D5, dt1_gammaf5
    real, dimension (nx) :: dt1_CMW, dt1_Dmu, dt1_vmu, dt1_special
-   real, dimension (nx) :: dt1_CVE1, dt1_CVE2 
+   real, dimension (nx) :: dt1_CVE1, dt1_CVE2, dt1_Cflow1, dt1_Cflow2
    integer :: imu5, imuS
    logical :: lmuS=.false., lCVE=.false.
    logical :: ldiffmu5_hyper2_simplified=.false.
@@ -151,6 +152,7 @@ module Special
       diffmu5_hyper3, diffmuS_hyper3, &
       ldiffmu5_hyper3_simplified, ldiffmuS_hyper3_simplified, &
       coef_muS, coef_mu5, Cw, lmuS, lCVE, lmu5adv, &
+      Cflow, muSdrag, lcme, &
       lmu5divu_term, lmuSdivu_term, &
       reinitialize_mu5, rescale_mu5, gammaf5_tdep, t1_gammaf5, t2_gammaf5, &
       source5_tdep, t1_source5, t2_source5, source5_expt, source5_expt2, &
@@ -191,6 +193,8 @@ module Special
   integer :: idiag_dt_Dmu=0    ! DIAG_DOC: $(\lambda \eta \mathrm{min}(\Bv^2))^{-1}$ 
   integer :: idiag_dt_vmu=0    ! DIAG_DOC: $\delta x /(\eta \mathrm{max}(|\mu_5 |))$ 
   integer :: idiag_dt_chiral=0 ! DIAG_DOC: total time-step contribution from chiral MHD
+  integer :: idiag_dt_Cflow1=0 ! DIAG_DOC: $\delta x \eta C_{\rm flow} \mu \left|\Uv\right|/ \left|\Bv\right|$
+  integer :: idiag_dt_Cflow2=0 ! DIAG_DOC: $\lambda_5 \eta C_{\rm flow} \mu \Uv\cdot\Bv/\mu_5$
   integer :: idiag_mu5bxm=0    ! DIAG_DOC: $\left<\mu_5B_x\right>$
   integer :: idiag_mu5b2m=0    ! DIAG_DOC: $\left<\mu_5B^2\right>$
   integer :: idiag_mu5jbm=0    ! DIAG_DOC: $\left<\mu_5\Jv\cdot\Bv\right>$
@@ -390,6 +394,8 @@ module Special
         lpenc_requested(i_muS)=.true.
         lpenc_requested(i_gmuS)=.true.
         lpenc_requested(i_ugmuS)=.true.
+        lpenc_requested(i_ub)=.true.
+        lpenc_requested(i_u2)=.true.
         if (diffmuS/=0.) lpenc_requested(i_del2muS)=.true.
       endif
       lpenc_requested(i_mu5)=.true.
@@ -504,6 +510,8 @@ module Special
 !  25-noc-18/jenny: added diffusion term to muS equation
 !  11-jun-20/jenny: added hyperdiffusion (hyper2)
 !  28-aug-21/jenny: added hyperdiffusion (hyper3)
+!  29-jun-26/deepen: added muSdrag and lcme
+!  29-jun-26/deepen: added charge-flow (Cflow) instability
 !
       use Sub, only: multsv, dot_mn, dot2_mn, dot_mn_vm_trans, dot, curl_mn, gij
 !
@@ -516,7 +524,7 @@ module Special
 !
       real, dimension (nx) :: dmu5, dmuS, bdotgmuS, bdotgmu5
       real, dimension (nx) :: muSmu5, oobb, oogmuS, oogmu5
-      real, dimension (nx,3) :: mu5bb, muSmu5oo
+      real, dimension (nx,3) :: mu5bb, muSmu5oo, muSuu
 !
 !  Identify module and boundary conditions.
 !
@@ -556,7 +564,7 @@ module Special
       if (lmu5divu_term) dmu5 = dmu5 - p%mu5*p%divu
 !
 !  E.B terms: J.B and CME term
-      dmu5 = dmu5 + lambda5*eta*(p%jb-p%mu5*p%b2)
+      dmu5 = dmu5 + lambda5*eta*(p%jb-lcme*p%mu5*p%b2)
 !
 !  muS-independent part of AVE term
       if (lCVE) then
@@ -574,6 +582,9 @@ module Special
 !
 !  CSE term in mu5 evolution
         dmu5 = dmu5 - coef_mu5*bdotgmuS
+!
+!  Cflow term in mu5 evolution
+        dmu5 = dmu5 - lambda5*eta*Cflow*p%muS*p%ub
 !
 !  CVE term and muS-dependent AVE term in mu5 evolution
         if (lCVE) then   
@@ -605,7 +616,10 @@ module Special
 !
 !  CME term
         dmuS = dmuS - coef_muS*bdotgmu5
-! 
+!
+!  muSdrag term
+        dmuS = dmuS - muSdrag*(p%muS)/eta  
+!
 !
 !  Update df array 
         df(l1:l2,m,n,imuS) = df(l1:l2,m,n,imuS) + dmuS
@@ -615,6 +629,8 @@ module Special
         dt1_CMW = sqrt(coef_mu5*coef_muS)*sqrt(p%b2)*sqrt(dxyz_2)
         if (ldiffmuS_hyper2_simplified) then
           dt1_Dmu = diffmuS_hyper2*dxyz_4
+        else if (ldiffmuS_hyper3_simplified) then
+          dt1_Dmu = diffmuS_hyper3*dxyz_6
         else
           dt1_Dmu = diffmuS*dxyz_2
         endif
@@ -627,10 +643,17 @@ module Special
 !  Contributions to timestep from mu5 equation
       dt1_lambda5 = lambda5*eta*p%b2
       if (lmuS) then
-         dt1_CVE2 = p%muS*lambda5*eta*p%b2
+        if (lCVE) then
+          dt1_CVE2 = abs(p%muS)*lambda5*eta*p%b2
+        endif
+        dt1_Cflow2 = sqrt(lambda5)*sqrt(eta)*sqrt(Cflow) &
+                      *sqrt(coef_muS)*sqrt(sqrt(p%b2)) &
+                      *sqrt(sqrt(dxyz_2))*sqrt(abs(p%ub))
       endif
       if (ldiffmu5_hyper2_simplified) then
          dt1_D5 = diffmu5_hyper2*dxyz_4
+      else if (ldiffmu5_hyper3_simplified) then
+         dt1_D5 = diffmu5_hyper3*dxyz_6
       else
          dt1_D5 = diffmu5*dxyz_2
       endif
@@ -641,15 +664,25 @@ module Special
 !
       if (lmagnetic) then
         call multsv(p%mu5,p%bb,mu5bb)
-        df(l1:l2,m,n,iax:iaz) = df(l1:l2,m,n,iax:iaz) + eta*mu5bb 
-        if (lCVE) then   
-          call multsv(muSmu5,p%oo,muSmu5oo)
-          df(l1:l2,m,n,iax:iaz) = df(l1:l2,m,n,iax:iaz) + eta*muSmu5oo
+        df(l1:l2,m,n,iax:iaz) = df(l1:l2,m,n,iax:iaz) + lcme*eta*mu5bb 
+        if (lmuS) then
+          call multsv(p%muS,p%uu,muSuu)
+          df(l1:l2,m,n,iax:iaz) = df(l1:l2,m,n,iax:iaz) + eta*Cflow*muSuu 
+          if (lCVE) then   
+            call multsv(muSmu5,p%oo,muSmu5oo)
+            df(l1:l2,m,n,iax:iaz) = df(l1:l2,m,n,iax:iaz) + eta*muSmu5oo
+          endif
         endif
       endif
 !  Contributions to timestep from bb equation
-      dt1_vmu = eta*p%mu5*sqrt(dxyz_2)
-      if (lCVE) dt1_CVE1 = eta*p%muS*p%mu5*sqrt(dxyz_2)
+      dt1_vmu = eta*abs(p%mu5)*sqrt(dxyz_2)
+      if (lCVE) dt1_CVE1 = eta*abs(p%muS*p%mu5)*sqrt(dxyz_2)
+      if (lmuS) dt1_Cflow1 = max( &
+                  sqrt(dxyz_2)*sqrt(eta)*sqrt(Cflow)*sqrt(sqrt(p%u2)) &
+                  *sqrt(coef_muS)*sqrt(abs(p%mu5)), &
+                  sqrt(dxyz_2)*sqrt(eta)*sqrt(Cflow)*sqrt(abs(p%muS)) &
+                  *sqrt(sqrt(p%b2)))
+!
 !
 !  Additions to the test-field equations
 !
@@ -667,7 +700,7 @@ module Special
           dt1_special = max(dt1_lambda5, dt1_D5, &
                             dt1_gammaf5, dt1_vmu, &
                             dt1_CVE1, dt1_CVE2, &
-                            dt1_CMW, dt1_Dmu)/cdtchiral
+                            dt1_CMW, dt1_Dmu, dt1_Cflow2, dt1_Cflow1)/cdtchiral
         else
           dt1_special = max(dt1_lambda5, dt1_D5, dt1_gammaf5, dt1_vmu)/cdtchiral
         endif
@@ -748,6 +781,8 @@ module Special
         if (idiag_dt_CMW/=0) call max_mn_name(-(1./dt1_CMW),idiag_dt_CMW,lneg=.true.)
         if (idiag_dt_Dmu/=0) call max_mn_name(-(1./dt1_Dmu),idiag_dt_Dmu,lneg=.true.)
         if (idiag_dt_chiral/=0) call max_mn_name(-(1./dt1_special),idiag_dt_chiral,lneg=.true.)
+        if (idiag_dt_Cflow1/=0) call max_mn_name(-(1./dt1_Cflow1),idiag_dt_Cflow1,lneg=.true.)
+        if (idiag_dt_Cflow2/=0) call max_mn_name(-(1./dt1_Cflow2),idiag_dt_Cflow2,lneg=.true.)
         if (idiag_mu5bxm/=0) call sum_mn_name(p%mu5*p%bb(:,1),idiag_mu5bxm)
         if (idiag_mu5b2m/=0) call sum_mn_name(p%mu5*p%b2,idiag_mu5b2m)
         if (idiag_mu5jbm/=0) call sum_mn_name(p%mu5*p%jb,idiag_mu5jbm)
@@ -757,13 +792,15 @@ module Special
 
     endsubroutine calc_diagnostics_special
 !***********************************************************************
-    subroutine read_special_init_pars(iostat)
+    subroutine read_special_init_pars(iomsg)
 !
       use File_io, only: parallel_unit
 !
-      integer, intent(out) :: iostat
+      character(LEN=iomsglen), intent(out) :: iomsg
+      integer :: iostat
 !
-      read(parallel_unit, NML=special_init_pars, IOSTAT=iostat)
+      read(parallel_unit, NML=special_init_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
 !
     endsubroutine read_special_init_pars
 !***********************************************************************
@@ -775,13 +812,15 @@ module Special
 !
     endsubroutine write_special_init_pars
 !***********************************************************************
-    subroutine read_special_run_pars(iostat)
+    subroutine read_special_run_pars(iomsg)
 !
       use File_io, only: parallel_unit
 !
-      integer, intent(out) :: iostat
+      character(LEN=iomsglen), intent(out) :: iomsg
+      integer :: iostat
 !
-      read(parallel_unit, NML=special_run_pars, IOSTAT=iostat)
+      read(parallel_unit, NML=special_run_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
 !
     endsubroutine read_special_run_pars
 !***********************************************************************
@@ -824,6 +863,7 @@ module Special
         idiag_mu5bjm=0; idiag_mu5bjrms=0;
         idiag_gmu5mx=0; idiag_gmu5my=0; idiag_gmu5mz=0;
         idiag_dt_chiral=0; idiag_dt_vmu=0;
+        idiag_dt_Cflow1=0;idiag_dt_Cflow2=0;
         idiag_dt_lambda5=0; idiag_dt_D5=0;
         idiag_dt_gammaf5=0; idiag_dt_CMW=0; idiag_dt_Dmu=0;
         idiag_jxm=0; idiag_Dmu5_tdep=0; idiag_oogmuSrms=0; idiag_oogmu5rms=0
@@ -861,6 +901,8 @@ module Special
         call parse_name(iname,cname(iname),cform(iname),'dt_Dmu',idiag_dt_Dmu)
         call parse_name(iname,cname(iname),cform(iname),'dt_vmu',idiag_dt_vmu)
         call parse_name(iname,cname(iname),cform(iname),'dt_chiral',idiag_dt_chiral)
+        call parse_name(iname,cname(iname),cform(iname),'dt_Cflow1',idiag_dt_Cflow1)
+        call parse_name(iname,cname(iname),cform(iname),'dt_Cflow2',idiag_dt_Cflow2)
         call parse_name(iname,cname(iname),cform(iname),'mu5bxm',idiag_mu5bxm)
         call parse_name(iname,cname(iname),cform(iname),'mu5b2m',idiag_mu5b2m)
         call parse_name(iname,cname(iname),cform(iname),'mu5jbm',idiag_mu5jbm)
@@ -1074,6 +1116,9 @@ module Special
     
     call keep_compiler_quiet(diffmuSmax)
 
+    call copy_addr(cflow,p_par(37))
+    call copy_addr(musdrag,p_par(38))
+    call copy_addr(lcme,p_par(39))
     endsubroutine pushpars2c
 !***********************************************************************
 !********************************************************************

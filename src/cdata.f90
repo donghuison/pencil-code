@@ -217,6 +217,7 @@ module Cdata
   real :: Area_xy=1., Area_yz=1., Area_xz=1.
   logical :: lfirst=.false.,llast=.false.,ldt_paronly=.false.
   logical :: ldt=.true.
+  logical :: ldt_report=.false.  !PAR_DOC: possibility for time step reports onto command line
   logical :: lupdate_courant_dt=.false.
 !
 !  Time integration parameters.
@@ -244,7 +245,6 @@ module Cdata
   integer :: num_substeps = 3
 !
 !  Parameters related to message passing.
-!
 !
   integer, dimension(-1:1,-1:1,-1:1) :: neighbors = 0
   integer, dimension(26) :: iproc_comm = -1
@@ -319,18 +319,16 @@ module Cdata
   logical :: lsnap=.false., lsnap_down=.false., lspec=.false., lspec_start=.false., lspec_at_tplusdt=.false.
   logical :: lspec_tcrit=.false. !PAR_DOC: allow setting critical time for switching to log interval for dspec.
   logical :: lsnap_tcrit=.false. !PAR_DOC: allow setting critical time for switching to log interval for dsnap.
-  logical :: lvid_tcrit=.false. !PAR_DOC: allow setting critical time for switching to log interval for dvid.
-  real :: dsnap=100. !PAR_DOC: save a snapshot (VAR file) every dsnap time units
-  real :: dsnap_down=0. !PAR_DOC: save a downsampled snapshot every dsnap time units
-  real :: d1davg=impossible !PAR_DOC: save 1D (xy, yz, ...) averages every d1davg
-    !PAR_DOC: time units (overrides it1d)
-  real :: d2davg=100. !PAR_DOC: save 2D (x, y, ...) averages every d2davg time
-    !PAR_DOC: units
-  real :: dvid=0. !PAR_DOC: save slice (video) files every dvid time units.
+  logical :: lvid_tcrit=.false.  !PAR_DOC: allow setting critical time for switching to log interval for dvid.
+  real :: dsnap=100.             !PAR_DOC: save a snapshot (VAR file) every dsnap time units
+  real :: dsnap_down=0.          !PAR_DOC: save a downsampled snapshot every dsnap_down time units
+  real :: d1davg=impossible      !PAR_DOC: save 1D (xy, yz, ...) averages every d1davg time units (overrides it1d)
+  real :: d2davg=100.            !PAR_DOC: save 2D (x, y, ...) averages every d2davg time units
+  real :: dvid=0.                !PAR_DOC: save slice (video) files every dvid time units.
   real :: dspec=impossible !PAR_DOC: save power spectra every dspec time units
   real :: tspec_crit_log_interval=impossible !PAR_DOC: critical time above which we set dspec to a negative value.
   real :: tsnap_crit_log_interval=impossible !PAR_DOC: critical time above which we set dsnap to a negative value.
-  real :: tvid_crit_log_interval=impossible !PAR_DOC: critical time above which we set dvid to a negative value.
+  real :: tvid_crit_log_interval=impossible  !PAR_DOC: critical time above which we set dvid to a negative value.
   real :: dit1=impossible
   real :: dtracers=0., dfixed_points=0.
   real :: crash_file_dtmin_factor=-1.0
@@ -345,10 +343,10 @@ module Cdata
                                !PAR_DOC: calculated at each timestep (e.g., when
                                !PAR_DOC: you set \code{kinematic_flow='from-snap'}
                                !PAR_DOC: in \name{hydro_run_pars}).
-  logical :: lwrite_aux=.false. !PAR_DOC: if set \code{T}, write auxiliary
-                                !PAR_DOC: variables (those calculated at each step,
-                                !PAR_DOC: but not evolved mathematically) to
-                                !PAR_DOC: \file{var.dat} after the evolved quantities.
+  logical :: lwrite_aux=.false.!PAR_DOC: if set \code{T}, write auxiliary
+                               !PAR_DOC: variables (those calculated at each step,
+                               !PAR_DOC: but not evolved mathematically) to
+                               !PAR_DOC: \file{var.dat} after the evolved quantities.
   logical :: lwrite_dvar=.false.
   logical :: lenforce_maux_check=.true., lwrite_avg1d_binary = .false.
   logical :: lread_oldsnap=.false. !PAR_DOC: if set \code{T}, the old snapshot
@@ -366,6 +364,7 @@ module Cdata
                                    !PAR_DOC: file{start.in}, put:
                                    !PAR_DOC: \cmd{ireset_tstart=0, lread_oldsnap=T, lwrite_var_anyway=T}
   logical :: lwrite_var_anyway=.false., lbackup_snap=.false.
+  integer :: nsnap_backups = 1
   logical :: lwrite_last_powersnap=.false., lwrite_fsum=.false.
   logical :: lread_oldsnap_rho2lnrho=.false.
   logical :: lread_oldsnap_nomag=.false. !PAR_DOC: if set \code{T}, the
@@ -419,6 +418,7 @@ module Cdata
   logical :: lfatal_num_vector_369=.true.
   logical :: lsmooth_farray=.false.
   logical :: lupdate_cvs=.false.
+  logical :: lbaryons=.true.  !PAR_DOC: interpret rho as the baryon velocity; it affects vA2 pencil.
 !
 !  Entries related to the scale factor of the universe
 !
@@ -643,7 +643,11 @@ module Cdata
   logical :: lpencil_check_diagnos_opti=.false.
   logical :: lpencil_check_at_work=.false.
   integer :: ipencil_swap=0
+!
+!  Pars for multiple special modules.
+!
   integer :: special_module_index=1
+  character(LEN=40), dimension(n_special_modules) :: special_modules
 !
 !  Variables for substepping in time
 !
@@ -660,6 +664,7 @@ module Cdata
 !
   character :: comment_char='#'
   integer :: it1=10,it1start=0,it1d=impossible_int,itspec=impossible_int
+  integer :: it1_ldt_report=0     !PAR_DOC: interval for time step constraint reports onto command line
   integer :: itsnap=impossible_int
   integer :: nname=0,nnamev=0,nnamexy=0,nnamexz=0,nnamerz=0
   integer :: nnamez=0,nnamey=0,nnamex=0,nnamer=0
@@ -710,6 +715,7 @@ module Cdata
   logical :: ltime_integrals=.false.
   logical :: lreset_seed=.false.
   logical :: lproper_averages=.false.
+  logical :: lappend_pc_constants=.false.   !PAR_DOC: always append when true to preserve history
   character (len=1) :: slice_position='p'
 ! time avaraging
   real :: tavg=0.
@@ -772,6 +778,8 @@ module Cdata
                                 ! PHIAVG_DOC: (useful for debugging)
   integer :: idiag_dtv=0        ! DIAG_DOC: advective timestep as a
                                 ! DIAG_DOC:   fraction of the actual one
+  integer :: idiag_dtsrc=0      ! DIAG_DOC: timestep from a source term,
+                                ! DIAG_DOC:   fraction of the actual one
   integer :: idiag_dtdiffus=0   ! DIAG_DOC: diffusive timestep as a
                                 ! DIAG_DOC:   fraction of the actual one
   integer :: idiag_dtdiffus2=0  ! DIAG_DOC: hyperdiffusive (hyper2)  timestep
@@ -823,6 +831,7 @@ module Cdata
   logical :: ux_spec=.false., uy_spec=.false., uz_spec=.false., a0_spec=.false., ucp_spec=.false.
   logical :: ou_spec=.false., ab_spec=.false., azbz_spec=.false., uzs_spec=.false.
   logical :: ub_spec=.false., Lor_spec=.false., OmU_spec=.false., EMF_spec=.false., Tra_spec=.false.
+  logical :: aBE_spec=.false., ABE2_spec=.false., uBE_spec=.false.
   logical :: GWs_spec=.false., GWh_spec=.false., GWm_spec=.false., Str_spec=.false., Stg_spec=.false.
   logical :: Gab_spec=.false., Gan_spec=.false., GBb_spec=.false.
   logical :: GWs_spec_boost=.false., GWh_spec_boost=.false.

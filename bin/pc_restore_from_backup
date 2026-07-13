@@ -1,6 +1,13 @@
 #!/bin/sh
-#
 # Wrapper to overwrite var.dat with var.dat.bck
-for d in data/proc[0-9]*; do
-    mv "$d/var.dat.bck" "$d/var.dat"
-done
+
+if [ -n "$1" ]; then
+    d="$1"
+    suffix=".bck.$d"
+else
+    suffix=".bck"
+fi
+src="var.dat$suffix"
+dst="var.dat"
+pc_move_var "$src" "$dst"
+

@@ -199,13 +199,15 @@ module Shock
 !
     endsubroutine initialize_shock
 !***********************************************************************
-    subroutine read_shock_run_pars(iostat)
+    subroutine read_shock_run_pars(iomsg)
 !
       use File_io, only: parallel_unit
 !
-      integer, intent(out) :: iostat
+      character(LEN=*), intent(out) :: iomsg
+      integer :: iostat
 !
-      read(parallel_unit, NML=shock_run_pars, IOSTAT=iostat)
+      read(parallel_unit, NML=shock_run_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
 !
     endsubroutine read_shock_run_pars
 !***********************************************************************
@@ -1797,6 +1799,7 @@ module Shock
     integer, parameter :: n_pars=100
     integer(KIND=ikind8), dimension(n_pars) :: p_par
     logical, save :: lconvergence_only = .true.,lmax_shock=.false.,lgaussian_smooth=.false.
+    logical, save :: lconvergence_bias = .false.
     logical, save :: lmax_axis_only = .true., l121_smooth = .true.
     logical,  save :: low_order_divu = .true.
     real, save :: con_bias = 0.1, shock_div_pow=1.0,dt_div_pow=0.
@@ -1815,6 +1818,7 @@ module Shock
     call copy_addr(l121_smooth,p_par(9)) ! bool
     call copy_addr(low_order_divu,p_par(10)) ! bool
     call copy_addr(lshock_first,p_par(11)) ! bool
+    call copy_addr(lconvergence_bias,p_par(12)) ! bool
     
     endsubroutine pushpars2c
 !***********************************************************************

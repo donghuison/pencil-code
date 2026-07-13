@@ -380,6 +380,13 @@ endsubroutine helper_loop
     if (.not.(lit1_logspacing.and.real(t)<tmax_logspacing)) &
       lout = (mod(it-1,it1) == 0) .and. (it > it1start)
 !
+!  Enable possibility of a more detailed and free-format output
+!  about time step constraints directly onto the command line.
+!
+    if (it1_ldt_report>0) ldt_report = (mod(it-1,it1_ldt_report) == 0) .and. (it > it1start)
+!
+!  Other time step criteria.
+!
     if (lspec_tcrit) call check_tspec_crit_log_interval
     if (lsnap_tcrit) call check_tsnap_crit_log_interval
     if (lvid_tcrit) call check_tvid_crit_log_interval
@@ -598,7 +605,7 @@ endsubroutine helper_loop
 !
     if ((it<nt) .and. (dt<dtmin)) then
       if (lroot) then 
-        call system_cmd("echo TIMESTEP BECAME TOO SHORT > TIMESTEP_BECAME_TOO_SHORT")
+        call system_cmd("echo TIMESTEP BECAME TOO SHORT > TIMESTEP_TOO_SHORT")
         write(*,*) ' Time step has become too short: dt = ', dt
       endif
       save_lastsnap=.false.

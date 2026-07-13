@@ -28,7 +28,7 @@
 ;   IDL> indices = pc_get_streamline (B, anchor=[2.0, 3.5, 1.2], grid=grid, distances=distances, length=length, /return_indices)
 ;   IDL> Temp_streamline = pc_extract_streamline (Temp, indices, /return_values)
 ;   IDL> B_streamline = pc_extract_streamline (B, indices, /return_values)
-;   IDL> B_abs = B_streamline[0,*]^2 + B_streamline[1,*]^2 + B_streamline[2,*]^2
+;   IDL> B_abs = sqrt (B_streamline[0,*]^2 + B_streamline[1,*]^2 + B_streamline[2,*]^2)
 ;   IDL> plot, distances, Temp_streamline, xtitle="coordinate along streamline", ytitle="temperature"
 ;   IDL> plot, distances, B_abs, xtitle="coordinate along streamline", ytitle="magnetic field", /ylog
 ;
@@ -40,9 +40,9 @@
 ;   IDL> streamlines = pc_get_streamline (B, anchor=seeds, grid=grid)
 ;   IDL> Temp_streamlines = pc_extract_streamline (Temp, streamlines, name='Temp')
 ;   IDL> B_streamlines = pc_extract_streamline (B, streamlines, name='B')
-;   IDL> Temp_streamline = pc_select_streamline (Temp_streamline, 1)
-;   IDL> B_streamline = pc_select_streamline (B_streamline, 1)
-;   IDL> B_abs = B_streamline[0,*]^2 + B_streamline[1,*]^2 + B_streamline[2,*]^2
+;   IDL> Temp_streamline = pc_select_streamline (Temp_streamlines, 1)
+;   IDL> B_streamline = pc_select_streamline (B_streamlines, 1)
+;   IDL> B_abs = sqrt (B_streamline[0,*]^2 + B_streamline[1,*]^2 + B_streamline[2,*]^2)
 ;   IDL> plot, distances, Temp_streamline, xtitle="coordinate along streamline", ytitle="temperature"
 ;   IDL> plot, distances, B_abs, xtitle="coordinate along streamline", ytitle="magnetic field", /ylog
 ;
@@ -54,9 +54,9 @@
 ;   IDL> streamlines = pc_get_streamline (B, anchor=seeds, grid=grid)
 ;   IDL> Temp_streamlines = pc_extract_streamline (Temp, streamlines, name='Temp', grid=grid)
 ;   IDL> B_streamlines = pc_extract_streamline (B, streamlines, name='B', grid=grid)
-;   IDL> Temp_streamline = pc_select_streamline (Temp_streamline, 1)
-;   IDL> B_streamline = pc_select_streamline (B_streamline, 1)
-;   IDL> B_abs = B_streamline[0,*]^2 + B_streamline[1,*]^2 + B_streamline[2,*]^2
+;   IDL> Temp_streamline = pc_select_streamline (Temp_streamlines, 1)
+;   IDL> B_streamline = pc_select_streamline (B_streamlines, 1)
+;   IDL> B_abs = sqrt (B_streamline[0,*]^2 + B_streamline[1,*]^2 + B_streamline[2,*]^2)
 ;   IDL> plot, distances, Temp_streamline, xtitle="coordinate along streamline", ytitle="temperature"
 ;   IDL> plot, distances, B_abs, xtitle="coordinate along streamline", ytitle="magnetic field", /ylog
 ;
@@ -84,6 +84,10 @@ function pc_extract_streamline, data, streamlines, name=name, label=label, preci
 	if (size (streamlines, /type) ne 8) then begin
 		num_points = n_elements (streamlines[0,*])
 		streamlines = { num:1L, set_1:{ indices:streamlines, num_points:num_points, num_lines:1L, first:[ 0L ], last:[ num_points-1L ] } }
+	end
+	if (has_tag (streamlines, 'indices')) then begin
+		num_points = n_elements (streamlines[0,*])
+		streamlines = { num:{ sets:1 }, set_1:streamlines }
 	end
 	if (not has_tag (streamlines.(1), 'indices')) then message, "ERROR: no indices in given streamlines structure."
 	if (not keyword_set (name)) then name = default_name

@@ -88,7 +88,9 @@ class SliceSeries(object):
 
         Notes
         -----
-        Use the attribute keys to get a list of attributes
+        - Use the attribute keys to get a list of attributes
+        - self.coordinate is the 1-based index of the slice including ghost zones at each output time
+        - self.position is the coordinate value of the slice at each output time
 
         Examples
         --------
@@ -382,15 +384,15 @@ class SliceSeries(object):
                     if extension == "xy" or extension == "Xy" or extension == "xy2" or extension == "xy3" or extension == "xy4":
                         hsize = dim.nx
                         vsize = dim.ny
-                        pos = grid.z[ind]
+                        pos = grid.z[ind-1]
                     elif extension == "xz":
                         hsize = dim.nx
                         vsize = dim.nz
-                        pos = grid.y[ind]
+                        pos = grid.y[ind-1]
                     elif extension == "yz":
                         hsize = dim.ny
                         vsize = dim.nz
-                        pos = grid.x[ind]
+                        pos = grid.x[ind-1]
                     elif extension == "r":
                         # Read grid size of radial slices by iterating to the last
                         # line of slice_position.dat. This will break if/when there

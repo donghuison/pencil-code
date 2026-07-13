@@ -1621,7 +1621,7 @@ module General
 !
       if (destLen<srcLen) then
         print*, "safe_character_assign: ", &
-            "RUNTIME ERROR: FORCED STRING TRUNCATION WHEN ASSIGNING '" &
+            "RUNTIME WARNING: FORCED STRING TRUNCATION WHEN ASSIGNING '" &
              //src//"' to ",destLen," characters"
         dest=src(1:destLen)
       else
@@ -2929,11 +2929,11 @@ module General
       IF (X>FLOAT(N)) THEN
       BJM = BESSJ0(X)
       BJ  = BESSJ1(X)
-      DO 11 J = 1,N-1
+      DO J = 1,N-1
       BJP = J*TOX*BJ-BJM
       BJM = BJ
       BJ  = BJP
-   11 CONTINUE
+      ENDDO
       BESSJ = BJ
       ELSE
       M = 2*((N+INT(SQRT(FLOAT(IACC*N))))/2)
@@ -2942,7 +2942,7 @@ module General
       SUM1 = 0.
       BJP = 0.
       BJ  = 1.
-      DO 12 J = M,1,-1
+      DO J = M,1,-1
       BJM = J*TOX*BJ-BJP
       BJP = BJ
       BJ  = BJM
@@ -2955,7 +2955,7 @@ module General
       IF (JSUM/=0) SUM1 = SUM1+BJ
       JSUM = 1-JSUM
       IF (J==N) BESSJ = BJP
-   12 CONTINUE
+      ENDDO
       SUM1 = 2.*SUM1-BJ
       BESSJ = BESSJ/SUM1
       ENDIF
@@ -7082,11 +7082,12 @@ iloop:do i=1,size(list2)
 !***********************************************************************
     function posindex_to_1Dindex(indx,indy,indz,rank) result(res)
 !
-!  Forms a 1D index into a (nx,ny,nz)-arrary from a triple index.
-!  Optionally, combines with the process rank such that rank and index can be recovered.
+!  Forms a 1D index into a (nx,ny,nz)-arrary from the triple index (indx,indy,indz).
+!  Optionally, combines with the process rank such that both index and rank can be recovered.
+!  Tripel index is 1-based, rank is 0-based.
 !
 !  21-apr-26/MR: coded
-
+!
       integer, intent(in) :: indx,indy,indz
       integer, optional, intent(in) :: rank
       real :: res
@@ -7097,7 +7098,12 @@ iloop:do i=1,size(list2)
     endfunction posindex_to_1Dindex
 !***********************************************************************
     subroutine expand_1Dindex(rindex,indx,indy,indz,rank)
-
+!
+!  Inverse of posindex_to_1Dindex: triple index and (optionally) rank from 1D index.
+!  Tripel index is 1-based, rank is 0-based.
+!
+!  21-apr-26/MR: coded
+!
       real, intent(in) :: rindex
       integer, intent(out) :: indx,indy,indz
       integer, optional, intent(out) :: rank
@@ -7338,6 +7344,8 @@ iloop:do i=1,size(list2)
         dst = enum_hp09_string
       case('sx')
         dst = enum_sx_string
+      case('power-law')
+        dst = enum_powerZlaw_string
       case('solar_dc99')
         dst = enum_solar_dc99_string
       case('vertical_shear')
@@ -8156,6 +8164,8 @@ iloop:do i=1,size(list2)
         dst = enum_gmssm_string
       case('damp_mean_uz_prof_bdr')
         dst = enum_damp_mean_uz_prof_bdr_string
+      case('global-heat')
+        dst = enum_globalZheat_string
       case('waterfall')
         dst = enum_waterfall_string
       case('imposed-cs2-core')
@@ -8164,6 +8174,12 @@ iloop:do i=1,size(list2)
         dst = enum_csZstep_string
       case('from_file_h5')
         dst = enum_from_file_h5_string
+      case('gilbert-bayly')
+        dst = enum_gilbertZbayly_string
+      case('diffrot_from_expansion')
+        dst = enum_diffrot_from_expansion_string
+      case ('step-local-patches')
+        dst = enum_stepZlocalZpatches
       case default
         dst = enum_unknown_string_string
         if (lroot) print*, 'No string enum for: ', src

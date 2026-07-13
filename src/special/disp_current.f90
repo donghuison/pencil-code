@@ -14,13 +14,15 @@
 ! MVAR CONTRIBUTION 4
 ! MAUX CONTRIBUTION 0
 !
-! PENCILS PROVIDED e2; edot2; el(3); a0; ga0(3); del2ee(3); curlE(3); BcurlE
+! PENCILS PROVIDED e2; edot2; el(3); a0; ga0(3); del2ee(3); curlE(3); BcurlE; BcurlB
+! PENCILS PROVIDED udotE;
+! PENCILS PROVIDED ExB(3);
 ! PENCILS PROVIDED rhoe, divJ, divE, gGamma(3); sigE, sigB; eb; count_eb0
 ! PENCILS PROVIDED boost; gam_EB; eprime; bprime; jprime; GammaY
 ! PENCILS PROVIDED jj_higgsY(3); rhoe_higgsY
 ! PENCILS EXPECTED phi, infl_phi, dphi, infl_dphi, gphi(3); cov_der(4,4)
 ! PENCILS EXPECTED curlb(3), jj_ohm(3), phi_doublet(3)
-! PENCILS EXPECTED gpsi(3), dpsi
+! PENCILS EXPECTED gpsi(3), dpsi, ext_force(4)
 !***************************************************************
 !
 module Special
@@ -36,7 +38,7 @@ module Special
 ! input parameters
 !
   real, dimension (ninit) :: amplee=0.0 !, kx_aa=1.0, ky_aa=1.0, kz_aa=1.0
-  real, dimension (nx) :: etaSchw, diffus_etaSchw=0.
+  real, dimension (nx) :: etaSchw=0., diffus_etaSchw=0., dtsrc_sigE=0.
   real :: alpf=0., alpfpsi=0.
   real :: ampl_ex=0.0, ampl_ey=0.0, ampl_ez=0.0, ampl_a0=0.0
   real :: kx_ex=0.0, kx_ey=0.0, kx_ez=0.0
@@ -78,6 +80,8 @@ module Special
   logical :: lrandom_ampl_ee=.false., lfixed_phase_ee=.false., lallow_bprime_zero=.true.
   logical :: lswitch_off_divJ=.false., lswitch_off_Gamma=.false., lmass_suppression=.false.
   logical :: loverride_c_light=.false., ldensity_add_je_heating=.false., llorentzforce_ee=.false.
+  logical :: lcorrect_sign_adphiB_term=.false. !PAR_DOC: correct sign adphiB_term
+  logical :: lignore_adphiB_term_in_MHD_current=.true. !PAR_DOC: correct sign adphiB_term
   character(len=labellen) :: inita0='zero'
   character (len=labellen), dimension(ninit) :: initee='nothing'
   character (len=labellen) :: power_filename='power_profile.dat'
@@ -108,9 +112,14 @@ module Special
   real :: sigEmax=impossible       !PAR_DOC: time step constraint from 1/sigE
   real :: sigE_ceiling=impossible  !PAR_DOC: ceiling
   real :: sigE_const_value=impossible  !PAR_DOC: constant value if set
+  real :: etaSchw_max=impossible   !PAR_DOC: constant value if set
   logical :: reinitialize_ee=.false.
-  logical :: lresistive_gauge_ee=.false. !possibility of resistive gauge when ladvance_ee=F.
+  logical :: lresistive_gauge_ee=.false.   !PAR_DOC: possibility of resistive gauge when ladvance_ee=F.
+  logical :: lresistive_gauge_disp=.false. !PAR_DOC: resitive gauge when displacement current is solved for.
   logical :: ldt_disp_current=.true.  !PAR_DOC: invoke timestep constraint from sigE
+  logical :: llate_reset_el_pencil=.false.  !PAR_DOC: late reset of el pencil, should probably be true in future.
+  logical :: linclude_dphiB_in_MHD=.false.  !PAR_DOC: include dphi*B in MHD approximation
+  logical :: linclude_gphixE_in_MHD=.false.  !PAR_DOC: include gphixE in MHD approximation
   character (len=labellen) :: aderiv_scaling='table'
 !
   namelist /special_run_pars/ &
@@ -125,7 +134,10 @@ module Special
     loverride_c_light, ldensity_add_je_heating, je_heating_factor, &
     lresistive_gauge_ee, llorentzforce_ee, aderiv_scaling, vA_limit, &
     lohmic_heating_ee, lohmic_heating_justee, sigE_const_value, &
-    ladvance_ee, eta_given, ldt_disp_current, cdt_sigE
+    ladvance_ee, eta_given, ldt_disp_current, cdt_sigE, &
+    lresistive_gauge_disp, etaSchw_max, llate_reset_el_pencil, &
+    linclude_dphiB_in_MHD, linclude_gphixE_in_MHD, &
+    lcorrect_sign_adphiB_term, lignore_adphiB_term_in_MHD_current
 !
 ! Declare any index variables necessary for main or
 !
@@ -146,6 +158,7 @@ module Special
   integer :: idiag_grms=0       ! DIAG_DOC: $\left<C-\nabla\cdot\Av\right>^{1/2}$
   integer :: idiag_da0rms=0     ! DIAG_DOC: $\left<C-\nabla\cdot\Av\right>^{1/2}$
   integer :: idiag_BcurlEm=0    ! DIAG_DOC: $\left<\Bv\cdot\nabla\times\Ev\right>$
+  integer :: idiag_BcurlBm=0    ! DIAG_DOC: $\left<\Bv\cdot\nabla\times\Bv\right>$
   integer :: idiag_divJrms=0    ! DIAG_DOC: $\left<\nab\Jv^2\right>^{1/2}$
   integer :: idiag_divErms=0    ! DIAG_DOC: $\left<\nab\Ev^2\right>^{1/2}$
   integer :: idiag_rhoerms=0    ! DIAG_DOC: $\left<\rho_e^2\right>^{1/2}$
@@ -169,7 +182,11 @@ module Special
   integer :: idiag_sigBrms=0    ! DIAG_DOC: $\left<\sigma_\mathrm{B}^2\right>^{1/2}$
   integer :: idiag_sigEE2m=0    ! DIAG_DOC: $\left<\sigma_\mathrm{E}\Ev^2\right>$
   integer :: idiag_sigBBEm=0    ! DIAG_DOC: $\left<\sigma_\mathrm{E}\Bv\cdot\Ev\right>$
+  integer :: idiag_BdEdtm=0     ! DIAG_DOC: $\left<\Bv\cdot\partial\Ev/\partial t\right>$
   integer :: idiag_adphiBm=0    ! DIAG_DOC: $\left<(\alpha/f)<\phi'\Bv\cdot\Ev\right>$
+  integer :: idiag_adphiB2m=0   ! DIAG_DOC: $\left<(\alpha/f)<\phi'\Bv^2/\sigma_E+\nabla\phi'\times\Ev\right>$
+  integer :: idiag_adphiB21m=0  ! DIAG_DOC: $\left<(\alpha/f)<\phi'\Bv^2/\sigma_E\right>$
+  integer :: idiag_adphiJBm=0   ! DIAG_DOC: $\left<(\alpha/f)<\phi'\Jv\cdot\Bv/\sigma_E\right>$
   integer :: idiag_adphiBrms=0  ! DIAG_DOC: $\left<[(\alpha/f)<\phi'\Bv]\right>^{1/2}$
   integer :: idiag_Johmrms=0    ! DIAG_DOC: $\left<\Jv^2\right>^{1/2}$
   integer :: idiag_J2sigEm=0    ! DIAG_DOC: $\left<\Jv^2/\sigma_E\right>$
@@ -188,6 +205,7 @@ module Special
 ! yz averaged diagnostics given in yzaver.in
 !
   integer :: idiag_e2mx = 0     ! YZAVG_DOC: $\langle E^2\rangle_{yz}$
+  logical, pointer :: lext_force
 !
   contains
 !
@@ -287,8 +305,19 @@ module Special
           "use unit_system='set' or put loverride_c_light=T")
       c_light2=c_light**2
 !
-      if (lmagnetic .and. .not.lswitch_off_divJ) &
+      if(lhydro) then
+        call get_shared_variable("lext_force",lext_force)
+      else
+       allocate(lext_force)
+       lext_force=.false.
+      endif
+!
+      if (lmagnetic .and. (.not.lswitch_off_divJ .or. lext_force)) then
         call get_shared_variable('eta',eta,caller='initialize_special')
+      else
+       allocate(eta)
+       eta=impossible
+      endif
 !
 !  The following are only obtained when luse_scale_factor_in_sigma=T
 !  (luse_scale_factor_in_sigma=F by default, because they are defined
@@ -351,6 +380,7 @@ module Special
       endif
 !
       call keep_compiler_quiet(f)
+
 !
     endsubroutine initialize_special
 !***********************************************************************
@@ -499,9 +529,11 @@ module Special
         lpenc_requested(i_rho1)=.true.
       endif
 !
-      !if (llorenz_gauge_disp) then
-      !  lpenc_requested(i_diva)=.true.
-      !endif
+!  Need graddiva for resitive gauge when displacement current is solved for:
+!
+      if (lresistive_gauge_disp) then
+        lpenc_requested(i_graddiva)=.true.
+      endif
 !
 !  Terms for Gamma evolution.
 !
@@ -548,6 +580,11 @@ module Special
         lpenc_diagnos(i_BcurlE)=.true.
       endif
 !
+      if (idiag_BcurlBm/=0) then
+        lpenc_diagnos(i_bb)=.true.
+        lpenc_diagnos(i_curlb)=.true.
+      endif
+!
       if (idiag_ebm/=0) lpenc_diagnos(i_eb)=.true.
       if (idiag_a0rms/=0) lpenc_diagnos(i_a0)=.true.
       if (idiag_grms/=0) lpenc_diagnos(i_diva)=.true.
@@ -577,13 +614,16 @@ module Special
 !
 !   24-nov-04/tony: coded
 !
-      use Sub, only: grad, div, curl, del2v, dot2_mn, dot, levi_civita, del2v_etc, cross_mn, multsv_mn
+      use Sub, only: grad, div, curl, del2v, dot2_mn, dot, levi_civita,& 
+                     del2v_etc, cross_mn, multsv_mn, multsv_add, dot_mn
 !
       real, dimension (mx,my,mz,mfarray) :: f
       type (pencil_case) :: p
+      real :: conductivity
 !
-      real, dimension (nx,3) :: tmpv
-      real, dimension (nx) :: tmp, mass_suppression_fact
+      real, dimension (nx,3) :: tmpv, E_MHD
+      real, dimension (nx) :: tmp, mass_suppression_fact, gphi2, prefactor
+      real, dimension (nx) :: uExB
       integer :: i,j,k
 !
       intent(inout) :: f
@@ -591,7 +631,11 @@ module Special
 !
 !  Pencil for charge density.
 !
-      if (lsolve_chargedensity) p%rhoe=f(l1:l2,m,n,irhoe)
+      if (lsolve_chargedensity) then
+        p%rhoe=f(l1:l2,m,n,irhoe)
+      else
+        p%rhoe = 0.0
+      endif
 !
 !  Terms for Gamma evolution.
 !
@@ -711,13 +755,22 @@ module Special
 !
         if (sigE_ceiling/=impossible) p%sigE=min(p%sigE,sigE_ceiling)
 !
-!  Put p%sigE=sigE_const_value when lsigE_const=T.
+!  Put p%sigE=sigE_const_value when lsigE_const=T (this is not normally used).
 !
         if (lsigE_const) then
           if (sigE_const_value==impossible) &
             call fatal_error('calc_pencils_special','sigE_const_value must not be impossible')
           p%sigE=sigE_const_value
           p%sigB=0.
+        endif
+!
+!  Compute magnetic diffusivity from 1/sigE, unless given.
+!  These 5 lines used to come after "if (ijx/=0)", but it should be done even if lohm_evolve=T
+!
+        if (eta_given==impossible) then
+          etaSchw=1./p%sigE
+        else
+          etaSchw=eta_given
         endif
 !
 !  Now compute current, using any of the 4 expressions above.
@@ -738,25 +791,22 @@ module Special
 !
 !  0 = curlB - mu0*J, but ignore mu0 for now.
 !
-            p%jj_ohm=p%curlb
+            if (lignore_adphiB_term_in_MHD_current) then
+              p%jj_ohm=p%curlb
+            else
+              call multsv_add(p%curlb,-alpf*p%infl_dphi,p%bb,p%jj_ohm)
+            endif
           endif
 !
 !  This would overwrite f(l1:l2,m,n,ijx:ijz)
 !
           if (ijx/=0) f(l1:l2,m,n,ijx:ijz) = p%jj_ohm
 !
-!  Compute magnetic diffusivity from 1/sigE, unless given.
-!
-          if (eta_given==impossible) then
-            etaSchw=1./p%sigE
-          else
-            etaSchw=eta_given
-          endif
-!
 !  If no time advance of E, we add here the expression without dispacement
 !  current based on Ohm's law, i.e., E = -uxb + J/sigE.
 !  For numerical reasons, we may want to use lresistive_gauge_ee=T (not the default).
 !  In that case, terms such as Ax,xx, Ay,yy, and Az,zz are present.
+!  Also update the electric field pencil.
 !
           if (.not. ladvance_ee) then
             if (lnoncollinear_EB .or. lnoncollinear_EB_aver) then
@@ -767,7 +817,48 @@ module Special
               else
                 call multsv_mn(etaSchw,p%jj_ohm,tmpv)
               endif
-              f(l1:l2,m,n,iex:iez)=-p%uxb+tmpv
+              E_MHD=-p%uxb+tmpv
+              if (linclude_dphiB_in_MHD) then
+                if (lcorrect_sign_adphiB_term) then
+                  call multsv_add(E_MHD,-alpf*etaSchw*p%infl_dphi,p%bb,E_MHD)
+                else
+                  call multsv_add(E_MHD,alpf*etaSchw*p%infl_dphi,p%bb,E_MHD)
+                endif
+                if (linclude_gphixE_in_MHD) then
+                  call dot2_mn(p%gphi,gphi2)
+                  prefactor=alpf*etaSchw
+                  tmp=1./(1.+prefactor*gphi2)
+!
+!  eps_123*EMHD(2)
+!  eps_132*EMHD(3)
+!
+                  f(l1:l2,m,n,iex)=tmp*( &
+                    (1.+prefactor*p%gphi(:,1)**2)*E_MHD(:,1) &
+                       +prefactor*p%gphi(:,3)    *E_MHD(:,2) &
+                       -prefactor*p%gphi(:,2)    *E_MHD(:,3))
+!
+!  eps_231*EMHD(3)
+!  eps_213*EMHD(1)
+!
+                  f(l1:l2,m,n,iey)=tmp*( &
+                       -prefactor*p%gphi(:,3)    *E_MHD(:,1) &
+                   +(1.+prefactor*p%gphi(:,2)**2)*E_MHD(:,2) &
+                       +prefactor*p%gphi(:,1)    *E_MHD(:,3))
+!
+!  eps_312*EMHD(1)
+!  eps_321*EMHD(2)
+!
+                  f(l1:l2,m,n,iez)=tmp*( &
+                       +prefactor*p%gphi(:,2)    *E_MHD(:,1) &
+                       -prefactor*p%gphi(:,1)    *E_MHD(:,2) &
+                   +(1.+prefactor*p%gphi(:,3)**2)*E_MHD(:,3))
+                else
+                  f(l1:l2,m,n,iex:iez)=E_MHD
+                endif
+              else
+                f(l1:l2,m,n,iex:iez)=E_MHD
+              endif
+              if (llate_reset_el_pencil) p%el=f(l1:l2,m,n,iex:iez)
             endif
           endif
         endif
@@ -802,6 +893,12 @@ module Special
       if (idiag_BcurlEm/=0) then
         call curl(f,iex,p%curle)
         call dot(p%bb,p%curle,p%BcurlE)
+      endif
+!
+!  curlb
+!
+      if (idiag_BcurlBm/=0) then
+        call dot(p%bb,p%curlb,p%BcurlB)
       endif
 ! !
 ! !  del2ee
@@ -852,15 +949,41 @@ module Special
         endif
       endif
       if (alpf/=0.and..not.lklein_gordon) p%dphi=p%infl_dphi
+      
+      if(lpenc_requested(i_ExB)) then
+       call cross_mn(p%el,p%ExB,p%ExB)
+      endif
+
+      if(lext_force) then
+       call dot_mn(p%uu,p%ExB,uExB)
+       conductivity = 1./eta
+       p%ext_force(:,1) = p%ext_force(:,1) -p%lorentz_gamma*(p%rhoe*p%udotE-conductivity*uExB-conductivity*p%e2)
+       do i=1,3
+         p%ext_force(:,i+1) = p%ext_force(:,i+1) -p%lorentz_gamma*((p%rhoe-conductivity*p%udotE)*p%el(:,i) &
+                               -p%rhoe*p%uxb(:,i) + conductivity*(p%ExB(:,i)-p%ub*p%bb(:,i) + p%b2*p%uu(:,i)))
+       enddo
+      endif
 !
-!  Total contribution to the timestep
+!  Total contribution to the timestep. Define here the array dtsrc_sigE
+!  which is used below for outputting the timestep constraint.
 !
       if (lfirst.and.ldt.and.ldt_disp_current) then
         if (ladvance_ee) then
-          dt1_max=max(dt1_max,p%sigE/cdt_sigE)
+          dtsrc_sigE=p%sigE/cdt_sigE
+          dt1_max=max(dt1_max,dtsrc_sigE)
         else
+          dtsrc_sigE=0.
           diffus_etaSchw=etaSchw*dxyz_2
           maxdiffus=max(maxdiffus,diffus_etaSchw)
+        endif
+!
+!  Detailed time step report.
+!
+        if (ldt_report) then
+          print*,'Time step report from disp_current: minval(1/dt1_max)=',minval(1./dt1_max)
+          print*,'Time step report from disp_current: minval(1/maxdiffus)=',minval(1./maxdiffus)
+          if (minval(diffus_etaSchw)>0.) &
+            print*,'Time step report from disp_current: minval(1/diffus_etaSchw)=',minval(1./diffus_etaSchw)
         endif
       endif
 !
@@ -932,7 +1055,9 @@ module Special
     endsubroutine calc_axion_term
 !***********************************************************************
     subroutine calc_helical_term(p,gtmp,dphi,gphi,lphihom)
-
+!
+!  Compute gtmp = phi'*B + gphi x E, or just phi'*B when lphihom=T (homogeneous case)
+!
       use Sub
 
       type(pencil_case), intent(IN) :: p
@@ -983,7 +1108,7 @@ module Special
       real, dimension (mx,my,mz,mvar) :: df
       type (pencil_case) :: p
 !
-      real, dimension (nx,3) :: gtmp, dJdt
+      real, dimension (nx,3) :: gtmp, dJdt, dEdt
       real, dimension (nx) :: tmp, tmp2, del2a0
       real :: inflation_factor=0., mfpf=0., fppf=0.
       integer :: j
@@ -1027,15 +1152,30 @@ module Special
 !  Solve dA/dt = -E.
 !
       if (lmagnetic) then
-
-        df(l1:l2,m,n,iax:iaz)=df(l1:l2,m,n,iax:iaz)-p%el
+!
+!  Decide here about resistive versus temporal (Weyl) gauge
+!  Allow for possibility to limit the diffusivity factor,
+!  which is needed for early times when etaSchw can be huge.
+!
+        if (lresistive_gauge_disp) then
+          if (etaSchw_max==impossible) then
+            call multsv(etaSchw,p%graddiva,gtmp)
+          else
+            call multsv(min(etaSchw,etaSchw_max),p%graddiva,gtmp)
+          endif
+          df(l1:l2,m,n,iax:iaz)=df(l1:l2,m,n,iax:iaz)-p%el+gtmp
+        else
+          df(l1:l2,m,n,iax:iaz)=df(l1:l2,m,n,iax:iaz)-p%el
+        endif
 !
 !  Solve: dE/dt = curlB - mu*J
 !
         if (ladvance_ee) then
-          df(l1:l2,m,n,iex:iez)=df(l1:l2,m,n,iex:iez)+c_light2*(p%curlb-mu0*p%jj_ohm)
+          !df(l1:l2,m,n,iex:iez)=df(l1:l2,m,n,iex:iez)+c_light2*(p%curlb-mu0*p%jj_ohm)
+          dEdt=c_light2*(p%curlb-mu0*p%jj_ohm)
         else
           df(l1:l2,m,n,iex:iez)=0.
+          dEdt=0.
         endif
 !
 !  Solve for charge density
@@ -1062,10 +1202,12 @@ module Special
 !
           if (lcurlyA) then
             inflation_factor=fppf
-            df(l1:l2,m,n,iex:iez)=df(l1:l2,m,n,iex:iez)-c_light2*inflation_factor*p%aa
+            !df(l1:l2,m,n,iex:iez)=df(l1:l2,m,n,iex:iez)-c_light2*inflation_factor*p%aa
+            dEdt=dEdt-c_light2*inflation_factor*p%aa
           else
             inflation_factor=-2.*mfpf
-            df(l1:l2,m,n,iex:iez)=df(l1:l2,m,n,iex:iez)-c_light2*inflation_factor*p%el
+            !df(l1:l2,m,n,iex:iez)=df(l1:l2,m,n,iex:iez)-c_light2*inflation_factor*p%el
+            dEdt=dEdt-c_light2*inflation_factor*p%el
           endif
           if (ip<14.and.lroot.and.lfirst) print*,'t, inflation_factor=',t, inflation_factor
         endif
@@ -1093,26 +1235,28 @@ module Special
             call calc_helical_term(p,gtmp,p%dphi,p%gphi,lphi_hom)
             if (ldensity .and. vA_limit>0) then
               tmp=1./(1.+p%b2*p%rho1/vA_limit**2)
-              call multsv_mn(tmp,gtmp,gtmp)
+              call multsv(tmp,gtmp,gtmp)
             endif
-            df(l1:l2,m,n,iex:iez)=df(l1:l2,m,n,iex:iez)-alpf*gtmp
+            !df(l1:l2,m,n,iex:iez)=df(l1:l2,m,n,iex:iez)-alpf*gtmp
+            dEdt=dEdt-alpf*gtmp
 !
             if (llorenz_gauge_disp) then
               ! if (lphi_hom) then
               !   df(l1:l2,m,n,idiva_name)=df(l1:l2,m,n,idiva_name)+del2a0
               ! else
               if (.not. lphi_hom) then
-                call dot_mn(p%gphi,p%bb,tmp)
+                call dot(p%gphi,p%bb,tmp)
                 df(l1:l2,m,n,idiva_name)=df(l1:l2,m,n,idiva_name)+alpf*tmp
               endif
             endif
           endif
           if (lwaterfall .and. alpfpsi/=0.) then
             call calc_helical_term(p,gtmp,p%dpsi,p%gpsi,lpsi_hom)
-            df(l1:l2,m,n,iex:iez)=df(l1:l2,m,n,iex:iez)-alpfpsi*gtmp
+            !df(l1:l2,m,n,iex:iez)=df(l1:l2,m,n,iex:iez)-alpfpsi*gtmp
+            dEdt=dEdt-alpfpsi*gtmp
             if (llorenz_gauge_disp) then
               if (.not. lpsi_hom) then
-                call dot_mn(p%gpsi,p%bb,tmp)
+                call dot(p%gpsi,p%bb,tmp)
                 df(l1:l2,m,n,idiva_name)=df(l1:l2,m,n,idiva_name)+alpfpsi*tmp
               endif
             endif
@@ -1134,7 +1278,8 @@ module Special
           df(l1:l2,m,n,ia0)=df(l1:l2,m,n,ia0)+f(l1:l2,m,n,idiva_name)
           df(l1:l2,m,n,iax:iaz)=df(l1:l2,m,n,iax:iaz)+p%ga0
         endif
-        if (eta_ee/=0.) df(l1:l2,m,n,iex:iez)=df(l1:l2,m,n,iex:iez)+c_light2*eta_ee*p%del2ee
+        !if (eta_ee/=0.) df(l1:l2,m,n,iex:iez)=df(l1:l2,m,n,iex:iez)+c_light2*eta_ee*p%del2ee
+        if (eta_ee/=0.) dEdt=dEdt+c_light2*eta_ee*p%del2ee
 !
 !  If Higgs doublet, add current from Higgs U(1) hypercharge.
 !
@@ -1154,8 +1299,15 @@ module Special
           !         p%phi_doublet(:,2)*p%cov_der(:,i+1,4) - &
           !         p%phi_doublet(:,3)*p%cov_der(:,i+1,3))
           ! enddo
-          df(l1:l2,m,n,iex:iez)=df(l1:l2,m,n,iex:iez) - p%jj_higgsY
+          !df(l1:l2,m,n,iex:iez)=df(l1:l2,m,n,iex:iez) - p%jj_higgsY
+          dEdt=dEdt-p%jj_higgsY
         endif
+      endif
+!
+!  Add here dEdt to df(l1:l2,m,n,iex:iez)
+!
+      if (ladvance_ee) then
+        df(l1:l2,m,n,iex:iez)=df(l1:l2,m,n,iex:iez)+dEdt
       endif
 !
 !  Compute eedot_as_aux; currently ignore alpf/=0.
@@ -1255,9 +1407,22 @@ module Special
 !
       if (lfirst.and.ldt) advec_cs2=max(advec_cs2,c_light2*dxyz_2)
 !
+!  Detailed time step report.
+!
+      if (ldt_report) then
+        print*,'Time step report from disp_current.: minval(1/sqrt(advec_cs2))=',minval(1./sqrt(advec_cs2))
+      endif
+!
 !  diagnostics
 !
-      if (ldiagnos) call calc_diagnostics_special(f,p)
+      !if (ldiagnos) call calc_diagnostics_special(f,p)
+      if (ldiagnos) then
+        call calc_diagnostics_special(f,p)
+        if (idiag_BdEdtm/=0) then
+          call dot(p%bb(:,2),dEdt,tmp)
+          call sum_mn_name(tmp,idiag_BdEdtm)
+        endif
+      endif
 !
     endsubroutine dspecial_dt
 !***********************************************************************
@@ -1288,17 +1453,36 @@ module Special
       if (idiag_sigBrms/=0) call sum_mn_name(p%sigB**2,idiag_sigBrms,lsqrt=.true.)
       if (idiag_sigEE2m/=0) call sum_mn_name(p%sigE*p%e2,idiag_sigEE2m)
       if (idiag_sigBBEm/=0) call sum_mn_name(p%sigB*p%eb,idiag_sigBBEm)
-      if (idiag_adphiBm/=0 .or. idiag_adphiBrms/=0) then
+!
+!  Magnetic helicity and energy production from axion term:
+!  adphiBm denotes (alp/f)*phi'*E.B (for electric energy production).
+!  In the MHD case, when the displacement current can be neglected, we compute
+!  adphiB2m = (alp/f)*<etaSchw*dphi*B^2> and adphiJBm = (alp/f)*<etaSchw*dphi*J.B>.
+!
+      if (idiag_adphiBm/=0 .or. idiag_adphiBrms/=0 .or. &
+          idiag_adphiB2m/=0 .or. idiag_adphiJBm/=0) then
         if (alpf/=0.) call calc_helical_term(p,gtmp,p%dphi,p%gphi,lphi_hom)
         if (idiag_adphiBm/=0) then
           call dot(alpf*gtmp,p%el,tmp)
           call sum_mn_name(tmp,idiag_adphiBm)
+        endif
+        if (idiag_adphiB2m/=0) then
+          call dot(alpf*gtmp,p%bb,tmp)
+          call sum_mn_name(etaSchw*tmp,idiag_adphiB2m)
+        endif
+        if (idiag_adphiJBm/=0) then
+          call dot(alpf*gtmp,p%jj,tmp)
+          call sum_mn_name(etaSchw*tmp,idiag_adphiJBm)
         endif
         if (idiag_adphiBrms/=0) then
           call dot2_mn(alpf*gtmp,tmp)
           call sum_mn_name(tmp,idiag_adphiBrms,lsqrt=.true.)
         endif
       endif
+!
+      if (maxval(etaSchw)>0. .and. alpf/=0.) &
+        call sum_mn_name(etaSchw*alpf*p%dphi*p%b2,idiag_adphiB21m)
+!
       if (idiag_Johmrms/=0 .or. idiag_J2sigEm/=0) then
         call dot2_mn(p%jj_ohm,tmp)
         call sum_mn_name(tmp,idiag_Johmrms,lsqrt=.true.)
@@ -1327,6 +1511,7 @@ module Special
       if (idiag_boostprms/=0) call sum_mn_name(p%boost**2 ,idiag_boostprms,lsqrt=.true.)
       if (idiag_a0rms/=0) call sum_mn_name(p%a0**2,idiag_a0rms,lsqrt=.true.)
       call sum_mn_name(p%BcurlE,idiag_BcurlEm)
+      call sum_mn_name(p%BcurlB,idiag_BcurlBm)
   !   if (lsolve_chargedensity) then
       call sum_mn_name(p%rhoe,idiag_rhoem)
       call sum_mn_name(p%count_eb0,idiag_count_eb0)
@@ -1341,7 +1526,7 @@ module Special
 !
 !  Fractional timestep constraints.
 !
-      call max_mn_name(p%sigE/cdt_sigE,idiag_dtsigE,l_dt=.true.)
+      call max_mn_name(dtsrc_sigE,idiag_dtsigE,l_dt=.true.)
       call max_mn_name(diffus_etaSchw/cdtv,idiag_dteta,l_dt=.true.)
 !
 !  Diagnostics.
@@ -1370,13 +1555,15 @@ module Special
 !
     endsubroutine calc_1d_diagnostics_special
 !***********************************************************************
-    subroutine read_special_init_pars(iostat)
+    subroutine read_special_init_pars(iomsg)
 !
       use File_io, only: parallel_unit
 !
-      integer, intent(out) :: iostat
+      character(LEN=iomsglen), intent(out) :: iomsg
+      integer :: iostat
 !
-      read(parallel_unit, NML=special_init_pars, IOSTAT=iostat)
+      read(parallel_unit, NML=special_init_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
 !
     endsubroutine read_special_init_pars
 !***********************************************************************
@@ -1388,13 +1575,15 @@ module Special
 !
     endsubroutine write_special_init_pars
 !***********************************************************************
-    subroutine read_special_run_pars(iostat)
+    subroutine read_special_run_pars(iomsg)
 !
       use File_io, only: parallel_unit
 !
-      integer, intent(out) :: iostat
+      character(LEN=iomsglen), intent(out) :: iomsg
+      integer :: iostat
 !
-      read(parallel_unit, NML=special_run_pars, IOSTAT=iostat)
+      read(parallel_unit, NML=special_run_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
 !
     endsubroutine read_special_run_pars
 !***********************************************************************
@@ -1430,15 +1619,15 @@ module Special
 !
       if (lreset) then
         idiag_EEEM=0; idiag_erms=0; idiag_exm=0;idiag_eym=0;  idiag_ezm=0; idiag_emax=0
-        idiag_edotrms=0; idiag_a0rms=0; idiag_grms=0; idiag_da0rms=0; idiag_BcurlEm=0
+        idiag_edotrms=0; idiag_a0rms=0; idiag_grms=0; idiag_da0rms=0; idiag_BcurlEm=0; idiag_BcurlBm=0
         idiag_mfpf=0; idiag_fppf=0; idiag_afact=0
         idiag_rhoerms=0; idiag_divErms=0; idiag_divJrms=0
         idiag_rhoem=0; idiag_count_eb0=0; idiag_divEm=0; idiag_divJm=0; idiag_constrainteqn=0
         idiag_dteta=0; idiag_dtsigE=0; idiag_etaSchw=0
         idiag_sigEm=0; idiag_sigBm=0; idiag_sigErms=0; idiag_sigBrms=0
-        idiag_ebm=0; idiag_Johmrms=0; idiag_J2sigEm=0; idiag_curlBrms=0
-        idiag_adphiBm=0; idiag_adphiBrms=0; idiag_ujxb1m=0
-        idiag_sigEE2m=0; idiag_sigBBEm=0
+        idiag_ebm=0; idiag_Johmrms=0; idiag_J2sigEm=0; idiag_curlBrms=0; idiag_BdEdtm=0
+        idiag_adphiBm=0; idiag_adphiB2m=0; idiag_adphiB21m=0; idiag_adphiJBm=0;
+        idiag_adphiBrms=0; idiag_ujxb1m=0; idiag_sigEE2m=0; idiag_sigBBEm=0
         idiag_eprimerms=0; idiag_bprimerms=0; idiag_jprimerms=0; idiag_gam_EBrms=0; 
         idiag_boostprms=0; idiag_echarge=0; idiag_e2mx=0; idiag_e2mz=0
         cformv=''
@@ -1463,6 +1652,7 @@ module Special
         call parse_name(iname,cname(iname),cform(iname),'grms',idiag_grms)
         call parse_name(iname,cname(iname),cform(iname),'da0rms',idiag_da0rms)
         call parse_name(iname,cname(iname),cform(iname),'BcurlEm',idiag_BcurlEm)
+        call parse_name(iname,cname(iname),cform(iname),'BcurlBm',idiag_BcurlBm)
         call parse_name(iname,cname(iname),cform(iname),'divErms',idiag_divErms)
         call parse_name(iname,cname(iname),cform(iname),'divJrms',idiag_divJrms)
         call parse_name(iname,cname(iname),cform(iname),'rhoerms',idiag_rhoerms)
@@ -1480,7 +1670,11 @@ module Special
         call parse_name(iname,cname(iname),cform(iname),'sigBrms',idiag_sigBrms)
         call parse_name(iname,cname(iname),cform(iname),'sigEE2m',idiag_sigEE2m)
         call parse_name(iname,cname(iname),cform(iname),'sigBBEm',idiag_sigBBEm)
+        call parse_name(iname,cname(iname),cform(iname),'BdEdtm',idiag_BdEdtm)
         call parse_name(iname,cname(iname),cform(iname),'adphiBm',idiag_adphiBm)
+        call parse_name(iname,cname(iname),cform(iname),'adphiB2m',idiag_adphiB2m)
+        call parse_name(iname,cname(iname),cform(iname),'adphiB21m',idiag_adphiB21m)
+        call parse_name(iname,cname(iname),cform(iname),'adphiJBm',idiag_adphiJBm)
         call parse_name(iname,cname(iname),cform(iname),'ujxb1m',idiag_ujxb1m)
         call parse_name(iname,cname(iname),cform(iname),'adphiBrms',idiag_adphiBrms)
         call parse_name(iname,cname(iname),cform(iname),'Johmrms',idiag_Johmrms)
@@ -1662,15 +1856,25 @@ module Special
       call copy_addr(je_heating_factor,p_par(46))
       call copy_addr(va_limit,p_par(47))
 
-    call copy_addr(lohmic_heating_ee,p_par(48)) ! bool
-    call copy_addr(ladvance_ee,p_par(49)) ! bool
-    call copy_addr(lohmic_heating_justee,p_par(50)) ! bool
-    call copy_addr(eta_given,p_par(51))
-    call copy_addr(cdt_sige,p_par(52))
-    call copy_addr(ldt_disp_current,p_par(53)) ! bool
-    call copy_addr(sige_ceiling,p_par(54))
-    call copy_addr(sige_const_value,p_par(55))
-    call copy_addr(lresistive_gauge_ee,p_par(56)) ! bool
+      call copy_addr(lohmic_heating_ee,p_par(48)) ! bool
+      call copy_addr(ladvance_ee,p_par(49)) ! bool
+      call copy_addr(lohmic_heating_justee,p_par(50)) ! bool
+      call copy_addr(eta_given,p_par(51))
+      call copy_addr(cdt_sige,p_par(52))
+      call copy_addr(ldt_disp_current,p_par(53)) ! bool
+      call copy_addr(sige_ceiling,p_par(54))
+      call copy_addr(sige_const_value,p_par(55))
+      call copy_addr(lresistive_gauge_ee,p_par(56)) ! bool
+      call copy_addr(etaschw_max,p_par(57))
+      call copy_addr(lresistive_gauge_disp,p_par(58)) ! bool
+      call copy_addr(llate_reset_el_pencil,p_par(59)) ! bool
+      call copy_addr(linclude_dphib_in_mhd,p_par(60)) ! bool
+      call copy_addr(linclude_gphixe_in_mhd,p_par(61)) ! bool
+
+    call copy_addr(lcorrect_sign_adphib_term,p_par(62)) ! bool
+    call copy_addr(lignore_adphib_term_in_mhd_current,p_par(63)) ! bool
+    call copy_addr(idiag_bcurlbm,p_par(64)) ! int
+    call copy_addr(idiag_bdedtm,p_par(65)) ! int
     endsubroutine pushpars2c
 !***********************************************************************
 !

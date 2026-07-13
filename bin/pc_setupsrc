@@ -13,8 +13,11 @@
 # Options:
 #   --pencil-home <dir>   Specify the root path of the Pencil Code directory
 #   --min                 Link only a minimum of files
+#   --force-astaroth      Link `src/astaroth` regardless of settings in Makefile.local
+
 IAM=$0
-#
+
+#-----------------------------------------------------------------------------
 link_scripts()
 {
   echo "Linking job submission/execution scripts."
@@ -473,8 +476,6 @@ create_Makefile_inc()
 #
   printf "# %s\n" "Empty" "(This file was written by 'pc_setupsrc')" \
       > src/Makefile.inc
-  printf "# %s\n" "Empty" "(This file was written by 'pc_setupsrc')" \
-      > src/Makefile-standard.inc
 }
 #
 copy_local_files()
@@ -543,48 +544,50 @@ scripts="start.csh start_run.csh run.csh getconf.csh"
 pencil_home_path=$PENCIL_HOME
 src="`pwd`/src"
 link_all=1
+force_link_gpu=0
 #
 while [ $# -gt 0 ]
 do
   case $1 in
-  -h)
-    . $pencil_home_path/lib/sh/functions.sh
-    usage_from_header $IAM
-    exit 1
-  ;;
-  -?)
-    . $pencil_home_path/lib/sh/functions.sh
-    usage_from_header $IAM
-    exit 1
-  ;;
-  --help)
+  -h | --help)
     . $pencil_home_path/lib/sh/functions.sh
     usage_from_header $IAM
     exit 1
   ;;
   --pencil-home)
     pencil_home_path=$2
-    shift
+    shift 2
   ;;
   --min)
     link_all=0
-    break
+    shift
+  ;;
+  --force-astaroth)
+    force_link_gpu=1
+    shift
   ;;
   --)
     shift
     break
   ;;
+  -*)
+    . $pencil_home_path/lib/sh/functions.sh
+    echo UNRECOGNISED PARAMETER: $1
+    usage_from_header $IAM
+    exit 1
+  ;;
   *)
-    if [ $specified_src ]; then
-      echo UNRECOGNISED PARAMETER
-      usage_from_header $IAM
-      exit 1
-    fi
     src=$1
+    shift
   ;;
   esac
-  shift
 done
+
+#To handle folder name being specified after --
+if [ $# -gt 0 ]; then
+  src=$1
+fi
+
 #
 . $pencil_home_path/lib/sh/functions.sh
 #
@@ -652,12 +655,7 @@ if [ -f "$src/Makefile.local" ]; then
     make_initial_condition_dir
     if [ "$link_all" -eq 1 ]; then link_initial_condition_files; fi
   fi
-  if [ "`grep '^[^#]*= *gpu_astaroth' $src/Makefile.local`" != "" ]; then 
-    make_astaroth_dir
-    if [ "$link_all" -eq 1 ]; then link_astaroth_files; fi
-  fi
-  pencil_user=$PENCIL_USER
-  if [ "$pencil_user" = GPU_AUTOTEST ]; then
+  if [ "`grep '^[^#]*= *gpu_astaroth' $src/Makefile.local`" != "" -o "$force_link_gpu" -eq 1 ]; then 
     make_astaroth_dir
     if [ "$link_all" -eq 1 ]; then link_astaroth_files; fi
   fi

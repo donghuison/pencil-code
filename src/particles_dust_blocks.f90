@@ -2032,12 +2032,17 @@ k_loop:   do while (.not. (k>npar_loc))
         if (ldragforce_dust_par .and. t>=tstart_dragforce_par) then
           if (headtt) print*, 'dvvp_dt_blocks: Add drag force; tausp=', tausp
 !
-          if (npar_iblock(iblock)/=0) then
+!  Initialise the inverse drag time-steps before the particle loop. Blocks with
+!  no particles (npar_iblock==0) skip the loop but still reach the summation
+!  dt1_drag=dt1_drag_dust+dt1_drag_gas below, so the arrays must be zeroed here
+!  to avoid operating on uninitialised values (a -finit-real=sNaN trap).
 !
-            if (lupdate_courant_dt) then
-              dt1_drag_dust=0.0
-              if (ldragforce_gas_par) dt1_drag_gas=0.0
-            endif
+          if (lupdate_courant_dt) then
+            dt1_drag_dust=0.0
+            if (ldragforce_gas_par) dt1_drag_gas=0.0
+          endif
+!
+          if (npar_iblock(iblock)/=0) then
 !
 !  Loop over all particles in considered block.
 !
@@ -2697,13 +2702,15 @@ k_loop:   do while (.not. (k>npar_loc))
 !
     endsubroutine particles_diffusion
 !***********************************************************************
-    subroutine read_particles_init_pars(iostat)
+    subroutine read_particles_init_pars(iomsg)
 !
       use File_io, only: parallel_unit
 !
-      integer, intent(out) :: iostat
+      character(LEN=*), intent(out) :: iomsg
+      integer :: iostat
 !
-      read(parallel_unit, NML=particles_init_pars, IOSTAT=iostat)
+      read(parallel_unit, NML=particles_init_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
 !
     endsubroutine read_particles_init_pars
 !***********************************************************************
@@ -2715,13 +2722,15 @@ k_loop:   do while (.not. (k>npar_loc))
 !
     endsubroutine write_particles_init_pars
 !***********************************************************************
-    subroutine read_particles_run_pars(iostat)
+    subroutine read_particles_run_pars(iomsg)
 !
       use File_io, only: parallel_unit
 !
-      integer, intent(out) :: iostat
+      character(LEN=*), intent(out) :: iomsg
+      integer :: iostat
 !
-      read(parallel_unit, NML=particles_run_pars, IOSTAT=iostat)
+      read(parallel_unit, NML=particles_run_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
 !
     endsubroutine read_particles_run_pars
 !***********************************************************************

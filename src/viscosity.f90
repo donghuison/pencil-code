@@ -31,6 +31,7 @@ module Viscosity
   character (len=labellen) :: lambda_profile='uniform', tdep_nu_type='powerlaw'
   real :: nu=0.0, nu_cspeed=0.5
   real :: mu=0.0
+  real :: ell_gam=0.0   !PAR_DOC: photon mean-free path in the tight coupling regime
   real :: nu_tdep=0.0, nu_tdep_exponent=0.0, nu_tdep_t0=0.0, nu_tdep_toffset=0.0
   real :: nu_tdep_t1=0.0, nu_tdep_t2=0.0, nu_tdep_kcs=0.0, nu_r_reduce=0.0
   real :: zeta=0.0, nu_mol=0.0, nu_hyper2=0.0, nu_hyper3=0.0
@@ -128,9 +129,10 @@ module Viscosity
   real :: no_visc_heat_z0=max_real, no_visc_heat_zwidth=0.0
   real :: damp_sound=0., nu_tdep_ascale_power=0.
   real :: h_sld_visc=2.0, nlf_sld_visc=1.0
+  real :: ascale_visc=1.  !PAR_DOC: value of ascale below which nu for recombination is constant
+  logical :: lvisc_const_below_ascale=.false.  !PAR_DOC: visc=const for ascale below ascale_visc
   logical :: lrate_of_strain_as_aux = .false.
   integer :: iSij=0
-
 !
   namelist /viscosity_run_pars/ &
       limplicit_viscosity, nu, mu, nu_tdep_exponent, &
@@ -149,11 +151,13 @@ module Viscosity
       lvisc_smag_Ma, nu_smag_Ma2_power, nu_cspeed, lno_visc_heat_zbound, &
       no_visc_heat_z0,no_visc_heat_zwidth, div_sld_visc ,lvisc_forc_as_aux, &
       lvisc_rho_nu_const_prefact, nu_rcyl_min, nu_r_reduce, &
-      tdep_nu_type, nu_tdep_ascale_power,lrate_of_strain_as_aux
+      tdep_nu_type, nu_tdep_ascale_power,lrate_of_strain_as_aux, &
+      ascale_visc, lvisc_const_below_ascale
 !
 ! diagnostic variable markers (needs to be consistent with reset list below)
 !
   integer :: idiag_nu_tdep=0    ! DIAG_DOC: time-dependent viscosity
+  integer :: idiag_ell_gam=0    ! DIAG_DOC: time-dependent photon mean free path
   integer :: idiag_fviscm=0     ! DIAG_DOC: Mean value of viscous acceleration
   integer :: idiag_fviscmin=0   ! DIAG_DOC: Min value of viscous acceleration (redundant)
   integer :: idiag_fviscmax=0   ! DIAG_DOC: Max absolute viscous acceleration
@@ -459,7 +463,8 @@ module Viscosity
         case ('nu-tdep')
           if (lroot) print*,'time-dependent nu*(del2u+graddivu/3+2S.glnrho)'
           if (nu/=0.) lpenc_requested(i_sij)=.true.
-          call get_shared_variable('cs_t',cs_t,caller='initialize_viscosity')
+          if (tdep_nu_type=='ascale_power_cs-step') &
+            call get_shared_variable('cs_t',cs_t,caller='initialize_viscosity')
           lvisc_nu_tdep=.true.
         case ('nu-prof')
           if (lroot) print*,'viscous force with a vertical profile for nu'
@@ -886,13 +891,15 @@ module Viscosity
 !
     endsubroutine initialize_lambda
 !***********************************************************************
-    subroutine read_viscosity_run_pars(iostat)
+    subroutine read_viscosity_run_pars(iomsg)
 !
       use File_io, only: parallel_unit
 !
-      integer, intent(out) :: iostat
+      character(LEN=*), intent(out) :: iomsg
+      integer :: iostat
 !
-      read(parallel_unit, NML=viscosity_run_pars, IOSTAT=iostat)
+      read(parallel_unit, NML=viscosity_run_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
 !
     endsubroutine read_viscosity_run_pars
 !***********************************************************************
@@ -925,7 +932,7 @@ module Viscosity
         idiag_epsK2=0; idiag_epsK3=0; idiag_epsK4=0
         idiag_visc_heatm=0; idiag_mesh3Remax=0; idiag_meshRemax=0; idiag_Reshock=0
         idiag_nuD2uxbxm=0; idiag_nuD2uxbym=0; idiag_nuD2uxbzm=0
-        idiag_nu_tdep=0; idiag_fviscm=0 ; idiag_fviscrmsx=0
+        idiag_nu_tdep=0; idiag_ell_gam=0; idiag_fviscm=0 ; idiag_fviscrmsx=0
         idiag_fviscmz=0; idiag_fviscmx=0; idiag_fviscmxy=0
         idiag_epsKmz=0; idiag_numx=0; idiag_fviscymxy=0
         idiag_sijxxmz=0; idiag_sijxymz=0; idiag_sijxzmz=0
@@ -940,6 +947,7 @@ module Viscosity
       if (lroot.and.ip<14) print*,'rprint_viscosity: run through parse list'
       do iname=1,nname
         call parse_name(iname,cname(iname),cform(iname),'nu_tdep',idiag_nu_tdep)
+        call parse_name(iname,cname(iname),cform(iname),'ell_gam',idiag_ell_gam)
         call parse_name(iname,cname(iname),cform(iname),'fviscm',idiag_fviscm)
         call parse_name(iname,cname(iname),cform(iname),'fviscmin',idiag_fviscmin)
         call parse_name(iname,cname(iname),cform(iname),'qfviscm',idiag_qfviscm)
@@ -1083,7 +1091,13 @@ module Viscosity
           lvisc_nu_profr_twosteps .or. lvisc_nu_profy_bound .or. &
           lvisc_nut_from_magnetic .or. lvisc_nu_cspeed .or. lvisc_mu_cspeed) &
         lpenc_requested(i_del2u)=.true.
-      if (.not. limplicit_viscosity .and. lvisc_simplified) lpenc_requested(i_del2u)=.true.
+      if (.not. limplicit_viscosity .and. lvisc_simplified) then
+        if(lconservative .and. lconservative) then
+          lpenc_requested(i_del2T)=.true.
+        else
+          lpenc_requested(i_del2u)=.true.
+        endif
+      endif
       if (lvisc_hyper3_simplified .or. lvisc_hyper3_simplified_tdep .or. &
           lvisc_hyper3_rho_nu_const .or. &
           lvisc_hyper3_nu_const .or. lvisc_hyper3_rho_nu_const_symm ) &
@@ -1441,14 +1455,21 @@ module Viscosity
 !  numerically easy and in most cases qualitatively OK.
 !  For boussinesq (divu=0) this is exact.
 !  In all other cases we use nu*o2.
+!  For the conservative relativistic case we take nu*del2Ti0,
+!  where Tij is the energy-momentum tensor.
+!  This is done for numerical stability.
 !
       if (.not. limplicit_viscosity .and. lvisc_simplified) then
-        p%fvisc=p%fvisc+nu*p%del2u
-        if (lpencil(i_visc_heat)) then
-          if (lboussinesq) then
-            p%visc_heat=p%visc_heat+2.*nu*p%sij2
-          else
-            p%visc_heat=p%visc_heat+nu*p%o2
+        if(lconservative .and. lrelativistic) then
+          p%fvisc=p%fvisc+nu*p%del2T
+        else
+          p%fvisc=p%fvisc+nu*p%del2u
+          if (lpencil(i_visc_heat)) then
+            if (lboussinesq) then
+              p%visc_heat=p%visc_heat+2.*nu*p%sij2
+            else
+              p%visc_heat=p%visc_heat+nu*p%o2
+            endif
           endif
         endif
         if (ldiffus_total) p%diffus_total=p%diffus_total+nu
@@ -1530,6 +1551,7 @@ module Viscosity
 !  [AB: this may not correspond to a symmetric stress tensor]
 !  PJK: 21-09-13 modified to include the missing term
 !  viscous force: mu/sqrt(rho)*(del2u+graddivu/3+S.glnrho)
+!  Is there a factor 2 missing in front of sglnrho?
 !
       if (lvisc_sqrtrho_nu_const) then
         murho1=nu*sqrt(p%rho1)
@@ -1634,6 +1656,9 @@ module Viscosity
             p%fvisc=p%fvisc+nu*(p%del2u+1.0/3.0*p%graddivu)
           endif
         endif
+!
+!  Standard calculation of heating per unit mass.
+!
         if (lpencil(i_visc_heat)) p%visc_heat=p%visc_heat+2*nu*p%sij2
         if (ldiffus_total) p%diffus_total=p%diffus_total+nu
       endif
@@ -2453,12 +2478,14 @@ module Viscosity
       use General, only: reduce_grad_dim,notanumber
       use DensityMethods, only: getrho
       use Boundcond, only: update_ghosts
+      use Diagnostics, only: save_name
 
       real, contiguous, dimension(:,:,:,:) :: f
       real, dimension (nx,3,3) :: uij,Sij
       real, dimension (nx) :: divu
 
       real, dimension(nx) :: rho, tmp
+      real :: n_ele, ell_gam, xH, rhob
 
       if (lnusmag_as_aux) then
 !
@@ -2540,8 +2567,25 @@ module Viscosity
             nu_tdep=cs_t/nu_tdep_kcs
           endif
         case ('PrM_sigEm')
-          nu_tdep=min(nu,PrM/sigEm_all)
-          !nu_tdep=nu
+          if (sigEm_all>0.) then
+            nu_tdep=min(nu,PrM/sigEm_all)
+          else
+            nu_tdep=nu
+          endif
+!
+!  Viscosity for recombination. Allow for a value of ascale below which nu is constant.
+!
+        case ('recombination')
+          xH=.7546
+          rhob=4.21e-31/ascale**3
+          n_ele=xH*rhob/m_p
+          ell_gam=1./(ascale*n_ele*sigma_Thomson)
+          if (lvisc_const_below_ascale) then
+            ell_gam=ell_gam/min(ascale/ascale_visc,1.)**2
+          endif
+          nu_tdep=c_light*ell_gam
+          if (lroot) call save_name(ell_gam,idiag_ell_gam)
+          if (lroot .and. ip<6) print*,'AXEL: m_p, sigma_Thomson, c_light=',m_p, sigma_Thomson, c_light
         case default
           call fatal_error('viscosity_after_boundary','unknown value of tdep_nu_type')
         endselect
@@ -2851,6 +2895,9 @@ module Viscosity
 
         if (idiag_fviscrmsx/=0) call sum_mn_name(xmask_vis*fvisc2,idiag_fviscrmsx,lsqrt=.true.)
         call sum_mn_name(p%visc_heat,idiag_visc_heatm)
+!
+!  Standard calculation of epsK
+!
         if (idiag_epsK/=0) call sum_mn_name(p%visc_heat*p%rho,idiag_epsK)
         if (idiag_epsK2/=0) call sum_mn_name((p%visc_heat*p%rho)**2,idiag_epsK2)
         if (idiag_epsK3/=0) call sum_mn_name((p%visc_heat*p%rho)**3,idiag_epsK3)

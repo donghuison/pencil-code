@@ -411,7 +411,8 @@ sub build_remote_cmd {
 	  cd '.$pencil_home.'/src/astaroth &&
 	  if [ -d submodule/.git ]; then
 	    cd submodule &&
-	    git pull origin develop > /dev/null 2>&1 &&
+	    git pull origin pencil-a > /dev/null 2>&1 &&
+	    git checkout pencil-a > /dev/null 2>&1 &&
 	    cd '.$pencil_home.'/fortran-parser &&
 	    git pull origin main > /dev/null 2>&1
 	  else
@@ -651,7 +652,9 @@ sub icon_result {
 sub icon_write {
     my $icon = shift;
     my $force = (shift || 0);
-    if (!$local) { die "Not yet implemented to write icon on remote host!\n"; }
+
+    # if (!$local) { die "Not yet implemented to write icon on remote host!\n"; }
+    if (!$local) { return; }
 
     # Output icon
     my $svg = "result.svg";

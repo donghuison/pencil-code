@@ -61,6 +61,7 @@ read_column_data_timeseries();
 
 read_line_data_simple();
 read_line_data_fancy();
+read_line_data_mixed();
 
 read_line_data1();
 read_line_data2();
@@ -238,11 +239,45 @@ sub read_line_data_fancy {
         );
 }
 
+sub read_line_data_mixed {
+    my $file = "$test_dir/data/line_mixed.dat";
+    my $comp = Test::NumericFileComparator->new($file);
+    ok($comp, "Parse $file");
+
+    _compare_string_lists(
+        ['Pressure', 'Temp(5,7,3:5)'],
+        $comp->{VARS},
+        $file
+        );
+
+    _compare_number_lists(
+        [0.6345238, 0.7345238, 0.655238],
+        $comp->{VALUES}->{'Pressure'},
+        "$file:Pressure"
+        );
+    _compare_number_lists(
+        [0.7543, 0.7411, 0.7123],
+        $comp->{VALUES}->{'Temp(5,7,3:5)'},
+        "$file:Temperature"
+        );
+
+    _compare_number_lists(
+        [0, 1.5e-7],
+        $comp->{ACCS}->{'Pressure'},
+        'accuracy[Pressure]'
+        );
+    _compare_number_lists(
+        [1.5e-4, 0],
+        $comp->{ACCS}->{'Temp(5,7,3:5)'},
+        'accuracy[Temperature]'
+        );
+}
+
 
 sub read_line_data1 {
     my $dir = "$pc_home/tests";
 
-    my $ref_file = "$dir/python/read-time-series/test1.ref";
+    my $ref_file = "$test_dir/data/line-2.dat";
     my $comp1 = Test::NumericFileComparator->new($ref_file);
     ok($comp1, "Parse $ref_file");
 }
@@ -302,7 +337,11 @@ sub _compare_numbers {
             "$label expected $exp, got $got, differs by > $abs_acc"
             );
     } else {
-        ok($exp == $got, "$label expected $exp, got $got");
+        #2026-Jun-08/Kishore: at least on my machine (perl 5.42.2),
+        # 1.5*1e-4 - 1.5e-4 = 2.71050543121376e-20 , so simply testing $exp == $got
+        # below makes some tests fail. 1e-15 is just chosen based on the machine
+        # epsilon for 64-bit floats, but probably can be made smaller.
+        ok(abs($exp - $got) < 1e-15, "$label expected $exp, got $got");
     }
 }
 

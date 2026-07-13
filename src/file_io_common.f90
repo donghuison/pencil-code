@@ -40,7 +40,6 @@ module File_io
       integer(kind=8) :: rec_len, num_rec, num, len, i
       integer, intent(in) :: reference
 !
-!
       if (num_rec < 0) then
         num_rec = -num_rec
         rec_len = -rec_len
@@ -197,7 +196,7 @@ module File_io
       file_size = -2
       if (file_exists(file)) then
         file_size = -1
-        call file_size_c(trim(file)//char(0), file_size)
+        inquire(file=trim(file), size=file_size)
       endif
 !
     endfunction file_size
@@ -337,13 +336,15 @@ module File_io
 !  18-aug-15/PABourdin: reworked to simplify code and display all errors at once
 !  19-aug-15/PABourdin: renamed from 'read_pars' to 'read_namelist'
 !
-      use Cdata, only: lnamelist_error, lparam_nml, lstart, lroot
+      use Cdata, only: lnamelist_error, lparam_nml, lstart, lroot, iomsglen, n_special_modules, &
+                       special_modules
       use General, only: loptest, itoa, ioptest
       use Messages, only: warning
 !
       interface
-        subroutine reader(iostat)
-          integer, intent(out) :: iostat
+        subroutine reader(iomsg)
+          use Cparam, only: n_special_modules, iomsglen
+          character(LEN=*), intent(out) :: iomsg
         endsubroutine reader
       endinterface
 !
@@ -351,54 +352,65 @@ module File_io
       logical, optional, intent(in) :: lactive
       logical, optional, intent(in) :: loptional
 !
-      integer :: ierr
-      logical :: found
+      integer :: i
+      character(len=n_special_modules*iomsglen) :: msg
+      logical :: lfound,lfound_special
       logical :: lnamelist_optional
-      character(len=5) :: type, suffix
+      character(len=12) :: type
       character(len=4) :: run_type
 !
-      lnamelist_optional = loptest (loptional)
-!
       if (.not. loptest (lactive, .true.)) return
+!
+      lnamelist_optional = loptest(loptional)
 !
       if (lstart .or. lparam_nml) then
         run_type = 'init'
       else
         run_type = 'run'
       endif
-      if (name /= '') type = '_'//run_type
-      suffix = '_pars'
       if (name == 'initial_condition_pars') then
         type = ''
-        suffix = ''
+      else
+        type = trim(adjustl(merge(' ','_',name=='')//run_type))//'_pars'
       endif
 !
       !if (.not. find_namelist (trim(name)//trim(type)//trim(suffix))) then
-      call find_namelist (trim(name)//trim(type)//trim(suffix), found, lnamelist_optional)
-      if (.not. found .and. lnamelist_optional) return
-!
-      ! G95 complains 'ierr' is used but not set, even though 'reader' has intent(out).
-      ! PABourdin:
-      ! Yes, because 'reader' is here a function *pointer* and it can not be verified whether the actual reader has intent(out).
-      ierr = 0
-      call reader(ierr)
-!
-      if (ierr /= 0) then
-!
-        if (.not.found) then
-          if (.not. lparam_nml) lnamelist_error = .true.
+      lfound=.true.
+
+      if (name/='special' .or. n_special_modules==1) then 
+          call find_namelist(trim(name)//trim(type), lfound, lnamelist_optional)
+      else if (lnamelist_optional) then
+          lfound = .false.
+          do i=1,n_special_modules
+            call find_namelist(trim(special_modules(i))//trim(type), lfound_special, lnamelist_optional)
+            !If a single special module namelist is found then "special_[run|init]_pars" is considered as found.
+            !This means one has to give all possible special modules a namelist in global_run.in or none.
+            !Othewise one would run to the risk of not checking incorrect namelists.
+            !Not a perfect solution but better than requiring all special modules to be present in global_run.in.
+            lfound = lfound .or. lfound_special
+            call parallel_rewind
+          enddo
+      endif
+
+      if (.not. lfound) then
+        if (.not.lnamelist_optional) then
+          if (.not. lparam_nml) lnamelist_error = .true.  !???
           call parallel_rewind
-          return
         endif
+        return
+      endif
 !
+      msg=""
+      call reader(msg)
+!
+      if (msg /= "") then
         lnamelist_error = .true.
-        if (lroot) then
-          if (ierr == -1) then
-            call warning ('read_namelist', 'namelist "'//trim(name)//trim(type)//trim(suffix)//'" is missing')
-          else
-            call warning ('read_namelist', 'namelist "'//trim(name)//trim(type)//trim(suffix)// &
-                          '" has an error ('//trim(itoa(ierr))//')')
-          endif
+        if (name=='special' .and. n_special_modules>1) then
+          call warning('read_namelist','namelist(s) "'//trim(name)//trim(type)//'" have an error: '//trim(msg))
+          if (lroot.and.(index(msg,'nd-of-file')/=0 .or. index(msg,'nd of file')/=0)) &
+              print*,'             something like "past end of file" indicates missing namelist.'
+        else
+          call warning('read_namelist','namelist "'//trim(name)//trim(type)//'" has an error: '//trim(msg))
         endif
       endif
 !

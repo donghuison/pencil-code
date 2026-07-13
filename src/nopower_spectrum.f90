@@ -30,11 +30,11 @@ module power_spectrum
 !
     endsubroutine initialize_power_spectrum
 !***********************************************************************
-    subroutine read_power_spectrum_run_pars(iostat)
+    subroutine read_power_spectrum_run_pars(iomsg)
 !
-      integer, intent(out) :: iostat
+      character(LEN=*), intent(out) :: iomsg
 !
-      iostat = 0
+      iomsg=""
 !
     endsubroutine read_power_spectrum_run_pars
 !***********************************************************************
@@ -122,6 +122,16 @@ module power_spectrum
       call keep_compiler_quiet(sp)
 !
     endsubroutine powerLor
+!***********************************************************************
+    subroutine poweraBE(f,sp)
+!
+      real, contiguous,dimension(:,:,:,:) :: f
+      character (len=3) :: sp
+!
+      call keep_compiler_quiet(f)
+      call keep_compiler_quiet(sp)
+!
+    endsubroutine poweraBE
 !***********************************************************************
     subroutine powerOmU(f,sp)
 !

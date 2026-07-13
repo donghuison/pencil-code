@@ -81,12 +81,12 @@ module Special
   implicit none
 !
   include '../special.h'
-!
+  include '../record_types.h'
 !
 ! Declare index of new variables in f array (if any).
 !
 !  integer :: iinfl_phi=0, iinfl_dphi=0, iinfl_hubble=0, iinfl_lna=0, Ndiv=100
-  integer :: iinfl_phi=0, iinfl_dphi=0, iinfl_lna=0, Ndiv=100
+  integer :: iinfl_phi=0, iinfl_dphi=0, iinfl_lna=0, iinfl_tph=0, Ndiv=100
   integer :: iinfl_rho_chi=0, iinfl_rho_rad=0
   integer :: it1_reset_value=0  !PAR_DOC: new it1 value after lit1_reset
   real :: ncutoff_phi=1., infl_v=.1
@@ -97,36 +97,44 @@ module Special
   real :: initpower_dphi=0., cutoff_dphi=0., initpower2_dphi=0.
   real :: kgaussian_phi=0.,kpeak_phi=0., kgaussian_dphi=0., kpeak_dphi=0.
   real :: relhel_phi=0.
-  real :: ddotam, a2rhopm, a2rhopm_all, a2rhom, a4rhom, a2rhom_all, a4rhom_all, rhom, rhom_all
+  real :: ddotam, a2rhopm, a2rhopm_all, a2rhom, a4rhom, a2rhom_all, a4rhom_all
+  real :: rhom, rhom_all, rhokinm, rhokinm_all
   real :: edotbm, edotbm_all, e2m, e2m_all, b2m, b2m_all, a2rhophim, a4rhophim, a2rhophim_all, a4rhophim_all
   real :: a2rhopphim, a2rhopphim_all
-  real :: sigE1m_all_nonaver, sigB1m_all_nonaver,sigEm_all,sigBm_all,sigEm_all_diagnos,sigBm_all_diagnos
+  real :: sigE1m_all_nonaver=0., sigB1m_all_nonaver=0., sigEm_all=0., sigBm_all=0.
+  real :: sigEm_all_diagnos,sigBm_all_diagnos
   real :: a2rhogphim, a2rhogphim_all
   real :: a2, a21, Hscript
   real :: Hscript0=0., scale_rho_chi_Heqn=1., scale_rho_rad_Heqn=1., rho_chi_init=0.
-  real :: cdt_rho_chi=1., cdt_phi=1e-2
+  real :: cdt_rho_chi=1., cdt_phi=1e-2, cdt_Gamma_phi=1.
   real :: amplee_BD_prefactor=0., deriv_prefactor_ee=-1.
   real :: echarge=.0, echarge_const=.303
-  real :: count_eb0_all=0., rad_heating=0., ascale_heat=0., ascale_heat_off=0., heating
+  real :: count_eb0_all=0., rad_heating=0., ascale_heat=0., ascale_heat_width=0., ascale_heat_off=0., heating
   real :: aphimax=0., aphimax2=0. !PAR_DOC: maximum a value above which the phi potential is quenched.
   real :: Gamma_phi0=impossible, Gamma_phi !PAR_DOC: damping factor for phi above aphimax
   real :: Gamma_phi_exp=3.        !PAR_DOC: scale factor exponent on Gamma_phi
-  real :: rhophim_crit=1e-21      !PAR_DOC: minimum phi
   real :: wstate, wstate_aver     !PAR_DOC: critical w (EoS) value (slightly below 1/3)
   real :: wstate_crit=0.333333333 !PAR_DOC: critical w (EoS) value (1/3)
   real :: wstate_tolerance=0.     !PAR_DOC: tolerance w (EoS) value
   real :: wstate_prev=0.          !PAR_DOC: value of wstate in the previous iteration.
   real :: a4rhophim_crit=0.       !PAR_DOC: critical value of a4rhophim below lsolve_phi=F is set.
+  real :: lna_switch_toMHD=4.17   !PAR_DOC: critical value when to switch to MHD (if lswitch_toMHD_at_lna=T)
+  real :: lnascale_reheating=impossible !PAR_DOC: value of lna when reheating has started
+  real :: dlnascale_reheating=0.  !PAR_DOC: width in lna over which reheating should occur
+  real :: lg_Gamma_phi_fraction_firststep=1e-3  !PAR_DOC: lg of Gamma phi fraction at firststep
   real, pointer :: sigE_ceiling   !PAR_DOC: sigE ceiling
   real, pointer :: sigE_const_value !PAR_DOC: constant value for sigE
 !
   real, target :: ddotam_all
   real, pointer :: alpf, eta
   real, pointer :: sigE_prefactor, sigB_prefactor, mass_chi
-  real, dimension (nx) :: dt1_special
+  real, dimension (nx) :: dt1_special    !PARDOC: total timestep constraint from this module
+  real, dimension (nx) :: dtsrc_Gphirho  !PARDOC: specific timestep constraint from the Gphirho term
   logical :: lcompute_dphi0=.true.
   logical :: lbackreact_infl=.true., lem_backreact=.true., lzeroHubble=.false.
   logical :: lscale_tobox=.true., ldt_backreact_infl=.true., lconf_time=.true.
+  logical :: lold_ldt_phi=.true.     !PAR_DOC: for backward compatibility.
+  logical :: ldt_Gamma_phi=.false.   !PAR_DOC: time step constraint from Gam_phi
   logical :: lskip_projection_phi=.false., lvectorpotential=.false., lflrw=.false.
   logical :: lrho_chi=.false., lno_noise_phi=.false., lno_noise_dphi=.false.
   logical :: lrho_rad=.false.            !PAR_DOC: radiation from inflaton decay
@@ -140,25 +148,33 @@ module Special
   logical :: lsolve_for_phi_switch=.true. !PAR_DOC: switch must be on for automatically switching off the phi solver.
   logical :: lsolve_for_phi_always=.true. !PAR_DOC: misnomer: is now used for switching off the phi solver: is now used for switching off the phi solver
   logical :: lwstate_crit=.true.         !PAR_DOC: lwstate_crit switch (would put phi=0, is false by default)
-  logical :: lwstate_crit_old=.false.    !PAR_DOC: lwstate_crit_old (to restore the old wstate criterion used in the autotest)
+  logical :: lwstate_crit_old=.false.    !PAR_DOC: lwstate_crit_old (to restore the old wstate criterion used in the 0d-tests/reheating autotest)
   logical :: lheating=.false.            !PAR_DOC: heating criterion
   logical :: lheating_always=.false.     !PAR_DOC: heating criterion, set to true once lheating=T.
-  logical :: lheating_keep_on=.false.    !PAR_DOC: heating criterion
+  logical :: lheating_keep_on=.true.     !PAR_DOC: should be true to prevent further checks on heating
   logical :: ldefine_a2rhopm_without_Vpotential=.false.    !PAR_DOC: should be false to have correct results
   logical :: la2rhop_wrong_factor=.false. !PAR_DOC: should be false to have correct results; kept for backward compatibility
   logical :: lappy_BD_k1D_factor=.false. !PAR_DOC: apply $k_1^D$ factor in the Bunch-Davies initial condition (NOTE typo in name!)
   logical :: lapply_BD_kNy_factor=.false. !PAR_DOC: apply $1/N^(D/2)$ factor in the Bunch-Davies initial condition.
   logical :: linv_BD=.true.              !PAR_DOC: apply forward transform in the Bunch-Davies initial condition.
-  logical :: lswitch_toMHD_when_nophi=.true. !PAR_DOC: switch to MHD when phi evolution is turned off.
+  logical :: lswitch_toMHD_when_nophi=.true. !PAR_DOC: switch to MHD when phi evolution is turned off (phi is not included in current MHD solver).
+  logical :: lswitch_toMHD_when_heating=.false. !PAR_DOC: switch to MHD at the start of reheating
   logical :: lit1_reset_if_lsolve_for_phi=.false.  !PAR_DOC: allow to check for it1_reset_if_lsolve_for_phi
   logical :: lit1_reset=.false.                    !PAR_DOC: put lit1_reset to a new value if true.
   logical :: lsigE_const_if_lsolve_for_phi=.false. !PAR_DOC: allow to check for lsigE_const_if_lsolve_for_phi
   logical :: lsigE_const_ifnot_lsolve_for_phi=.false. !PAR_DOC: allow to check for lsigE_const_if_lsolve_for_phi
   logical :: lsigE_const=.false.                   !PAR_DOC: put sigE to a constant if true.
+  logical :: lBD_scaling_wHubble=.true.            !PAR_DOC: Bunch-Davies scaling with Hubble (true for backward compatibility, but should be false to be correct)
+  logical :: lold_lrho_chi_dtconstraint=.true.     !PAR_DOC: old lrho_chi dt constraint (use false for new and correct version)
+  logical :: linclude_rhokin_in_a2rho=.false.      !PAR_DOC: include rhokin in a2rho
+  logical :: linclude_rho_EBK_in_wstate=.false.    !PAR_DOC: include rhoE, rhoB, and rhokin in wstate
+  logical :: lswitch_toMHD_at_lna=.false.          !PAR_DOC: option to use lna as criterion for switching to MHD
+  logical :: lsmooth_Gamma_phi=.false.             !PAR_DOC: smooth increase of Gamma_phi
   logical, pointer :: lphi_hom, lphi_linear_regime, lnoncollinear_EB, lnoncollinear_EB_aver
   logical, pointer :: lcollinear_EB, lcollinear_EB_aver, lmass_suppression
   logical, pointer :: lallow_bprime_zero
   logical, pointer :: ladvance_ee
+  logical, pointer :: lrelativistic_eos
   !Whether the sums needed for the ODE and rhs advancement are done in the together in the same kernel as the rhs
   !advancement. Benchmarks seem to suggest that combining them is indeed more performant.
   !This approach is however strictly approximative since we effectively take the value of Hscript from the preceeding substep
@@ -179,27 +195,33 @@ module Special
       ncutoff_phi, lscale_tobox, Hscript0, Hscript_choice, infl_v, lflrw, &
       lrho_chi, scale_rho_chi_Heqn, scale_rho_rad_Heqn, amplee_BD_prefactor, deriv_prefactor_ee, &
       lrho_rad, init_rho_rad, Gamma_phi0, lconf_time, &
-      echarge_type, init_rho_chi, rho_chi_init, lrho_chi_inhom, rhophim_crit, &
+      echarge_type, init_rho_chi, rho_chi_init, lrho_chi_inhom, &
       wstate_crit, lwstate_crit, lwstate_crit_old, wstate_tolerance, &
       lsolve_for_phi_always, lsolve_for_phi_switch, &
       heating_choice, ldefine_a2rhopm_without_Vpotential, la2rhop_wrong_factor, &
-      lappy_BD_k1D_factor, lapply_BD_kNy_factor, linv_BD
+      lappy_BD_k1D_factor, lapply_BD_kNy_factor, linv_BD, lBD_scaling_wHubble
 !
   namelist /special_run_pars/ &
       initspecial, phi0, dphi0, axionmass, eps, ascale_ini, &
       lbackreact_infl, lem_backreact, c_light_axion, lambda_axion, Vprime_choice, &
-      lzeroHubble, ldt_backreact_infl, Ndiv, Hscript0, Hscript_choice, infl_v, &
+      lzeroHubble, lold_ldt_phi, ldt_backreact_infl, ldt_Gamma_phi, Ndiv, &
+      Hscript0, Hscript_choice, infl_v, &
       lflrw, lrho_chi, scale_rho_chi_Heqn, scale_rho_rad_Heqn, echarge_type, &
-      cdt_rho_chi, cdt_phi, &
+      cdt_rho_chi, cdt_phi, cdt_Gamma_phi, &
       lrho_rad, lrho_rad_apply, lrho_rad_apply2, lrho_chi_corrected, &
-      lrho_chi_inhom, ldefine_a2rhophi_with_Vpotential, &
-      rad_heating, ascale_heat, ascale_heat_off, aphimax, Gamma_phi0, lconf_time, rhophim_crit, &
+      lrho_chi_inhom, ldefine_a2rhophi_with_Vpotential, rad_heating, &
+      lsmooth_Gamma_phi, ascale_heat, ascale_heat_width, ascale_heat_off, &
+      aphimax, Gamma_phi0, lconf_time, &
       wstate_crit, lwstate_crit, lwstate_crit_old, wstate_tolerance, &
       lsolve_for_phi_always, lsolve_for_phi_switch, &
       heating_choice, lheating_keep_on, lcombine_prep_ode_right_with_rhs, &
-      lswitch_toMHD_when_nophi, Gamma_phi_exp, a4rhophim_crit, solve_phi_criterion, &
+      lswitch_toMHD_when_nophi, lswitch_toMHD_when_heating, &
+      Gamma_phi_exp, a4rhophim_crit, solve_phi_criterion, &
       lit1_reset_if_lsolve_for_phi, it1_reset_value, &
-      lsigE_const_ifnot_lsolve_for_phi, lsigE_const, lsigE_const_if_lsolve_for_phi
+      lsigE_const_ifnot_lsolve_for_phi, lsigE_const, lsigE_const_if_lsolve_for_phi, &
+      lold_lrho_chi_dtconstraint, linclude_rhokin_in_a2rho, linclude_rho_EBK_in_wstate, &
+      lswitch_toMHD_at_lna, lna_switch_toMHD, &
+      dlnascale_reheating, lg_Gamma_phi_fraction_firststep
 !
 ! Diagnostic variables (needs to be consistent with reset list below).
 !
@@ -229,6 +251,8 @@ module Special
   integer :: idiag_wstate_aver=0 ! DIAG_DOC: $\langle w_\mathrm{state}\rangle$
   integer :: idiag_Gamma_phi=0  ! DIAG_DOC: $\langle w_\mathrm{state}\rangle$
   integer :: idiag_Gam_phi=0    ! DIAG_DOC: $\langle w_\mathrm{state}\rangle$
+  integer :: idiag_dtGphirho=0  ! DIAG_DOC: dtGphirho
+  integer :: idiag_tph=0  ! DIAG_DOC: dtGphirho
 !
   integer :: enum_hscript_choice = 0
   integer :: enum_vprime_choice = 0
@@ -254,7 +278,11 @@ module Special
       call farray_register_pde('infl_phi',iinfl_phi)
       call farray_register_pde('infl_dphi',iinfl_dphi)
 !
-     if (lflrw) call farray_register_ode('infl_lna',iinfl_lna)
+     if (lflrw) then
+       call farray_register_ode('infl_lna',iinfl_lna)
+       call farray_register_ode('infl_tph',iinfl_tph)
+     endif
+!
      if (lrho_chi) call farray_register_ode('infl_rho_chi',iinfl_rho_chi)
      if (lrho_rad) call farray_register_ode('infl_rho_rad',iinfl_rho_rad)
 !
@@ -268,10 +296,11 @@ module Special
       call put_shared_variable('e2m_all',e2m_all)
       call put_shared_variable('b2m_all',b2m_all)
       call put_shared_variable('lsigE_const',lsigE_const)
-      call put_shared_variable('sigEm_all',sigEm_all,caller='register_backreact_infl')
-      call put_shared_variable('sigBm_all',sigBm_all,caller='register_backreact_infl')
-      call put_shared_variable('echarge',echarge,caller='register_backreact_infl')
+      call put_shared_variable('sigEm_all',sigEm_all)
+      call put_shared_variable('sigBm_all',sigBm_all)
+      call put_shared_variable('echarge',echarge)
       call put_shared_variable('lrho_chi',lrho_chi)
+print*,'AXEL1: lheating_always=',lheating_always
 !
     endsubroutine register_special
 !***********************************************************************
@@ -321,9 +350,10 @@ module Special
           call get_shared_variable('ladvance_ee',ladvance_ee)
           call get_shared_variable('mass_chi',mass_chi)
         else
-          if (.not.associated(lphi_hom)) allocate(lphi_hom, lphi_linear_regime, ladvance_ee, &
+          if (.not.associated(alpf)) allocate(alpf,lphi_hom, lphi_linear_regime, ladvance_ee, &
             lcollinear_EB, lnoncollinear_EB, lcollinear_EB_aver, lnoncollinear_EB_aver, &
             sigE_ceiling, sigE_const_value)
+          alpf=0.
           lphi_hom=.true.
           sigE_ceiling=impossible
           sigE_const_value=impossible
@@ -339,10 +369,11 @@ module Special
         if (.not.associated(alpf)) allocate(alpf, lphi_hom, lphi_linear_regime, &
           sigE_prefactor, sigB_prefactor, lcollinear_EB, lcollinear_EB_aver, &
           lnoncollinear_EB, lnoncollinear_EB_aver, lmass_suppression, &
-          sigE_ceiling, sigE_const_value, lallow_bprime_zero, mass_chi)
+          sigE_ceiling, sigE_const_value, lallow_bprime_zero, mass_chi, ladvance_ee)
         alpf=0.
         lphi_hom=.false.
         lphi_linear_regime=.false.
+        ladvance_ee=.false.
         sigE_ceiling=impossible
         sigE_const_value=impossible
         sigE_prefactor=0.
@@ -354,6 +385,15 @@ module Special
         lmass_suppression=.false.
         lallow_bprime_zero=.false.
         mass_chi=0.
+      endif
+!
+!  To know whether we are solving the relativistic eos equations we need to get lrelativistic_eos from density.
+!
+      if (ldensity) then
+        call get_shared_variable('lrelativistic_eos',lrelativistic_eos, caller='initialize_backreact_infl')
+      else
+        allocate(lrelativistic_eos)
+        lrelativistic_eos=.false.
       endif
 !
 !  Redundancy checks. To be removed when these logicals are removed.
@@ -408,12 +448,19 @@ module Special
             t=tstart
             Hubble_ini=sqrt(8.*pi/3.*(.5*dphi0**2+.5*axionmass2*phi0**2*ascale_ini**2))
             lnascale=log(ascale_ini)
-            if (lflrw) f_ode(iinfl_lna)=lnascale
+!
+!  ODE variables
+!
+            if (lflrw) then
+              f_ode(iinfl_lna)=lnascale
+              f_ode(iinfl_tph)=0.
+            endif
 !
           case ('default')
             Vpotential=.5*axionmass2*phi0**2
 !
 !  Hubble_ini is here based on the standard (non-reduced) Planck mass.
+!  The following is only corrrect for the quadratic potential!
 !
             Hubble_ini=sqrt(8.*pi/3.*(.5*axionmass2*phi0**2*ascale_ini**2))
             ! dphi0=-ascale_ini*sqrt(2*eps/3.*Vpotential)
@@ -463,14 +510,22 @@ module Special
 !
           case ('Bunch-Davies')
             if (lroot) print*,'Hubble_ini=',Hubble_ini
-            amplphi_BD=amplphi*Hubble_ini
+            if (lBD_scaling_wHubble) then
+              amplphi_BD=amplphi*Hubble_ini
+            else
+              amplphi_BD=amplphi
+            endif
             deriv_prefactor=1.
             call bunch_davies(f,iinfl_phi,iinfl_phi,iinfl_dphi,iinfl_dphi, &
               amplphi_BD,kpeak_phi,deriv_prefactor, &
               lappy_BD_k1D_factor=lappy_BD_k1D_factor, &
               lapply_BD_kNy_factor=lapply_BD_kNy_factor, linv=linv_BD)
             if (amplee_BD_prefactor/=0.) then
-              amplee_BD=amplee_BD_prefactor*Hubble_ini
+              if (lBD_scaling_wHubble) then
+                amplee_BD=amplee_BD_prefactor*Hubble_ini
+              else
+                amplee_BD=amplee_BD_prefactor
+              endif
               if (iex>0) then
                 deriv_prefactor=deriv_prefactor_ee
                 call bunch_davies(f,iax,iaz,iex,iez, &
@@ -628,6 +683,7 @@ module Special
 !
 !  06-oct-03/tony: coded
 !   2-nov-21/axel: first set of equations coded
+!  13-jun-26/axel: corrected: lphi_hom --> lphi_linear_regime (for E.B feedback)
 !
       use Diagnostics, only: sum_mn_name, max_mn_name, save_name
       use Sub, only: dot_mn, dot2_mn, del2, grad
@@ -636,7 +692,7 @@ module Special
       real, dimension (mx,my,mz,mvar) :: df
       real, dimension (nx,3) :: gphi
       real, dimension (nx) :: Vprime, Vpotential, a2rhophi, a4rhophi
-      real, dimension (nx) :: tmp, del2phi, gphi2
+      real, dimension (nx) :: tmp, del2phi, gphi2, Gamma_phi_rho_rhs
       real :: pref_Vprime=1., pref_Hubble=2., pref_del2=1., pref_alpf, pref_Gamma=impossible
       type (pencil_case) :: p
 !
@@ -669,8 +725,24 @@ module Special
 !  to rename lheating -> lheating_phi. The switch lheating_always is false by default
 !  and set to true after the first time lheating is true and if lheating_keep_on is true.
 !
+if (ip<16) print*,'AXEL9: lheating_always=',lheating_always
       if (lheating .or. lheating_always) then
-        Gamma_phi=Gamma_phi0
+        if (lsmooth_Gamma_phi) then
+          if (dlnascale_reheating==0.) then
+            Gamma_phi=Gamma_phi0*.5*(1.+tanh((ascale-ascale_heat)/ascale_heat_width))
+          else
+!
+!  When dlnascale_reheating /= 0, then we use the following formula, where Gamma_phi jumps
+!  to a fraction 10^lg_Gamma_phi_fraction_firststeplg_Gamma_phi_fraction_firststep of the
+!  final Gamma_phi value within the first time step, and then its log growth linearly
+!  in lna within the interval dlnascale_reheating.
+!
+            Gamma_phi=Gamma_phi0*10.**(lg_Gamma_phi_fraction_firststep*(1.- &
+              min(max(log(ascale)-lnascale_reheating,0.)/dlnascale_reheating,1.)))
+          endif
+        else
+          Gamma_phi=Gamma_phi0
+        endif
       else
         Gamma_phi=0.
       endif
@@ -730,11 +802,11 @@ module Special
           call grad(f,iinfl_phi,gphi)
           call dot2_mn(gphi,gphi2)
           a2rhophi=0.5*p%infl_dphi**2+0.5*gphi2+a2*Vpotential
-          tmp=Gamma_phi*a2rhophi*ascale**Gamma_phi_exp
+          Gamma_phi_rho_rhs=Gamma_phi*a2rhophi*ascale**Gamma_phi_exp
           if (ldensity_nolog) then
-            df(l1:l2,m,n,irho)=df(l1:l2,m,n,irho)+tmp
+            df(l1:l2,m,n,irho)=df(l1:l2,m,n,irho)+Gamma_phi_rho_rhs
           else
-            df(l1:l2,m,n,ilnrho)=df(l1:l2,m,n,ilnrho)+tmp*p%rho1
+            df(l1:l2,m,n,ilnrho)=df(l1:l2,m,n,ilnrho)+Gamma_phi_rho_rhs*p%rho1
           endif
         else
           call fatal_error("dspecial_dt: ","density must be true")
@@ -756,6 +828,7 @@ module Special
         endif
 !
 !  magnetic terms, add (alpf/a^2)*(E.B) to dphi'/dt equation
+!  Is only included when lphi_hom=T and lphi_linear_regime=F, i.e., when homogeneous feedback.
 !
         if (lmagnetic .and. lem_backreact) then
           if (lphi_hom .and. .not. lphi_linear_regime) then
@@ -763,9 +836,9 @@ module Special
           endif
 !
 !  Compute E.B only when displacement current is included.
-!  Note that alpf does not (currently) exist in MHD.
+!  The iex=0 option should not be used.
 !
-          if (.not. lphi_hom) then
+          if (.not. lphi_linear_regime) then
             if (iex>0) then
               call dot_mn(p%el,p%bb,tmp)
             else
@@ -800,30 +873,64 @@ module Special
 !  vA=B/sqrt(rho_chi), so dt=C_M*dx/vA. In practice, C_M (=cdt_rho_chi) can be 20.
 !  This timestep constraint should not be used if hydrodynamics is evolved.
 !  If it is used, it should be based on cobformal time using comoving B and rho.
+!  ldt_backreact_infl=T by default; can be used to prevent automatic time step control.
 !
       if (lfirst .and. ldt .and. ldt_backreact_infl) then
         if (Ndiv==0.) then
           if (lsolve_for_phi) then
-            if (dimensionality==0) then
-              dt1_special=axionmass*sqrt(a2)/cdt_phi
+            if (lold_ldt_phi) then
+              if (dimensionality==0) then
+                dt1_special=axionmass*sqrt(a2)/cdt_phi
+              else
+                advec2=max(advec2,axionmass2*a2*dxyz_2/cdt_phi**2)
+                dt1_special=0.
+              endif
             else
-              advec2=max(advec2,axionmass2*a2*dxyz_2/cdt_phi**2)
-              dt1_special=0.
+!
+!  New (corrected) timestep constraint for phi: always (for quadratic potential):
+!  dt < cdt_phi*ma*a. In addition, there is a speed-of-light constraint from del2phi.
+!
+              dt1_special=axionmass*ascale/cdt_phi
+              advec2=max(advec2,dxyz_2/cdt_phi**2)
             endif
+!
+!  Time step constraint from Gam_phi. Need to compenate here for the
+!
+            if (ldt_Gamma_phi .and. lrho_chi_inhom .and. lheating) then
+              ! 7-jul-26/axel: neither of the two expressions below seems to be correct.
+              !dtsrc_Gphirho=Gamma_phi_rho_rhs*p%rho1*cdt_phi/cdt_Gamma_phi
+              dtsrc_Gphirho=Gamma_phi_rho_rhs*p%rho1/cdt_Gamma_phi
+              dt1_special=max(dt1_special,dtsrc_Gphirho)
+            else
+              dtsrc_Gphirho=0.
+            endif
+          else
+            dt1_special=0.
           endif
 !
 !  Additional constraint from vA=B/sqrt(rho_chi), but this is only relevant
-!  when ldensity=F, because otherwise the standard Alfven constaint applies.
+!  when ldensity=F, because otherwise the standard Alfven constraint applies.
 !
           if (lrho_chi) then
-            advec2=max(advec2,a21**2*b2m_all/f_ode(iinfl_rho_chi)*dxyz_2/cdt_rho_chi**2)
-          else
-            call fatal_error("dspecial_dt", "lrho_chi must be .true. when Ndiv=0")
+            if (lold_lrho_chi_dtconstraint .or. .not. (lrho_chi_inhom .and. ldensity)) &
+              advec2=max(advec2,a21**2*b2m_all/f_ode(iinfl_rho_chi)*dxyz_2/cdt_rho_chi**2)
+    !     else
+    !       call fatal_error("dspecial_dt", "lrho_chi must be .true. when Ndiv=0")
+    ! now ok
           endif
         else
           dt1_special = Ndiv*abs(Hscript)
         endif
         dt1_max=max(dt1_max,dt1_special)
+! 7-jul-2026/axel: perhaps better via dt1_src
+        !maxsrc=max(maxsrc,dt1_special)
+!
+!  Detailed time step report.
+!
+        if (ldt_report) then
+          print*,'Time step report from backreact_infl: minval(1/dt1_max)=',minval(1./dt1_max)
+          print*,'Time step report from backreact_infl: minval(1/sqrt(advec2))=',minval(1./sqrt(advec2))
+        endif
       endif
 !
 !  Diagnostics
@@ -838,10 +945,18 @@ module Special
       use Diagnostics , only: 
 !
 !  Here is the Friedmann equation. For cosmic time, Hscript means H.
+!  Hscript is computed in get_Hscript_and_a2 and based on a2rhom_all, where rhom_all is physical.
+!  The comoving total energy density would be a^2*a2rhom_all.
 !
       if (lgpu) call read_sums_from_GPU
       call get_Hscript_and_a2(Hscript,a2rhom_all)
-      if (lflrw) df_ode(iinfl_lna)=df_ode(iinfl_lna)+Hscript
+!
+!  Integrate ODEs
+!
+      if (lflrw) then
+        df_ode(iinfl_lna)=df_ode(iinfl_lna)+Hscript
+        df_ode(iinfl_tph)=df_ode(iinfl_tph)+ascale
+      endif
 !
 !  Energy density of the charged particles.
 !  This is currently only done for <sigE>*<E^2>, and not for <sigE*E^2>.
@@ -902,7 +1017,7 @@ module Special
       use Diagnostics 
       
       real, dimension(n_odevars), intent(in) :: f_ode
-      real :: rho_chi, rho_rad, lnascale
+      real :: rho_chi, rho_rad, lnascale, tph=0.
       real :: Hscript_diagnos
 !
 !  Set rho_chi for diagnostics
@@ -923,10 +1038,14 @@ module Special
 !
       if (ldiagnos) then
         call get_Hscript_and_a2(Hscript_diagnos,a2rhom_all_diagnos)
-        if (lflrw) lnascale=f_ode(iinfl_lna)
+        if (lflrw) then
+          lnascale=f_ode(iinfl_lna)
+          tph=f_ode(iinfl_tph)
+        endif
         call save_name(Hscript_diagnos,idiag_Hscriptm)
         call save_name(ddotam_all_diagnos,idiag_ddotam)
         call save_name(lnascale,idiag_lnam)
+        call save_name(tph,idiag_tph)
         call save_name(ascale,idiag_ascale)
         call save_name(a2rhopm_all_diagnos,idiag_a2rhopm)
         call save_name(a2rhom_all_diagnos,idiag_a2rhom)
@@ -944,6 +1063,10 @@ module Special
         call save_name(wstate_aver,idiag_wstate_aver)
         call save_name(Gamma_phi,idiag_Gamma_phi)
         call save_name(Gamma_phi,idiag_Gam_phi) !(shorter name for Gamma_phi)
+!
+!  Fractional timestep constraints.
+!
+      call max_mn_name(dtsrc_Gphirho,idiag_dtGphirho,l_dt=.true.)
 !
       endif
 !
@@ -965,18 +1088,23 @@ module Special
         call sum_mn_name(p%infl_dphi,idiag_dphim)
         if (idiag_dphi2m/=0) call sum_mn_name(p%infl_dphi**2,idiag_dphi2m)
         if (idiag_dphirms/=0) call sum_mn_name(p%infl_dphi**2,idiag_dphirms,lsqrt=.true.)
-        call max_mn_name(sqrt(advec2)/cdt_phi,idiag_dtphi,l_dt=.true.)
+!
+!  Fractional timestep constraints.
+!
+        call max_mn_name(dt1_special,idiag_dtphi,l_dt=.true.)
       endif
 !
     endsubroutine calc_diagnostics_special
 !***********************************************************************
-    subroutine read_special_init_pars(iostat)
+    subroutine read_special_init_pars(iomsg)
 !
       use File_io, only: parallel_unit
 !
-      integer, intent(out) :: iostat
+      character(LEN=iomsglen), intent(out) :: iomsg
+      integer :: iostat
 !
-      read(parallel_unit, NML=special_init_pars, IOSTAT=iostat)
+      read(parallel_unit, NML=special_init_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
 !
     endsubroutine read_special_init_pars
 !***********************************************************************
@@ -988,13 +1116,15 @@ module Special
 !
     endsubroutine write_special_init_pars
 !***********************************************************************
-    subroutine read_special_run_pars(iostat)
+    subroutine read_special_run_pars(iomsg)
 !
       use File_io, only: parallel_unit
 !
-      integer, intent(out) :: iostat
+      character(LEN=iomsglen), intent(out) :: iomsg
+      integer :: iostat
 !
-      read(parallel_unit, NML=special_run_pars, IOSTAT=iostat)
+      read(parallel_unit, NML=special_run_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
 !
     endsubroutine read_special_run_pars
 !***********************************************************************
@@ -1029,7 +1159,8 @@ module Special
         idiag_a2rhopm=0; idiag_a2rhom=0; idiag_a4rhophim=0; idiag_a2rhophim=0
         idiag_a2rhogphim=0; idiag_rho_chi=0; idiag_rho_rad=0; idiag_sigEma=0
         idiag_sigBma=0; idiag_count_eb0a=0; idiag_heating=0; idiag_wstate=0
-        idiag_wstate_aver=0; idiag_Gamma_phi=0; idiag_Gam_phi=0
+        idiag_Gamma_phi=0; idiag_Gam_phi=0; idiag_dtGphirho=0
+        idiag_wstate_aver=0; idiag_tph=0 
       endif
 !
       do iname=1,nname
@@ -1059,9 +1190,71 @@ module Special
         call parse_name(iname,cname(iname),cform(iname),'wstate_aver',idiag_wstate_aver)
         call parse_name(iname,cname(iname),cform(iname),'Gamma_phi',idiag_Gamma_phi)
         call parse_name(iname,cname(iname),cform(iname),'Gam_phi',idiag_Gam_phi)
+        call parse_name(iname,cname(iname),cform(iname),'dtGphirho',idiag_dtGphirho)
+        call parse_name(iname,cname(iname),cform(iname),'tph',idiag_tph)
       enddo
 !
     endsubroutine rprint_special
+!*****************************************************************************
+    subroutine input_persist_special_id(id,done)
+!
+!  Read in the parameters of the next SNI
+!
+!  13-Dec-2011/Bourdin.KIS: reworked
+!  14-jul-2015/fred: removed obsolete Remnant persistant variable from current
+!  read and added new cluster variables. All now consistent with any io
+!
+      use IO, only: read_persist, lun_input
+!
+      integer, intent(in) :: id
+      logical, intent(inout) :: done
+!
+      select case (id)
+        case (id_record_LHEATING_ALWAYS)
+          done = read_persist ('LHEATING_ALWAYS', lheating_always)
+        case (id_record_LSOLVE_FOR_PHI)
+          done = read_persist ('LSOLVE_FOR_PHI', lsolve_for_phi)
+      endselect
+print*,'AXEL2: id, done=',id, done
+!
+    endsubroutine input_persist_special_id
+!*****************************************************************************
+    subroutine input_persist_special()
+!
+!  Read in the stored time for lheating_always, lsolve_for_phi, etc.
+!
+!  12-Oct-2019/PABourdin: coded
+!
+      use IO, only: read_persist
+!
+      logical :: error
+!
+      error = read_persist ('LHEATING_ALWAYS', lheating_always)
+      if (lroot .and. .not. error) print *, 'input_persist_special: lheating_always = ', lheating_always
+!
+      error = read_persist ('LSOLVE_FOR_PHI', lsolve_for_phi)
+      if (lroot .and. .not. error) print *, 'input_persist_special: lsolve_for_phi = ', lsolve_for_phi
+!
+    endsubroutine input_persist_special
+!*****************************************************************************
+    logical function output_persistent_special()
+!
+!  Writes out the time of the next SNI
+!
+!  13-Dec-2011/Bourdin.KIS: reworked
+!  15-jun-2015/axel: adapted from interstellar during office hours
+!
+      use IO, only: write_persist
+!
+      output_persistent_special = .true.
+!
+      if (write_persist ('LHEATING_ALWAYS', id_record_LHEATING_ALWAYS, lheating_always)) return
+!
+      if (write_persist ('LSOLVE_FOR_PHI', id_record_LSOLVE_FOR_PHI, lsolve_for_phi)) return
+!
+      output_persistent_special = .false.
+!
+    endfunction output_persistent_special
 !***********************************************************************
     subroutine get_echarge
 !
@@ -1183,7 +1376,7 @@ module Special
       use Sub, only: dot2_mn, grad, curl, dot_mn
 !
       real, dimension (mx,my,mz,mfarray), intent(inout) :: f
-      real :: sigE1m, sigB1m, rho_rad, Hscript_prev=0.
+      real :: tmp, sigE1m, sigB1m, rho_rad, Hscript_prev=0.
 !
 ! TP: to avoid code duplication could this function not be combined with the copy of it in
 !     klein_gordon.f90? We could make an appropriate module and call it from there
@@ -1197,6 +1390,7 @@ module Special
       call mpibcast_real(a21)
 !
 !  Here we use the possibility of switching off the phi evolution by setting phi=dphi=0.
+!  This should happen immediately when lsolve_for_phi=F, but there seems to be some delay.
 !
       if (.not. lsolve_for_phi) then
         f(:,:,:,iinfl_phi)=0.
@@ -1206,7 +1400,7 @@ module Special
 !
 !  In the following loop, go through all penciles and add up results to get e2m, etc.
 !
-      ddotam=0.; a2rhopm=0.; a2rhom=0.; rhom=0; e2m=0; b2m=0; edotbm=0
+      ddotam=0.; a2rhopm=0.; a2rhom=0.; rhom=0; rhokinm=0; e2m=0; b2m=0; edotbm=0
       a2rhophim=0.; a4rhophim=0.; a2rhopphim=0.; a2rhogphim=0.; sigE1m=0.; sigB1m=0.
 !
 !  In the following, sum over all mn pencils.
@@ -1261,6 +1455,7 @@ module Special
 !  so maybe "all" is not needed?
 !
       call mpiallreduce_sum(rhom,rhom_all)
+      call mpiallreduce_sum(rhokinm,rhokinm_all)
       call mpireduce_sum(a2rhopm,a2rhopm_all)
       call mpiallreduce_sum(a2rhom,a2rhom_all)
       call mpireduce_sum(a2rhophim,a2rhophim_all)
@@ -1298,12 +1493,23 @@ module Special
       call mpibcast_real(a2rhopphim_all)
 !
 !  Compute rhom, which is needed for wstate.
+!  In the line with tmp, everything is comoving.
+!  Then, because we divide by a2rhom_all, where rho is physical,
+!  we need to divide by a2 to have the equivalent expression.
 !
       if (ldensity) then
-        call mpibcast_real(rhom_all)
-        wstate=(a2rhopphim_all*a21+onethird*rhom)/(a2rhophim_all*a21+rhom)
+        if (linclude_rho_EBK_in_wstate) then
+          tmp=rhom_all+.5*(e2m_all+b2m_all)+rhokinm_all
+          wstate=(a2rhopphim_all+onethird*a21*tmp)/a2rhom_all
+        else
+          wstate=(a2rhopphim_all*a21+onethird*rhom)/(a2rhophim_all*a21+rhom)
+        endif
       else
-        wstate=(a2rhopphim_all*a21+onethird*rho_rad)/(a2rhophim_all*a21+rho_rad)
+        if (linclude_rho_EBK_in_wstate) then
+          call fatal_error("backreact_infl special_after_boundary: ","linclude_rhokin_in_a2rho=T not possible")
+        else
+          wstate=(a2rhopphim_all*a21+onethird*rho_rad)/(a2rhophim_all*a21+rho_rad)
+        endif
       endif
 !
 !  Alternatitives for deciding when to solve for phi: either when
@@ -1313,7 +1519,13 @@ module Special
         select case (solve_phi_criterion)
           case ('rhophi')
             lsolve_for_phi=a4rhophim > a4rhophim_crit
-            if (lroot .and. .not. lsolve_for_phi) print*,'rhophi criterion activated'
+            if (lroot .and. .not. lsolve_for_phi) then
+              print*,'rhophi criterion activated'
+              open (1,file=trim(datadir)//'/pc_constants.pro',position="append")
+              write (1,*) 'ascale_phioff=',ascale,';(rhophi criterion activated)'
+              write (1,*) 't_phioff=',t
+              close (1)
+            endif
           case ('wstate')
             if (lwstate_crit_old) then
               lsolve_for_phi=(wstate<wstate_crit)
@@ -1362,8 +1574,12 @@ module Special
         endif
       endif
 !
-!  Alternatitives for deciding when to turn on heating,
-!  i.e., when the end of inflation occurs.
+!  Alternatitives for deciding when to turn on reheating.
+!  Usually, this is done when the end of inflation occurs, i.e., Hscript_max=max.
+!  If lheating_keep_on=T (default), this criterion is evaluated only once,
+!  because it sets lheating_always=T, so no further checks are done.
+!  If it is false, it keeps checking, which also affects the 0d-tests/reheating autotest.
+!  Must have lheating_always as persist.
 !
       select case (heating_choice)
         case ('Hscript_max')
@@ -1371,12 +1587,47 @@ module Special
             lheating=Hscript<Hscript_prev
             Hscript_prev=Hscript
             lheating_always=lheating .and. lheating_keep_on
+            lnascale_reheating=alog(ascale)
+            !if (lroot .and. lheating .and. lheating_keep_on) then
+            if (lheating .and. lheating_keep_on) then
+              if (lroot) then
+                print*,'switch to lheating=T'
+                open (1,file=trim(datadir)//'/pc_constants.pro',position="append")
+                write (1,*) 'ascale_reheating=',ascale
+                write (1,*) 't_reheating=',t
+                close (1)
+              endif
+              if (lswitch_toMHD_when_heating .and. iex>0) then
+                ladvance_ee=.false.
+                if (lroot) then
+                  open (1,file=trim(datadir)//'/pc_constants.pro',position="append")
+                  write (1,*) 'ascale_noadvance_ee=',ascale
+                  write (1,*) 't_noadvance_ee=',t
+                  close (1)
+                endif
+              endif
+            endif
           endif
         case ('aphimax2')
           lheating=a2>aphimax2
         case default
           call fatal_error("special_after_boundary: No such heating_choice: ",trim(heating_choice))
       endselect
+!
+!  Option to switch to MHD when lna has exceeded a certain critical value.
+!
+      if (lswitch_toMHD_at_lna .and. ladvance_ee) then
+        if (f_ode(iinfl_lna)>lna_switch_toMHD) then
+          ladvance_ee=.false.
+          if (lroot) then
+            print*,'lswitch_toMHD_at_lna criterion activated'
+            open (1,file=trim(datadir)//'/pc_constants.pro',position="append")
+            write (1,*) 'ascale_noadvance_ee=',ascale,';(lswitch_toMHD_at_lna criterion activated)'
+            write (1,*) 't_noadvance_ee=',t
+            close (1)
+          endif
+        endif
+      endif
 !
     endsubroutine special_after_boundary
 !***********************************************************************
@@ -1390,7 +1641,7 @@ module Special
       real, intent(inout) :: sigE1m,sigB1m
       real, dimension (nx,3) :: el, bb, gphi
       real, dimension (nx) :: e2, b2, gphi2, dphi, a2rhop, a2rho, a2rhophi, a4rhophi
-      real, dimension (nx) :: a2rhopphi
+      real, dimension (nx) :: a2rhopphi, tmp
       real, dimension (nx) :: ddota, phi, Vpotential, edotb, sigE1, sigB1
       real, dimension (nx) :: boost, gam_EB, eprime, bprime, jprime1
 !
@@ -1433,7 +1684,7 @@ module Special
         call dot2_mn(gphi,gphi2)
         a2rhogphim=a2rhogphim+sum(0.5*gphi2)
 !
-!AB: probably mistake
+!AB: probably mistake, but keep la2rhop_wrong_factor for backward compatibility
 !
         if (la2rhop_wrong_factor) then
           a2rhop=a2rhop+onethird*gphi2
@@ -1480,19 +1731,45 @@ module Special
 !  option to take the inhomogeneous rho instead
 !  Here, in the expression a2rho, rho is not comoving, but the rho from f(l1:l2,m,n,ilnrho) is comoving.
 !
-      if (lrho_chi) then
+      if (lrho_chi .or. lrho_chi_inhom) then
         if (lrho_chi_inhom) then
           if (ldensity) then
             if (ldensity_nolog) then
-              a2rho=a2rho+scale_rho_chi_Heqn/a2*f(l1:l2,m,n,irho)
+              a2rho=a2rho+a21*scale_rho_chi_Heqn*f(l1:l2,m,n,irho)
             else
-              a2rho=a2rho+scale_rho_chi_Heqn/a2*exp(f(l1:l2,m,n,ilnrho))
+              a2rho=a2rho+a21*scale_rho_chi_Heqn*exp(f(l1:l2,m,n,ilnrho))
             endif
           else
-            call fatal_error("backreact_infl special_after_boundary: No such Vprime_choice: ","density must be true")
+            call fatal_error("backreact_infl special_after_boundary: ","density must be true")
+          endif
+!
+!  Kinetic energy density, i.e., (1/2) <rho*u^2> or (2/3) <rho*u^2>.
+!  Here we have the option of adding rhokin to a2rho.
+!
+          if (lhydro .and. linclude_rhokin_in_a2rho) then
+            call dot2_mn(f(l1:l2,m,n,iux:iuz),tmp)
+            if (ldensity_nolog) then
+              tmp=tmp*f(l1:l2,m,n,irho)
+            else
+              tmp=tmp*exp(f(l1:l2,m,n,ilnrho))
+            endif
+            if (lrelativistic_eos) then
+              a2rho=a2rho+twothird*a21*tmp
+              rhokinm=rhokinm+sum(twothird*tmp)
+            else
+              a2rho=a2rho+.5*a21*tmp
+              rhokinm=rhokinm+sum(.5*tmp)
+            endif
           endif
         else
-          a2rho=a2rho+scale_rho_chi_Heqn*a2*f_ode(iinfl_rho_chi)
+!
+!  Here the homogeneous case
+!
+          if (linclude_rhokin_in_a2rho) then
+            call fatal_error("backreact_infl special_after_boundary: ","linclude_rhokin_in_a2rho=T not possible")
+          else
+            a2rho=a2rho+scale_rho_chi_Heqn*a2*f_ode(iinfl_rho_chi)
+          endif
         endif
       endif
 !
@@ -1682,7 +1959,7 @@ module Special
     use Syscalls, only: copy_addr
     use General , only: string_to_enum
 
-    integer, parameter :: n_pars=50
+    integer, parameter :: n_pars=60
     integer(KIND=ikind8), dimension(n_pars) :: p_par
 
     call string_to_enum(enum_hscript_choice,hscript_choice)
@@ -1724,7 +2001,6 @@ module Special
     call copy_addr(lheating,p_par(33)) ! bool
 
     call keep_compiler_quiet(rad_heating)
-    call keep_compiler_quiet(rhophim_crit)
     call keep_compiler_quiet(phase_phi)
     call keep_compiler_quiet(lbackreact_infl)
     call keep_compiler_quiet(eps)
@@ -1743,6 +2019,18 @@ module Special
     call copy_addr(gamma_phi_exp,p_par(41))
     call copy_addr(lsolve_for_phi2,p_par(42)) ! bool
     call copy_addr(lsige_const,p_par(43)) ! bool
+    call copy_addr(lold_lrho_chi_dtconstraint,p_par(44)) ! bool
+    call copy_addr(cdt_gamma_phi,p_par(45))
+    call copy_addr(lold_ldt_phi,p_par(46)) ! bool
+    call copy_addr(ldt_gamma_phi,p_par(47)) ! bool
+    call copy_addr(width,p_par(48))
+    call copy_addr(ascale_heat,p_par(49))
+    call copy_addr(ascale_heat_width,p_par(50))
+    call copy_addr(lsmooth_gamma_phi,p_par(51)) ! bool
+
+    call copy_addr(lnascale_reheating,p_par(52))
+    call copy_addr(dlnascale_reheating,p_par(53))
+    call copy_addr(lg_gamma_phi_fraction_firststep,p_par(54))
     endsubroutine pushpars2c
 !********************************************************************
 !********************************************************************

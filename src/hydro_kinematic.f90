@@ -56,10 +56,14 @@ module Hydro
   real, dimension(mz) :: profz_kinflow1=1.!, profz_kinflow2=1., profz_kinflow3=1.
 !
   real :: u_out_kep=0.0
-  real :: tphase_kinflow=-1., phase1=0., phase2=0., tsforce=0.
+  real :: tphase_kinflow=-1., phase1=0., phase2=0., tsforce=-1.
   real :: tsforce_ampl=0., tsforce_wavenumber=0.
   real ::  dtforce=impossible, ampl_random
   real, dimension(3) :: location,location_fixed=(/0.,0.,0./)
+  real, dimension(3) :: qvec_gb, avec_gb
+  !$omp threadprivate(qvec_gb,avec_gb,phase1,phase2)
+  real, dimension(3) :: qvec_gb_save, avec_gb_save
+  real :: phase1_save,phase2_save
   logical :: lupw_uu=.false., lkinflow_as_uudat=.false.
   logical :: lcalc_uumeanz=.false.,lcalc_uumeanxy=.false.
   logical :: lcalc_uumeanx=.false.,lcalc_uumeanxz=.false.
@@ -109,8 +113,10 @@ module Hydro
   logical :: lkinflow_as_comaux=.false.
   logical :: lrandom_ampl=.false.
   logical :: ltime_old_kinflow=.false.
+  ! SG: need to have it here as a dummy boolean
+  logical :: lconservative=.false.
 !
-  namelist /hydro_start_pars/ &
+  namelist /hydro_init_pars/ &
       lkinflow_as_comaux, lkinflow_as_uudat
 !
   namelist /hydro_run_pars/ &
@@ -136,19 +142,18 @@ module Hydro
       binary_radius, radius_kinflow, width_kinflow, &
       power1_kinflow, power2_kinflow, kpeak_kinflow, &
       cs21_kinflow, diff_rot_a2, diff_rot_a4, alpha_damping, &
-      ltime_old_kinflow
+      ltime_old_kinflow, lconservative
 !
   integer :: idiag_u2m=0,idiag_um2=0,idiag_oum=0,idiag_o2m=0
   integer :: idiag_uxpt=0,idiag_uypt=0,idiag_uzpt=0
   integer :: idiag_urms=0,idiag_umax=0,idiag_uzrms=0
   integer :: idiag_uzmax=0,idiag_orms=0,idiag_omax=0
   integer :: idiag_ux2m=0,idiag_uy2m=0,idiag_uz2m=0
-  integer :: idiag_uxuym=0,idiag_uxuzm=0,idiag_uyuzm=0,idiag_oumphi=0
+  integer :: idiag_uxuym=0,idiag_uxuzm=0,idiag_uyuzm=0
   integer :: idiag_ruxm=0,idiag_ruym=0,idiag_ruzm=0,idiag_rumax=0
   integer :: idiag_umx=0
   integer :: idiag_umy=0,idiag_umz=0
-  integer :: idiag_Marms=0,idiag_Mamax=0,idiag_divu2m=0,idiag_epsK=0
-  integer :: idiag_urmphi=0,idiag_upmphi=0,idiag_uzmphi=0,idiag_u2mphi=0
+  integer :: idiag_Marms=0,idiag_Mamax=0,idiag_divu2m=0
   integer :: idiag_phase1=0,idiag_phase2=0
   integer :: idiag_ekintot=0,idiag_ekin=0
   integer :: idiag_divum=0
@@ -197,12 +202,14 @@ module Hydro
 !  ncpus, nprocy, etc.
 !
       if (lkinflow_as_aux.or.lkinflow_as_comaux) then
-        call farray_register_auxiliary('uu',iuu,vector=3,communicated=lkinflow_as_comaux)
+        call farray_register_auxiliary('uu',iuu,vector=3,communicated=lkinflow_as_comaux,rhs=.true.)
         iux=iuu
         iuy=iuu+1
         iuz=iuu+2
         if (lroot .and. (ip<14)) print*, 'initialize_hydro: iuu = ', iuu
       endif
+
+      if(lkinflow_as_comaux) lkinflow_as_aux = .true.
 !
       kinflow=kinematic_flow
 
@@ -305,7 +312,7 @@ module Hydro
 !
 ! kinflows end here
 !
-      if ((lkinflow_as_aux.or.lkinflow_as_comaux) .and. iuu/=0) then
+      if ((lkinflow_as_aux) .and. iuu/=0) then
 !
 !  The kinematic flow can only be used as auxiliary if it has been registered.
 !  Later registering by setting lkinflow_as_aux or lkinflow_as_comaux to .true. at 
@@ -618,11 +625,17 @@ module Hydro
 !  Diagnostic pencils.
 !
       if (idiag_urms/=0 .or. idiag_umax/=0 .or. idiag_u2m/=0 .or. &
-          idiag_um2/=0) lpenc_diagnos(i_u2)=.true.
-      if (idiag_orms/=0 .or. idiag_omax/=0 .or. idiag_o2m/=0) lpenc_diagnos(i_o2)=.true.
+          idiag_um2/=0 .or. idiag_rumax/=0) lpenc_diagnos(i_u2)=.true.
+      if (idiag_orms/=0 .or. idiag_omax/=0 .or. idiag_o2m/=0) then
+              if(lkinflow_as_aux) lpenc_diagnos(i_uij) = .true.
+              lpenc_diagnos(i_o2)=.true.
+      endif
       if (idiag_oum/=0 .or. idiag_ourms/=0 .or. idiag_oumxy/=0) lpenc_diagnos(i_ou)=.true.
       if (idiag_oxurms/=0) lpenc_diagnos(i_oxu2)=.true.
-      if (idiag_divum/=0) lpenc_diagnos(i_divu)=.true.
+      if (idiag_divum/=0 .or. idiag_divu2m/=0) lpenc_diagnos(i_divu)=.true.
+      if (idiag_ruxm/=0 .or. idiag_ruym/=0 .or. idiag_ruzm/=0 .or. &
+          idiag_rumax/=0) lpenc_diagnos(i_rho)=.true.
+      if (idiag_Marms/=0 .or. idiag_Mamax/=0) lpenc_diagnos(i_Ma2)=.true.
 !
       if (idiag_EEK/=0 .or. idiag_ekin/=0 .or. idiag_ekintot/=0) then
         lpenc_diagnos(i_rho)=.true.
@@ -658,6 +671,9 @@ module Hydro
       if (lpencil_in(i_oxu)) then
         lpencil_in(i_uu)=.true.
         lpencil_in(i_oo)=.true.
+      endif
+      if (lpencil_in(i_o2)) then
+        lpencil_in(i_oo) = .true.
       endif
 ! oo
       if (lpencil_in(i_ou)) then
@@ -738,6 +754,7 @@ module Hydro
       real, dimension(nx) :: rone, argx, pom2, ck_r
       real, dimension(nx) :: psi1, psi2, psi3, psi4, rho_prof, prof, prof1
       real, dimension(nx) :: random_r, random_p, random_tmp
+      real, dimension (nx) :: advec_uu
 !      real :: random_r_pt, random_p_pt
       real :: fac, fac2, argy, argz, cxt, cyt, czt, omt, del
       real :: fpara, dfpara, ecost, esint, epst, sin2t, cos2t
@@ -2600,6 +2617,26 @@ module Hydro
                      *(1.0-0.92-0.2*(cos(y(m)))**2))
         endif
 !
+! Gilbert & Bayly (1992) renovating flow (nonhelical version)
+! u = \vec{a} \sin(\vec{q|\cdot\vec{x} + \psi)
+! where
+!   \vec{q} has a randomly chosen direction and prescribed magnitude kpeak_kinflow,
+!   \vec{a} is randomly chosen in the plane perpendicular to \vec{q}, and
+!   \psi is randomly chosen between 0 and 2\pi.
+! Reference: https://doi.org/10.1017/S0022112092002003
+!
+! You must set lkinflow_as_comaux=T to calculate p%oo etc.
+! tsforce controls the renovation time of the flow (by default, renovates every timestep).
+! ampl_kinflow sets the value of urms.
+!
+      case ('Gilbert-Bayly')
+        if (lpenc_loc(i_uu)) then
+          tmp_mn = sin(qvec_gb(1)*x(l1:l2) + qvec_gb(2)*y(m) + qvec_gb(3)*z(n) + phase1)
+          do ii = 1,3
+            p%uu(:,ii) = avec_gb(ii) * tmp_mn
+          enddo
+        endif
+!
 ! no kinematic flow.
 !
       case ('none')
@@ -2651,10 +2688,21 @@ module Hydro
       if (lpenc_loc(i_o2)) call dot2_mn(p%oo,p%o2)
 ! ou
       if (lpenc_loc(i_ou)) call dot_mn(p%oo,p%uu,p%ou)
-! ou and oxu
-      if (lpenc_loc(i_ou)) call dot_mn(p%oo,p%uu,p%ou)
+! oxu
       if (lpenc_loc(i_oxu)) call cross(p%oo,p%uu,p%oxu)
       if (lpenc_loc(i_oxu2)) call dot2_mn(p%oxu,p%oxu2)
+
+!
+!  uu/dx for timestep (if kinematic_flow is set)
+!
+      if (kinematic_flow/='none') then
+        if (lupdate_courant_dt) then
+          advec_uu=sum(abs(p%uu)*dline_1,2)
+          !maxadvec=maxadvec+advec_uu
+          maxadvec=max(maxadvec,advec_uu)
+          if (headtt.or.ldebug) print*, 'duu_dt: max(advec_uu) =', maxval(advec_uu)
+        endif
+      endif
 
     endsubroutine calc_pencils_hydro_pencpar
 !***********************************************************************
@@ -2674,17 +2722,44 @@ module Hydro
         call sum_mn_name(p%o2,idiag_orms,lsqrt=.true.)
         call max_mn_name(p%u2,idiag_umax,lsqrt=.true.)
         call max_mn_name(p%o2,idiag_omax,lsqrt=.true.)
+!
+        if (idiag_ux2m/=0) call sum_mn_name(p%uu(:,1)**2,idiag_ux2m)
+        if (idiag_uy2m/=0) call sum_mn_name(p%uu(:,2)**2,idiag_uy2m)
+        if (idiag_uz2m/=0) call sum_mn_name(p%uu(:,3)**2,idiag_uz2m)
+!
+        if (idiag_uxuym/=0) call sum_mn_name(p%uu(:,1)*p%uu(:,2),idiag_uxuym)
+        if (idiag_uxuzm/=0) call sum_mn_name(p%uu(:,1)*p%uu(:,3),idiag_uxuzm)
+        if (idiag_uyuzm/=0) call sum_mn_name(p%uu(:,2)*p%uu(:,3),idiag_uyuzm)
+!
+        if (idiag_ruxm/=0) call sum_mn_name(p%rho*p%uu(:,1),idiag_ruxm)
+        if (idiag_ruym/=0) call sum_mn_name(p%rho*p%uu(:,2),idiag_ruym)
+        if (idiag_ruzm/=0) call sum_mn_name(p%rho*p%uu(:,3),idiag_ruzm)
+        if (idiag_rumax/=0) call max_mn_name(p%rho*sqrt(p%u2),idiag_rumax)
+!
+        call sum_mn_name(p%uu(:,1),idiag_umx)
+        call sum_mn_name(p%uu(:,2),idiag_umy)
+        call sum_mn_name(p%uu(:,3),idiag_umz)
+!
+        call sum_mn_name(p%Ma2,idiag_Marms,lsqrt=.true.)
+        call max_mn_name(p%Ma2,idiag_Mamax,lsqrt=.true.)
+!
         if (idiag_uzrms/=0)  call sum_mn_name(p%uu(:,3)**2,idiag_uzrms,lsqrt=.true.)
         if (idiag_uzmax/=0)  call max_mn_name(p%uu(:,3)**2,idiag_uzmax,lsqrt=.true.)
+!
         call sum_mn_name(p%u2,idiag_u2m)
         call max_mn_name(p%u2,idiag_um2)
+        call sum_mn_name(p%o2,idiag_o2m)
+!
         call sum_mn_name(p%ou,idiag_oum)
         if (idiag_ourms/=0)  call sum_mn_name(p%ou**2,idiag_ourms,lsqrt=.true.)
         call sum_mn_name(p%oxu2,idiag_oxurms,lsqrt=.true.)
+!
         if (idiag_EEK/=0)    call sum_mn_name(.5*p%rho*p%u2,idiag_EEK)
         if (idiag_ekin/=0)   call sum_mn_name(.5*p%rho*p%u2,idiag_ekin)
         if (idiag_ekintot/=0)call integrate_mn_name(.5*p%rho*p%u2,idiag_ekintot)
+!
         call sum_mn_name(p%divu,idiag_divum)
+        if (idiag_divu2m/=0) call sum_mn_name(p%divu**2,idiag_divu2m)
 !
 !  Kinetic field components at one point (=pt).
 !
@@ -2727,21 +2802,25 @@ module Hydro
 !***********************************************************************
     subroutine hydro_before_boundary(f)
 !
-!  Dummy routine
+!  Do global, time-dependent flow calculations here:
 !
 !   16-dec-10/bing: coded
 !
       use Mpicomm, only: update_foreign_data
-      use Sub, only: smooth, eulag_filter
+      use Sub, only: smooth, eulag_filter, get_random_vec, dot
       use General, only: random_number_wrapper
+      use Gpu, only: update_on_gpu_vec, update_on_gpu
+      integer, save :: qvec_gb_index=-1
+      integer, save :: avec_gb_index=-1
+      integer, save :: phase1_index=-1
+      real, dimension(nx) :: tmp_mn
 !
       real, contiguous,dimension(:,:,:,:), intent(inout) :: f
 !
-      real :: fac
+      real :: fac, qdota
       real, save :: t_foreign=0.
       integer :: j
-!
-!  Do global, time-dependent flow calculations here:
+      integer :: ii
 !
       if (kinematic_flow=='from-foreign-snap') then
         if (lfirst) then
@@ -2790,18 +2869,70 @@ module Hydro
             phase1=eps_kinflow*phase1
             phase2=eps_kinflow*phase2
           endif
-
         endif
+!
       elseif (kinematic_flow=='ShearRoberts2'.or.kinematic_flow=='ShearRoberts1') then
         ky_uukin=1.
         kx_uukin=real(ky_uukin*(mod(.5-eps_kinflow*t,1.D0)-.5))
         if (ip==11) write(21,*) t,kx_uukin
+!
       elseif (kinematic_flow=='HelicalShearingWave'.or.kinematic_flow=='ShearingWave') then
         ky_uukin=1.
         kx_uukin=real(-ky_uukin*Sshear*t)
+!
+      elseif (kinematic_flow=='Gilbert-Bayly') then
+        if (t > tsforce) then
+          if (.not.lpencil_check_at_work) then
+            tsforce = tsforce + dtforce
+          endif
+!
+          call random_number_wrapper(phase1); phase1 = 2*pi*phase1
+          call get_random_vec(qvec_gb, kpeak_kinflow)
+          call get_random_vec(avec_gb)
+!
+!         make avec perpendicular to qvec
+          call dot(qvec_gb, avec_gb, qdota)
+          do j = 1,3
+            avec_gb(j) = avec_gb(j) - qvec_gb(j)*qdota
+          enddo
+!
+!         fix amplitude so that urms == ampl_kinflow
+          avec_gb= sqrt(2.) * ampl_kinflow * avec_gb/ sqrt(sum(avec_gb**2))
+          if(lgpu) then
+            call update_on_gpu_vec(qvec_gb_index,'AC_qvec_gb__mod__hydro',qvec_gb)
+            call update_on_gpu_vec(avec_gb_index,'AC_avec_gb__mod__hydro',avec_gb)
+            call update_on_gpu(phase1_index,'AC_phase1__mod__hydro',phase1)
+          endif
+        endif
+
+        if(lkinflow_as_aux .and. .not. lgpu) then
+          do m = m1,m2
+          do n = n1,n2
+            tmp_mn = sin(qvec_gb(1)*x(l1:l2) + qvec_gb(2)*y(m) + qvec_gb(3)*z(n) + phase1)
+            do ii = 1,3
+              f(l1:l2,m,n,iux-1+ii) = avec_gb(ii)*tmp_mn
+            enddo
+          enddo
+          enddo
+        endif
+!
       endif
 !
     endsubroutine hydro_before_boundary
+!***********************************************************************
+    subroutine hydro_save_diagnostic_controls
+            qvec_gb_save = qvec_gb
+            avec_gb_save = avec_gb
+            phase1_save  = phase1
+            phase2_save  = phase2
+    endsubroutine hydro_save_diagnostic_controls
+!***********************************************************************
+    subroutine hydro_restore_diagnostic_controls
+            qvec_gb = qvec_gb_save
+            avec_gb = avec_gb_save
+            phase1  = phase1_save
+            phase2  = phase2_save
+    endsubroutine hydro_restore_diagnostic_controls
 !***********************************************************************
     subroutine duu_dt(f,df,p)
 !
@@ -2815,31 +2946,22 @@ module Hydro
       real, contiguous,dimension(:,:,:,:) :: f
       real, contiguous,dimension(:,:,:,:) :: df
       type (pencil_case) :: p
-      real, dimension (nx) :: advec_uu
       logical, save :: lfirst_aux=.true.
 !
       intent(in)  :: df,p
       intent(out) :: f
 !
-!  uu/dx for timestep (if kinematic_flow is set)
-!
-      if (kinematic_flow/='none') then
-        if (lupdate_courant_dt) then
-          advec_uu=sum(abs(p%uu)*dline_1,2)
-          !maxadvec=maxadvec+advec_uu
-          maxadvec=max(maxadvec,advec_uu)
-          if (headtt.or.ldebug) print*, 'duu_dt: max(advec_uu) =', maxval(advec_uu)
-        endif
-      endif
-!
 !  Store uu as auxiliary variable in f-array if requested by lkinflow_as_aux.
 !  Just neccessary immediately before writing snapshots, but how would we
 !  know we are?
-!  Changed lkinflow_as_aux -> (lkinflow_as_aux.or.lkinflow_as_comaux)
 !
-     if (lpencil(i_uu).and.lkinflow_as_aux.and.(get_lupdate_aux().or.lfirst_aux)) f(l1:l2,m,n,iux:iuz)=p%uu
-     !if (lpencil(i_uu).and.(lkinflow_as_aux.or.lkinflow_as_comaux).and. &
-     !    (lupdate_aux.or.lfirst_aux)) f(l1:l2,m,n,iux:iuz)=p%uu
+!  2026-Jun-04/Kishore: changed lkinflow_as_aux -> (lkinflow_as_aux.or.lkinflow_as_comaux).
+!                       Axel had earlier suggested this change in a comment.
+!                       (see commit 89c5a868244ee31b7dd2872516ac34b109a38330)
+!  2026-Jun-9/TP: Made lkinflow_as_aux be true if lkinflow_as_comaux is true so now we simply have lkinflow_as_aux
+!
+     if (lpencil(i_uu).and.(lkinflow_as_aux).and. &
+        (get_lupdate_aux().or.lfirst_aux)) f(l1:l2,m,n,iux:iuz)=p%uu
      if (.not.lpencil_check_at_work) lfirst_aux=.false.
 !
       call calc_diagnostics_hydro(f,p)
@@ -2889,6 +3011,7 @@ module Hydro
 !
       real, contiguous,dimension(:,:,:,:) :: f
       intent(inout) :: f
+
 !
 !  Random phase, amplitude and wavenumber.
 !
@@ -3395,6 +3518,12 @@ module Hydro
       elseif (id == id_record_HYDRO_WAVENUMBER) then
         if (read_persist ('HYDRO_WAVENUMBER', tsforce_wavenumber)) return
         done = .true.
+      elseif (id == id_record_HYDRO_QVEC_GB) then
+        if (read_persist ('HYDRO_QVEC_GB', qvec_gb)) return
+        done = .true.
+      elseif (id == id_record_HYDRO_AVEC_GB) then
+        if (read_persist ('HYDRO_AVEC_GB', avec_gb)) return
+        done = .true.
       endif
 !
       if (lroot) print*,'input_persist_hydro: ', tphase_kinflow
@@ -3432,6 +3561,12 @@ module Hydro
       error = read_persist ('HYDRO_WAVENUMBER', tsforce_wavenumber)
       if (lroot .and. .not. error) print *, 'input_persist_hydro: tsforce_wavenumber = ', tsforce_wavenumber
 !
+      error = read_persist ('HYDRO_AVEC_GB', avec_gb)
+      if (lroot .and. .not. error) print *, 'input_persist_hydro: avec_gb = ', avec_gb
+!
+      error = read_persist ('HYDRO_QVEC_GB', qvec_gb)
+      if (lroot .and. .not. error) print *, 'input_persist_hydro: qvec_gb = ', qvec_gb
+!
     endsubroutine input_persist_hydro
 !***********************************************************************
     logical function output_persistent_hydro()
@@ -3459,16 +3594,22 @@ module Hydro
       if (write_persist ('HYDRO_TSFORCE', id_record_HYDRO_TSFORCE, tsforce)) return
       if (write_persist ('HYDRO_AMPL', id_record_HYDRO_AMPL, tsforce_ampl)) return
       if (write_persist ('HYDRO_WAVENUMBER', id_record_HYDRO_WAVENUMBER, tsforce_wavenumber)) return
+      if (write_persist ('HYDRO_AVEC_GB', id_record_HYDRO_AVEC_GB, avec_gb)) return
+      if (write_persist ('HYDRO_QVEC_GB', id_record_HYDRO_QVEC_GB, qvec_gb)) return
 !
       output_persistent_hydro = .false.
 !
     endfunction output_persistent_hydro
 !***********************************************************************
-    subroutine read_hydro_init_pars(iostat)
+    subroutine read_hydro_init_pars(iomsg)
 !
-      integer, intent(out) :: iostat
+      use File_io, only: parallel_unit
 !
-      iostat = 0
+      character(LEN=*), intent(out) :: iomsg
+      integer :: iostat
+!
+      read(parallel_unit, NML=hydro_init_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
 !
     endsubroutine read_hydro_init_pars
 !***********************************************************************
@@ -3476,17 +3617,19 @@ module Hydro
 !
       integer, intent(in) :: unit
 !
-      call keep_compiler_quiet(unit)
+      write(unit, NML=hydro_init_pars)
 !
     endsubroutine write_hydro_init_pars
 !***********************************************************************
-    subroutine read_hydro_run_pars(iostat)
+    subroutine read_hydro_run_pars(iomsg)
 !
       use File_io, only: parallel_unit
 !
-      integer, intent(out) :: iostat
+      character(LEN=*), intent(out) :: iomsg
+      integer :: iostat
 !
-      read(parallel_unit, NML=hydro_run_pars, IOSTAT=iostat)
+      read(parallel_unit, NML=hydro_run_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
 !
     endsubroutine read_hydro_run_pars
 !***********************************************************************
@@ -3523,13 +3666,12 @@ module Hydro
         idiag_uxpt=0; idiag_uypt=0; idiag_uzpt=0
         idiag_urms=0; idiag_umax=0; idiag_uzrms=0; idiag_uzmax=0
         idiag_phase1=0; idiag_phase2=0
-        idiag_orms=0; idiag_omax=0; idiag_oumphi=0
+        idiag_orms=0; idiag_omax=0
         idiag_ruxm=0; idiag_ruym=0; idiag_ruzm=0; idiag_rumax=0
         idiag_ux2m=0; idiag_uy2m=0; idiag_uz2m=0
         idiag_uxuym=0; idiag_uxuzm=0; idiag_uyuzm=0
         idiag_umx=0; idiag_umy=0; idiag_umz=0
-        idiag_Marms=0; idiag_Mamax=0; idiag_divu2m=0; idiag_epsK=0
-        idiag_urmphi=0; idiag_upmphi=0; idiag_uzmphi=0; idiag_u2mphi=0
+        idiag_Marms=0; idiag_Mamax=0; idiag_divu2m=0
         idiag_EEK=0; idiag_ekin=0; idiag_ekintot=0
         idiag_divum=0
         idiag_oumxy=0;idiag_uxmxy=0;idiag_uymxy=0;idiag_uzmxy=0
@@ -3572,7 +3714,6 @@ module Hydro
         call parse_name(iname,cname(iname),cform(iname),'Marms',idiag_Marms)
         call parse_name(iname,cname(iname),cform(iname),'Mamax',idiag_Mamax)
         call parse_name(iname,cname(iname),cform(iname),'divu2m',idiag_divu2m)
-        call parse_name(iname,cname(iname),cform(iname),'epsK',idiag_epsK)
         call parse_name(iname,cname(iname),cform(iname),'uxpt',idiag_uxpt)
         call parse_name(iname,cname(iname),cform(iname),'uypt',idiag_uypt)
         call parse_name(iname,cname(iname),cform(iname),'uzpt',idiag_uzpt)
@@ -3946,8 +4087,8 @@ module Hydro
     integer, parameter :: n_pars=200
     integer(KIND=ikind8), dimension(n_pars) :: p_par
 
-    call copy_addr(phase1,p_par(1))
-    call copy_addr(phase2,p_par(2))
+    call copy_addr(phase1,p_par(1)) ! real dconst
+    call copy_addr(phase2,p_par(2)) ! real dconst
     call copy_addr(ampl_random,p_par(3))
     call copy_addr(ks_modes,p_par(4)) ! int
     call copy_addr(random_ampl,p_par(5))
@@ -4013,10 +4154,10 @@ module Hydro
     call copy_addr(profy_kinflow2,p_par(65)) ! (my)
     call copy_addr(profy_kinflow3,p_par(66)) ! (my)
     call copy_addr(location,p_par(67)) ! real3
-    call copy_addr(ks_k,p_par(68)) ! (3) (ks_modes__mod__hydro)
-    call copy_addr(ks_a,p_par(69)) ! (3) (ks_modes__mod__hydro)
-    call copy_addr(ks_b,p_par(70)) ! (3) (ks_modes__mod__hydro)
-    call copy_addr(ks_omega,p_par(71)) ! (ks_modes__mod__hydro)
+    if(allocated(KS_k)) call copy_addr(KS_k,p_par(68)) ! (3) (ks_modes__mod__hydro)
+    if(allocated(KS_A)) call copy_addr(KS_A,p_par(69)) ! (3) (ks_modes__mod__hydro)
+    if(allocated(KS_B)) call copy_addr(KS_B,p_par(70)) ! (3) (ks_modes__mod__hydro)
+    if(allocated(KS_omega)) call copy_addr(ks_omega,p_par(71)) ! (ks_modes__mod__hydro)
     call string_to_enum(enum_kinematic_flow,kinematic_flow)
     call string_to_enum(enum_wind_profile,wind_profile)
     call copy_addr(enum_kinematic_flow,p_par(72)) ! int
@@ -4026,11 +4167,17 @@ module Hydro
     if (allocated(dpldtheta)) call copy_addr(dpldtheta,p_par(76)) ! (mx)
     if (allocated(dzldr)) call copy_addr(dzldr,p_par(77)) ! (my)
 
+    call copy_addr(qvec_gb,p_par(78)) ! real3 dconst
+    call copy_addr(avec_gb,p_par(79)) ! real3 dconst
+    ! SG: need to have it here as a dummy boolean
+    call copy_addr(lconservative,p_par(80)) ! bool
+
     call keep_compiler_quiet(uphi_at_rzero)
     call keep_compiler_quiet(uphi_at_rmax)
     call keep_compiler_quiet(uphi_rmax)
     call keep_compiler_quiet(u_out_kep)
     call keep_compiler_quiet(radial_shear)
+
 
     endsubroutine pushpars2c
 !***********************************************************************

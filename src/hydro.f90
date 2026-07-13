@@ -17,7 +17,7 @@
 ! PENCILS PROVIDED divu; oo(3); o2; ou; oxu2; oxu(3); u2; uij(3,3); uu(3); curlo(3)
 ! PENCILS PROVIDED sij(3,3); sij2; uij5(3,3); ugu(3); ugu2; oij(3,3)
 ! PENCILS PROVIDED d2uidxj(3,3), uijk(3,3,3); ogu(3)
-! PENCILS PROVIDED u3u21; u1u32; u2u13; del2u(3); del4u(3); del6u(3)
+! PENCILS PROVIDED u3u21; u1u32; u2u13; del2u(3); del2T(3); del4u(3); del6u(3)
 ! PENCILS PROVIDED u2u31; u3u12; u1u23
 ! PENCILS PROVIDED graddivu(3); del6u_bulk(3); grad5divu(3)
 ! PENCILS PROVIDED rhougu(3); der6u(3); transpurho(3)
@@ -25,8 +25,9 @@
 ! PENCILS PROVIDED uu_advec(3); uuadvec_guu(3)
 ! PENCILS PROVIDED del6u_strict(3); del4graddivu(3); uu_sph(3)
 ! PENCILS PROVIDED der6u_res(3,3); uij6(3,3)
-! PENCILS PROVIDED lorentz; hless; advec_uu
+! PENCILS PROVIDED lorentz; lorentz_gamma; hless; advec_uu
 ! PENCILS PROVIDED T00; T0i(3); Tij(6); velx(3)
+! PENCILS PROVIDED ext_force(4); 
 !
 !** AUTOMATIC REFERENCE-LINK.TEX GENERATION ********************
 ! Declare relevant citations from pencil-code/doc/citations/ref.bib for this module.
@@ -52,16 +53,27 @@ module Hydro
   real, target, dimension (:,:,:), allocatable :: oo_xz,oo_yz,oo_xz2
   real, target, dimension (:,:,:), allocatable :: uu_sph_xy,uu_sph_xy2,uu_sph_xy3,uu_sph_xy4
   real, target, dimension (:,:,:), allocatable :: uu_sph_xz,uu_sph_yz,uu_sph_xz2
-  real, target, dimension (:,:), allocatable :: divu_xy,u2_xy,o2_xy,mach_xy
-  real, target, dimension (:,:), allocatable :: divu_xy2,u2_xy2,o2_xy2,mach_xy2
-  real, target, dimension (:,:), allocatable :: divu_xy3,divu_xy4,u2_xy3,u2_xy4,mach_xy4
-  real, target, dimension (:,:), allocatable :: o2_xy3,o2_xy4,mach_xy3
-  real, target, dimension (:,:), allocatable :: divu_xz,u2_xz,o2_xz,mach_xz
-  real, target, dimension (:,:), allocatable :: divu_xz2,u2_xz2,o2_xz2,mach_xz2
-  real, target, dimension (:,:), allocatable :: divu_yz,u2_yz,o2_yz,mach_yz
+  real, target, dimension (:,:), allocatable :: divu_xy,u2_xy,o2_xy,mach_xy,hless_xy
+
+  real, target, dimension (:,:), allocatable :: Ft_xy,Fx_xy,Fy_xy,Fz_xy
+  real, target, dimension (:,:), allocatable :: Ft_xz,Fx_xz,Fy_xz,Fz_xz
+  real, target, dimension (:,:), allocatable :: Ft_yz,Fx_yz,Fy_yz,Fz_yz
+  real, target, dimension (:,:), allocatable :: Ft_xy2,Fx_xy2,Fy_xy2,Fz_xy2
+  real, target, dimension (:,:), allocatable :: Ft_xz2,Fx_xz2,Fy_xz2,Fz_xz2
+  real, target, dimension (:,:), allocatable :: Ft_yz2,Fx_yz2,Fy_yz2,Fz_yz2
+  real, target, dimension (:,:), allocatable :: Ft_xy3,Fx_xy3,Fy_xy3,Fz_xy3
+  real, target, dimension (:,:), allocatable :: Ft_xy4,Fx_xy4,Fy_xy4,Fz_xy4
+
+  real, target, dimension (:,:), allocatable :: divu_xy2,u2_xy2,o2_xy2,mach_xy2,hless_xy2
+  real, target, dimension (:,:), allocatable :: divu_xy3,divu_xy4,u2_xy3,u2_xy4,mach_xy4,hless_xy4
+  real, target, dimension (:,:), allocatable :: o2_xy3,o2_xy4,mach_xy3,hless_xy3
+  real, target, dimension (:,:), allocatable :: divu_xz,u2_xz,o2_xz,mach_xz,hless_xz
+  real, target, dimension (:,:), allocatable :: divu_xz2,u2_xz2,o2_xz2,mach_xz2,hless_xz2
+  real, target, dimension (:,:), allocatable :: divu_yz,u2_yz,o2_yz,mach_yz,hless_yz
   real, target, dimension (:,:), allocatable :: ou_xy,ou_xy2,ou_xy3,ou_xy4
   real, target, dimension (:,:), allocatable :: ou_xz,ou_yz,ou_xz2
-  real, target, dimension (:,:,:,:,:), allocatable :: divu_r,u2_r,o2_r,mach_r,ou_r
+  real, target, dimension (:,:,:,:,:), allocatable :: divu_r,u2_r,o2_r,mach_r,ou_r,hless_r
+  real, target, dimension (:,:,:,:,:), allocatable :: Ft_r,Fx_r,Fy_r,Fz_r
   real, target, dimension (:,:,:,:,:,:), allocatable :: oo_r,uu_sph_r
 
   real, dimension (mz,3) :: uumz=0.0, ruumz=0.0
@@ -150,6 +162,7 @@ module Hydro
   real, dimension(2) :: hydro_zaver_range=(/-max_real,max_real/)
   real, dimension(3,3) :: uij_0D_test=0.
   real :: u_out_kep=0.0, velocity_ceiling=.0, w_sldchar_hyd=1.0
+  real :: velocity_floor=impossible
   real :: mu_omega=0., gap=0., r_omega=0., w_omega=0.
   real :: z1_uu=0., z2_uu=0.
   real :: ABC_A=1., ABC_B=1., ABC_C=1.
@@ -159,8 +172,13 @@ module Hydro
   integer :: nb_rings=0
   integer :: neddy=0
   integer :: iTij=0, ihless=0, nhless=0
+  integer :: iT11=0,iT12=0,iT13=0,iT21=0,iT22=0,iT23=0,iT31=0,iT32=0,iT33=0
+  integer :: i11=1,i22=2,i33=3,i12=4,i23=5,i13=6
+  !integer :: i11=1,i22=2,i33=3,i12=4,i13=5,i23=6
+  integer :: i31=-1
   real, dimension(:), allocatable :: thless, xhless, yhless, zhless
   real, dimension(:), allocatable :: Bsquared
+  real :: cs201=1., cs20_corr=1., cs2011=impossible
 !
 ! variables for expansion into spherical harmonics
 !
@@ -200,7 +218,7 @@ module Hydro
   logical :: llorentz_limiter=.false., full_3D=.false.
   logical :: lhiggsless=.false., lhiggsless_old=.false.
   logical :: lsqrt_qirro_uu=.false., lset_uz_zero=.false.
-  logical :: lnorm_vw_hless=.false., lcorrect_penc_u=.true.
+  logical :: lnorm_vw_hless=.false.
   logical :: lampluu_adjust_ascale=.false.   !PAR_DOC: automatically adjust initial u-amplitude
   real, pointer :: profx_ffree(:),profy_ffree(:),profz_ffree(:)
   real, pointer :: B_ext2
@@ -243,7 +261,7 @@ module Hydro
       lno_noise_uu, lrho_nonuni_uu, lpower_profile_file_uu, &
       llorentz_limiter, lhiggsless, lhiggsless_old, vwall, alpha_hless, width_hless, &
       xjump_mid, yjump_mid, zjump_mid, qini, lnorm_vw_hless, &
-      lcorrect_penc_u, qshear, lampluu_adjust_ascale
+      qshear, lampluu_adjust_ascale
 !
 !  Run parameters.
 !
@@ -280,6 +298,7 @@ module Hydro
   logical :: lcalc_uumeanx=.false.,lcalc_uumeany=.false.,lcalc_uumeanxz=.false.
   logical :: lcalc_ruumeanz=.false.,lcalc_ruumeanxy=.false.
   logical :: lforcing_cont_uu=.false.
+  logical :: lforcing_cont_uu_diff=.false.   !PAR_DOC: forcing with respect the velocity difference
   integer :: iforcing_cont_uu=0
   logical :: lcoriolis_xdep=.false.
   logical :: lno_meridional_flow=.false.
@@ -313,6 +332,7 @@ module Hydro
   real :: cdt_tauf=1.0, ulev=impossible
   logical :: lcdt_tauf=.false.
   logical, target :: lcalc_uuavg=.false.
+  logical, target :: lext_force=.false.
 !
   namelist /hydro_run_pars/ &
       Omega, theta, tdamp, dampu, dampuext, dampuint, rdampext, rdampint, &
@@ -330,11 +350,11 @@ module Hydro
       lconservative_pressure_on_rhs,&
       lcalc_uumean, lcalc_uumeanx, lcalc_uumeanxy, lcalc_uumeanxz, lcalc_uumeanz, &
       lcalc_ruumeanz, lcalc_ruumeanxy, &
-      lforcing_cont_uu, width_ff_uu, x1_ff_uu, x2_ff_uu, &
+      lforcing_cont_uu, lforcing_cont_uu_diff, width_ff_uu, x1_ff_uu, x2_ff_uu, &
       loo_as_aux, luut_as_aux, luust_as_aux, loot_as_aux, loost_as_aux, &
       luij_test, luij_as_aux, llorentz_as_aux, loutest, ldiffrot_test, &
       interior_bc_hydro_profile, lhydro_bc_interior, z1_interior_bc_hydro, &
-      velocity_ceiling, ampl_Omega, lcoriolis_xdep, &
+      velocity_ceiling, velocity_floor, ampl_Omega, lcoriolis_xdep, &
       ekman_friction, friction_tdep, friction_tdep_toffset, friction_tdep_tau0, &
       t1_ekman, t2_ekman, lhubble_hydro, &
       ampl_forc, k_forc, w_forc, x_forc, dx_forc, ampl_fcont_uu, Sbaro0, &
@@ -348,7 +368,8 @@ module Hydro
       limpose_only_horizontal_uumz, luu_fluc_as_aux, Om_inner, luu_sph_as_aux, &
       ltime_integrals_always, dtcor, lvart_in_shear_frame, lSchur_3D3D1D_uu, &
       lSchur_2D2D3D_uu, lSchur_2D2D1D_uu, &
-      lhiggsless, vwall, alpha_hless, width_hless, qshear, zdampint, zdampext
+      lhiggsless, vwall, alpha_hless, width_hless, qshear, zdampint, zdampext, &
+      lext_force
 !
 !  Diagnostic variables (need to be consistent with reset list below).
 !
@@ -575,6 +596,8 @@ module Hydro
   integer :: idiag_qmax=0       ! DIAG_DOC: $\max(|\qv|)$
   integer :: idiag_qom=0        ! DIAG_DOC: $\left<\qv\cdot\omv\right>$
   integer :: idiag_quxom=0      ! DIAG_DOC: $\left<\qv\cdot(\uv\times\omv)\right>$
+  integer :: idiag_qsglnrhom=0  ! DIAG_DOC: $\left<\qv\cdot\bm{G}\right>$
+  integer :: idiag_oglnrxgdum=0 ! DIAG_DOC: $\left<\boldsymbol{\omega}\cdot(\ln\varrho)\times\nabla\nabla\cdot\uv\right>$
   integer :: idiag_qezxum=0     ! DIAG_DOC: $\left< (\boldsymbol{e_z} \times \mathbf{u}) \cdot \mathbf{q} \right>$
   integer :: idiag_quysm=0      ! DIAG_DOC: $\left< \frac{1}{\tau} (u_y^S - u_y) \mathbf{\hat{y}} \cdot \mathbf{q} \right>$
   integer :: idiag_jxbrqm=0     ! DIAG_DOC: $\left<(\Jv\times\Bv/\rho)\cdot\mathbf{q}\right>$
@@ -622,6 +645,7 @@ module Hydro
   integer :: idiag_uyzrms=0     ! DIAG_DOC: $u_{y,z}^{\rm rms}$
   integer :: idiag_uzyrms=0     ! DIAG_DOC: $u_{z,y}^{\rm rms}$
   integer :: idiag_sld_char_rms=0
+  integer :: idiag_coriolis_number=0 ! DIAG_DOC: $\left< \frac{|2\boldsymbol\Omega \times \uv|}{|\uv \cdot \nabla \uv|} \right>$
   integer :: idiag_urmsn=0,idiag_urmss=0,idiag_urmsh=0
   integer :: idiag_ormsn=0,idiag_ormss=0,idiag_ormsh=0
   integer :: idiag_oumn=0,idiag_oums=0,idiag_oumh=0
@@ -945,7 +969,8 @@ module Hydro
 !  Video data.
 !
   integer :: ivid_oo=0, ivid_o2=0, ivid_divu=0, ivid_u2=0, ivid_Ma2=0, ivid_uu_sph=0
-  integer :: ivid_ou=0
+  integer :: ivid_hless=0
+  integer :: ivid_ou=0, ivid_Ft=0, ivid_Fx=0, ivid_Fy=0, ivid_Fz=0
 !
 !  Auxiliary variables
 !
@@ -960,6 +985,8 @@ module Hydro
   real, dimension (nz,3) :: uumz_prof
   real, dimension (nx,3) :: fint,fext
   real, dimension (nx,ny) :: omega_prof
+  real, dimension (nx,3) :: coriolis_force = 0.0
+  !$omp threadprivate(coriolis_force)
 
   integer :: enum_friction_tdep = 0
   integer :: enum_uuprof = 0
@@ -1043,6 +1070,8 @@ module Hydro
         igu21=iguij+3; igu22=iguij+4; igu23=iguij+5
         igu31=iguij+6; igu32=iguij+7; igu33=iguij+8
       endif
+
+
 !!
 !!  Fourier transformed uu as aux
 !!
@@ -1051,9 +1080,22 @@ module Hydro
 !
 !  Tij and possibly relativistic Lorentz factor as aux
 !
+
+      i31 = i13
       if (lconservative) then
         call farray_register_auxiliary('Tij',iTij,vector=6,communicated=.true.,rhs=.true.)
         if (llorentz_as_aux) call register_report_aux('lorentz', ilorentz,communicated=.true.,rhs=.true.)
+        iT11 = iTij-1+i11
+        iT22 = iTij-1+i22
+        iT33 = iTij-1+i33
+        iT12 = iTij-1+i12
+        iT23 = iTij-1+i23
+        iT13 = iTij-1+i13
+
+        iT21=iT12
+        iT32=iT23
+        iT31=iT13
+
       ! else
       !   if (lrelativistic) then
       !     call fatal_error('register_hydro','no lrelativistic without lconservative')
@@ -1094,7 +1136,8 @@ module Hydro
 !
       if (luu_sph_as_aux.and.lsphere_in_a_box) then
         if (iuu_sph==0) then
-          call farray_register_auxiliary('uu_sph',iuu_sph,vector=3)
+          call farray_register_auxiliary('uu_sph',iuu_sph,vector=3,&
+                                          rhs=.true.,read_from_gpu=.true.)
           iuu_sphr = iuu_sph; iuu_spht = iuu_sph+1; iuu_sphp = iuu_sph+2;
         else
           if (lroot) print*, 'register_hydro: iuu_sph = ', iuu_sph
@@ -1172,6 +1215,8 @@ module Hydro
       if (lparticles_grad) lgradu_as_aux=.true.
       if (lSGS_hydro) call register_SGS_hydro      
 !
+      call put_shared_variable('lext_force',lext_force)
+!
     endsubroutine register_hydro
 !***********************************************************************
     subroutine initialize_hydro(f)
@@ -1187,6 +1232,7 @@ module Hydro
 !   7-jun.16/MR: modifications for calculation of z average on Yin-Yang grid, not yet operational
 !
       use BorderProfiles, only: request_border_driving
+      use EquationOfState, only: cs20
       use Forcing, only: n_forcing_cont
       use Initcond
       use Mpicomm, only: mpibcast
@@ -1215,6 +1261,11 @@ module Hydro
         if (iforcing_cont_uu==0) &
           call fatal_error('initialize_hydro','no valid continuous forcing available')
       endif
+!
+!  Block use of lforcing_cont_uu_diff if lforcing_cont_uu=F.
+!
+      if (lforcing_cont_uu_diff .and. .not. lforcing_cont_uu) &
+        call fatal_error('initialize_hydro','must put lforcing_cont_uu=T')
 !
 !  Calculate cosz*sinz, cos^2, and sinz^2, to take moments with
 !  of ux2, uxuy, etc.
@@ -1666,8 +1717,14 @@ module Hydro
       if (ivid_u2/=0) call alloc_slice_buffers(u2_xy,u2_xz,u2_yz,u2_xy2,u2_xy3,u2_xy4,u2_xz2,u2_r)
       if (ivid_divu/=0) call alloc_slice_buffers(divu_xy,divu_xz,divu_yz,divu_xy2,divu_xy3,divu_xy4,divu_xz2,divu_r)
       if (ivid_Ma2/=0) call alloc_slice_buffers(mach_xy,mach_xz,mach_yz,mach_xy2,mach_xy3,mach_xy4,mach_xz2,mach_r)
+      if (ivid_hless/=0) call alloc_slice_buffers(hless_xy,hless_xz,hless_yz,hless_xy2,hless_xy3,hless_xy4,hless_xz2,hless_r)
       if (ivid_uu_sph/=0) &
         call alloc_slice_buffers(uu_sph_xy,uu_sph_xz,uu_sph_yz,uu_sph_xy2,uu_sph_xy3,uu_sph_xy4,uu_sph_xz2,uu_sph_r)
+
+      if (ivid_Ft/=0) call alloc_slice_buffers(Ft_xy,Ft_xz,Ft_yz,Ft_xy2,Ft_xy3,Ft_xy4,Ft_xz2,Ft_r)
+      if (ivid_Fx/=0) call alloc_slice_buffers(Fx_xy,Fx_xz,Fx_yz,Fx_xy2,Fx_xy3,Fx_xy4,Fx_xz2,Fx_r)
+      if (ivid_Fy/=0) call alloc_slice_buffers(Fy_xy,Fy_xz,Fy_yz,Fy_xy2,Fy_xy3,Fy_xy4,Fy_xz2,Fy_r)
+      if (ivid_Fz/=0) call alloc_slice_buffers(Fz_xy,Fz_xz,Fz_yz,Fz_xy2,Fz_xy3,Fz_xy4,Fz_xz2,Fz_r)
 !
 !  Warn if orms is not set in print.in
 !
@@ -1689,8 +1746,16 @@ module Hydro
         call get_shared_variable('lrelativistic_eos_corr', lrelativistic_eos_corr)
       else
         allocate(lrelativistic_eos)
+        allocate(lrelativistic_eos_corr)
         lrelativistic_eos=.false.
+        lrelativistic_eos_corr=.false.
       endif
+!
+!   Set values 1 + cs2 for relativistic_eos and (1 - cs2)/(1 + cs2) for relativistic_eos_corr
+!
+      if (lrelativistic_eos) cs201=1.+cs20
+      if (lrelativistic_eos_corr) cs20_corr=(1.-cs20)/cs201
+      cs2011=1.0/cs201
 !
       if (ltime_integrals) then
         if (.not.(ltime_integrals_always .or. dtcor<=0.)) call put_shared_variable('t_cor',t_cor)
@@ -1707,8 +1772,6 @@ module Hydro
 !
       if (lconservative) then
         ! alberto: is this needed? if so, why not do it for f(..., ivv)?
-        f(:,:,:,iTij:iTij+5)=0.
-        if (llorentz_as_aux) f(:,:,:,ilorentz)=0.
         if (lmagnetic) then
           if (ibx==0) call fatal_error("initialize_hydro","must use lbb_as_comaux=T for lconservative=T")
           if (allocated(Bsquared)) deallocate(Bsquared)
@@ -1741,10 +1804,6 @@ module Hydro
         call mpibcast(yhless,nhless)
         call mpibcast(zhless,nhless)
       endif
-
-      !TP: don't want to consider this on the GPU and would prefer if we could refactor this flag out
-      if(lgpu) lcorrect_penc_u = .false.
-      
 
       endsubroutine initialize_hydro
 !***********************************************************************
@@ -1955,6 +2014,7 @@ module Hydro
       real, dimension (3) :: tmpvec,xhhless
 !
       real, dimension (nx,3) :: tmp_nx3
+      real, dimension (mx) :: distance
       real, dimension (mx,3) :: ss
       real, dimension (mx) :: tmpmx, ss2, delx, tau_hless
       real, dimension (nx) :: r,p1,tmp,prof,xc0,yc0,ur,lnrhor
@@ -2970,7 +3030,8 @@ module Hydro
                 delx=(Lxyz(1)/pi)*atan(tan(pi/Lxyz(1)*(x   -xhhless(1))))
                 dely=(Lxyz(2)/pi)*atan(tan(pi/Lxyz(2)*(y(m)-xhhless(2))))
                 delz=(Lxyz(3)/pi)*atan(tan(pi/Lxyz(3)*(z(n)-xhhless(3))))
-                tau_hless=thless(jhless)+sqrt(delx**2+dely**2+delz**2)/vwall
+                distance = sqrt(delx**2+dely**2+delz**2)
+                tau_hless=thless(jhless)+distance/vwall
                 where(tau_hless<f(:,m,n,ihless)) f(:,m,n,ihless)=tau_hless
               enddo
               enddo
@@ -2983,13 +3044,15 @@ module Hydro
     endsubroutine init_uu
 !***********************************************************************
     subroutine pencil_needs_ivv(pencil_name)
+
       character (len=*) :: pencil_name
 
       call fatal_error('pencil_interdep_hydro',&
             'calculating ' // pencil_name // ' correctly for lconservative=T requires velocity as an auxiliary ' &
              // ACHAR(10) // '                              i.e. lvv_as_aux = lvv_as_comaux = T.'&
              // ACHAR(10) // 'If the pencil only needs 1st or 2nd order derivatives you could consider '&
-             // 'to write out the product rules out and lift this restriction.')
+             // 'to write out the product rules and lift this restriction.')
+
     endsubroutine pencil_needs_ivv
 !***********************************************************************
     subroutine pencil_criteria_hydro
@@ -3007,7 +3070,7 @@ module Hydro
           lpenc_requested(i_rho1)=.true.
           lpenc_requested(i_transpurho)=.true.
         !When using momentum advection is handled by divergence of Tij
-        else if(.not. lconservative) then
+        else if (.not. lconservative) then
           lpenc_requested(i_ugu)=.true.
         endif
       endif
@@ -3068,7 +3131,9 @@ module Hydro
         if (ivid_divu/=0) lpenc_video(i_divu)=.true.
         if (ivid_u2  /=0) lpenc_video(i_u2)=.true.
         if (ivid_Ma2 /=0) lpenc_video(i_Ma2)=.true.
+        if (ivid_hless /=0) lpenc_video(i_hless)=.true.
         if (ivid_uu_sph/=0) lpenc_video(i_uu_sph)=.true.
+        if (ivid_Ft/=0) lpenc_video(i_ext_force)=.true.
       endif
 !
 !  diagnostic pencils
@@ -3088,20 +3153,25 @@ module Hydro
           idiag_oxm /=0 .or. idiag_oym /=0 .or. idiag_ozm /=0 .or. &
           idiag_oxoym/=0 .or. idiag_oxozm/=0 .or. idiag_oyozm/=0 .or. &
           idiag_oxuzxm/=0 .or. idiag_oyuzym/=0 .or. idiag_pvzm /=0 .or. &
-          idiag_quxom/=0 .or. idiag_qezxum/=0 .or. idiag_quysm/=0 .or. idiag_jxbrqm/=0) &
-          lpenc_diagnos(i_oo)=.true.
+          idiag_quxom/=0 .or. idiag_qezxum/=0 .or. idiag_quysm/=0 .or. &
+          idiag_jxbrqm/=0 .or. idiag_oglnrxgdum/=0 .or. idiag_qsglnrhom/=0) lpenc_diagnos(i_oo)=.true.
+      if (idiag_oglnrxgdum/=0) lpenc_diagnos(i_glnrho)=.true.
       if (idiag_orms/=0 .or. idiag_omax/=0 .or. idiag_o2m/=0 .or. idiag_o2u2m/=0 .or. idiag_o2sphm/=0 .or. &
           idiag_ormsh/=0 .or. idiag_o2mz/=0 ) lpenc_diagnos(i_o2)=.true.
       if (idiag_q2m/=0 .or. idiag_qrms/=0 .or. idiag_qmax/=0 .or. idiag_qfm/=0 .or. &
-          idiag_qom/=0 .or. idiag_quxom/=0 .or. idiag_qezxum/=0 .or. idiag_quysm/=0 .or. idiag_jxbrqm/=0) &
+          idiag_qom/=0 .or. idiag_quxom/=0 .or. idiag_qezxum/=0 .or. idiag_quysm/=0 .or. &
+          idiag_jxbrqm/=0 .or. idiag_qsglnrhom/=0) &
           lpenc_diagnos(i_curlo)=.true.
+      if (idiag_qsglnrhom/=0) lpenc_diagnos(i_sglnrho)=.true.
       if (idiag_divu2m/=0 .or. idiag_divu2mz/=0 .or. idiag_divru2mz/=0 .or. &
           idiag_divum/=0 .or. idiag_rdivum/=0) lpenc_diagnos(i_divu)=.true.
       if (idiag_rdivum/=0 .or. idiag_fkinzm/=0 .or. idiag_ruzupmz/=0 .or. idiag_ruzdownmz/=0) &
           lpenc_diagnos(i_rho)=.true.
       if (idiag_ruxupmxy/=0 .or. idiag_ruxdownmxy/=0) &
           lpenc_diagnos2d(i_rho)=.true.
-      if (idiag_gdivu2m/=0) lpenc_diagnos(i_graddivu)=.true.
+      if (idiag_gdivu2m/=0 .or. idiag_oglnrxgdum/=0) lpenc_diagnos(i_graddivu)=.true.
+!AB: need this line because of missing pencil complaint
+      if (idiag_gdivu2m/=0 .or. idiag_oglnrxgdum/=0) lpenc_diagnos(i_curlo)=.true.
       if (idiag_oum/=0 .or. idiag_ourms/=0 .or. idiag_oumx/=0 .or. idiag_oumy/=0 .or. &
            idiag_oumz/=0 .or. idiag_oumh/=0 .or. idiag_ou_int/=0 ) lpenc_diagnos(i_ou)=.true.
       if (idiag_oxum/=0) lpenc_diagnos(i_oxu)=.true.
@@ -3111,6 +3181,7 @@ module Hydro
         lpenc_diagnos(i_divu)=.true.
         lpenc_diagnos(i_rho)=.true.
       endif
+      if (idiag_coriolis_number /= 0) lpenc_diagnos(i_ugu2) = .true.
       if (idiag_Marms/=0 .or. idiag_Mamax/=0) lpenc_diagnos(i_Ma2)=.true.
       if (idiag_u3u21m/=0 .or. idiag_u3u21mz/=0) lpenc_diagnos(i_u3u21)=.true.
       if (idiag_u1u32m/=0 .or. idiag_u1u32mz/=0) lpenc_diagnos(i_u1u32)=.true.
@@ -3282,6 +3353,13 @@ module Hydro
         endif
       else
       endif
+
+      if(lext_force) then
+        lpenc_requested(i_divu)=.true.
+        lpenc_requested(i_uu)=.true.
+        lpenc_requested(i_u2)=.true.
+        lpenc_requested(i_ext_force)=.true.
+      endif
 !
     endsubroutine pencil_criteria_hydro
 !***********************************************************************
@@ -3353,32 +3431,29 @@ module Hydro
 
       if (idiag_dtu/=0) ltimestep_diagnostics=.true.
 
-      if(lconservative .and. .not. (lvv_as_aux .or. lvv_as_comaux)) then
+      if (lconservative .and. .not. (lvv_as_aux .or. lvv_as_comaux)) then
         if (lpencil_in(i_uij) .and. lrelativistic) then
           call fatal_error('pencil_interdep_hydro',&
                 'calculating uij correctly for lrelativistic=T .and. lconservative=T requires velocity as an auxiliary ' &
                  // ACHAR(10) // '                              i.e. lvv_as_aux = lvv_as_comaux = T.')
         endif
-        if (lpencil_in(i_uij5))             call pencil_needs_ivv("uij5")
-        if (lpencil_in(i_uij6))             call pencil_needs_ivv("uij6")
-        if (lpencil_in(i_ugu))              call pencil_needs_ivv("ugu")
-        if (lpencil_in(i_d2uidxj))          call pencil_needs_ivv("d2uidxj")
-        if (lpencil_in(i_uijk))             call pencil_needs_ivv("uijk")
-        if (lpencil_in(i_del4u))            call pencil_needs_ivv("del4u")
-        if (lpencil_in(i_del6u))            call pencil_needs_ivv("del6u")
-        if (lpencil_in(i_del6u_strict))     call pencil_needs_ivv("del6u_strict")
-        if (lpencil_in(i_del4graddivu))     call pencil_needs_ivv("del4_graddivu")
-        if (lpencil_in(i_ogu))              call pencil_needs_ivv("ogu")
-        if (lpencil_in(i_grad5divu))        call pencil_needs_ivv("grad5divu")
-        if (lpencil_in(i_del6u_bulk))       call pencil_needs_ivv("del6u_bulk")
-        if (lpencil_in(i_der6u_res))        call pencil_needs_ivv("der6u_res")
-        if (lpencil_in(i_graddivu))         call pencil_needs_ivv("graddivu")
-        if (lpencil_in(i_curlo))            call pencil_needs_ivv("curlo")
-        if (lpencil_in(i_transpurho))       call pencil_needs_ivv("transpurho")
-        !TP: I guess in the relativistic case one takes del2 of whatever one is solving for because of numerical reasons
-        !    and it is fine for it not to be actually del2 of the velocity? This is at least done for 1d-tests/rel-shock.
-        !    If so, could we consider having a pencil with a separate name for del2 of the variable being solved for?
-        if (.not. lrelativistic .and. lpencil_in(i_del2u))      call pencil_needs_ivv("del2u")
+        if (lpencil_in(i_uij5))         call pencil_needs_ivv("uij5")
+        if (lpencil_in(i_uij6))         call pencil_needs_ivv("uij6")
+        if (lpencil_in(i_ugu))          call pencil_needs_ivv("ugu")
+        if (lpencil_in(i_d2uidxj))      call pencil_needs_ivv("d2uidxj")
+        if (lpencil_in(i_uijk))         call pencil_needs_ivv("uijk")
+        if (lpencil_in(i_del4u))        call pencil_needs_ivv("del4u")
+        if (lpencil_in(i_del6u))        call pencil_needs_ivv("del6u")
+        if (lpencil_in(i_del6u_strict)) call pencil_needs_ivv("del6u_strict")
+        if (lpencil_in(i_del4graddivu)) call pencil_needs_ivv("del4_graddivu")
+        if (lpencil_in(i_ogu))          call pencil_needs_ivv("ogu")
+        if (lpencil_in(i_grad5divu))    call pencil_needs_ivv("grad5divu")
+        if (lpencil_in(i_del6u_bulk))   call pencil_needs_ivv("del6u_bulk")
+        if (lpencil_in(i_der6u_res))    call pencil_needs_ivv("der6u_res")
+        if (lpencil_in(i_graddivu))     call pencil_needs_ivv("graddivu")
+        if (lpencil_in(i_curlo))        call pencil_needs_ivv("curlo")
+        if (lpencil_in(i_transpurho))   call pencil_needs_ivv("transpurho")
+        if (lpencil_in(i_del2u))        call pencil_needs_ivv("del2u")
       endif
 !
     endsubroutine pencil_interdep_hydro
@@ -3433,7 +3508,11 @@ module Hydro
 
         if (notanumber(p%advec_uu)) then
           if (lproc_print) then
-            print*, 'calc_pencils_hydro: p%advec_uu =',p%advec_uu
+            if (ip<15) print*, 'calc_pencils_hydro: p%advec_uu =',p%advec_uu
+            if (ip<15) print*, 'calc_pencils_hydro: p%uu =',p%uu
+            if(.not. lpenc_loc(i_uu)) then
+               call fatal_error('calc_pencils_hydro', 'advec_uu needs uu!')
+            endif
             if (.not.allproc_print) lproc_print=.false.
           endif
         endif
@@ -3445,6 +3524,20 @@ module Hydro
         !maxadvec=maxadvec+p%advec_uu
         maxadvec=max(maxadvec,p%advec_uu)
         if (headtt.or.ldebug) print*,'calc_pencils_hydro: max(advec_uu) =',maxval(p%advec_uu)
+      endif
+!
+! Coriolis force for diagnostics.
+! Would be better if coriolis force would always be calculated into a pencil, but that is for future
+!
+      if (lcartesian_coords .and. (.not. lrotation_xaxis) .and. lrotation .and. theta==0) then
+        if (idiag_coriolis_number /= 0) then
+          coriolis_force(:,1) =  2*Omega*p%uu(:,2)
+          coriolis_force(:,2) = -2*Omega*p%uu(:,1)
+        endif
+      endif
+
+      if (lext_force) then
+        p%ext_force = 0.
       endif
 !
       endsubroutine calc_pencils_hydro_pencpar
@@ -3474,7 +3567,7 @@ module Hydro
       use Sub, only: multsv_mn, del2v_etc, gij_etc, u_dot_grad, del6v, &
         dot2_mn, gij, div_mn, traceless_strain, curl_mn, multm2_sym_mn, &
         dot_mn, cross, del4v, del4graddiv, d2fi_dxj, del2fi_dxjk, h_dot_grad, &
-        invmat_DB, multmv, dot_mn_sv_pencil, gij_v_times_s
+        multmv, dot_mn_sv_pencil, gij_v_times_s
       use WENO_transport, only: weno_transp
 !
       real, contiguous, dimension(:,:,:,:) :: f
@@ -3483,6 +3576,9 @@ module Hydro
       integer :: iuu
 !
       real, dimension (nx) :: tmp 
+      real, dimension (nx,3,3) :: T0ij
+
+
       integer :: i, j, ju
 !
       intent(in)   :: lpenc_loc
@@ -3640,6 +3736,21 @@ module Hydro
         enddo
       endif
 !
+! del2T
+!
+     if (lpenc_loc(i_del2T)) then
+       if (.not. lconservative) then
+          call fatal_error('calc_pencils_hydro_nonlinear', 'del2T implemented only for lconservative')
+       endif
+       if(lcartesian_coords) then
+         call del2v_etc(f,iuu,DEL2=p%del2T)
+       else
+         call gij(f,iuu,T0ij,1)
+         call gij_etc(f,iuu,f(l1:l2,m,n,iux:iuz),T0ij,del2=p%del2T)
+       endif
+     endif
+!
+!
 ! del2u, graddivu
 !
       if (.not.lcartesian_coords.or.lalways_use_gij_etc) then
@@ -3692,6 +3803,120 @@ module Hydro
       endif
     endsubroutine calc_pencils_hydro_nonlinear_from_f
 !***********************************************************************
+    subroutine calc_Tij(f,p,lpenc_loc)
+      real, contiguous, dimension(:,:,:,:) :: f
+      type (pencil_case) :: p
+      logical, dimension(npencils) :: lpenc_loc
+      integer :: i
+
+      if (lpenc_loc(i_T00) .and. ldensity) then
+        if(ldensity_nolog) then
+          p%T00 = f(l1:l2,m,n,irho)
+        else
+          p%T00 = exp(f(l1:l2,m,n,ilnrho))
+        endif
+      endif
+
+      if (lconservative) then
+        if (lpenc_loc(i_T0i)) p%T0i=f(l1:l2,m,n,iux:iuz)
+        if (lpenc_loc(i_Tij)) then
+          do i=1,6
+           p%Tij(:,i) = f(l1:l2,m,n,iTij-1+i)
+          enddo
+        endif
+      endif
+    endsubroutine calc_Tij
+!***********************************************************************
+    subroutine calc_uu(f,p)
+
+      use EquationOfState, only: cs20
+      use Sub, only: multsv_mn,invmat_DB,multmv
+
+      real, contiguous, dimension(:,:,:,:) :: f
+      type (pencil_case) :: p
+      real, dimension (nx) :: tmp,DD,tmp_rho
+      real, dimension (nx,3) :: tmp3, tmp3g
+      real, dimension (nx,3,3) :: tmp33
+      
+      if (lconservative) then
+        if (lvv_as_aux .or. lvv_as_comaux) then
+          p%uu=f(l1:l2,m,n,ivx:ivz)
+        else
+          tmp3=f(l1:l2,m,n,iux:iuz)
+!
+!  alberto: tmp_rho is required to be reconstructed for higgsless.
+!  Unless the p%uu pencil is taken from the ivv chunk of the farray, the
+!  following smoothing is only used for diagnostics.
+!
+          tmp_rho=f(l1:l2,m,n,irho)
+          if (.not.lhiggsless_old.and.lhiggsless) then
+            if (width_hless==0.) then
+              where(real(t) < f(l1:l2,m,n,ihless)) tmp_rho=tmp_rho-eps_hless
+            else
+              tmp_rho=real(tmp_rho-eps_hless &
+                *max(0.d0, min(1.d0, (f(l1:l2,m,n,ihless)+0.5d0*width_hless_absolute-t)/width_hless_absolute)))
+!print*,'AXEL1'
+!AB: this is never accessed
+            endif
+          else
+            if (lhiggsless_old) call warning('calc_pencils_hydro', &
+                          'pencil u is not correctly computed for lhiggsless_old')
+          endif
+          if (lrelativistic) then
+!
+!  In the relativistic case, which must also be conservative, cs201=4/3, if cs2=1/3.
+!  At this point, the Lorentz factor gamma^2 is already available.
+!  We solve here Eq. (39) of the notes.
+!
+            !cs201=cs20+1.
+            ! tmp_rho=f(l1:l2,m,n,irho)
+            !if (.not.lhiggsless_old.and.lhiggsless) then
+            !  where(real(t) < f(l1:l2,m,n,ihless)) tmp_rho=tmp_rho-eps_hless
+            !endif
+            if (.not.llorentz_as_aux) then
+              call fatal_error('calc_pencils_hydro_nonlinear', &
+                                'llorentz_as_aux should be True to reconstruct p%uu')
+            endif
+            if (lmagnetic) then
+!
+              if (full_3D) then
+                DD=(f(l1:l2,m,n,irho)-.5*B_ext2)/(1.-.25/f(l1:l2,m,n,ilorentz))+B_ext2
+!AB: not yet calculated
+                call invmat_DB(DD,p%bb,tmp33)
+                call multmv(tmp33,tmp3,p%uu)
+              else
+                tmp=1./((f(l1:l2,m,n,irho)-.5*B_ext2)/(1.-.25/f(l1:l2,m,n,ilorentz))+B_ext2)
+                call multsv_mn(tmp,tmp3,p%uu)
+              endif
+            else
+              ! alberto: when llorentz_as_aux is not chosen this will not
+              !          be correct
+              !tmp=1./(tmp_rho/(1.-.25/f(l1:l2,m,n,ilorentz)))
+              tmp=1.-cs20*cs2011/f(l1:l2,m,n,ilorentz)
+              tmp=tmp/tmp_rho
+              call multsv_mn(tmp,tmp3,p%uu)
+              ! alberto: added p%rho1 for conservative and relativistic case
+              p%rho1=(cs201*f(l1:l2,m,n,ilorentz)-cs20)/tmp_rho
+            endif
+!print*,'AXEL7: used B_ext2'
+!
+!  In the non-relativisitic (but conservative) case, f(:,:,:,iuu) is the momentum,
+!  so to get the velocity, we have to divide by it.
+!
+          else
+            p%rho1=1./tmp_rho
+            call multsv_mn(p%rho1,tmp3,p%uu)
+            ! alberto: I commented the line below by mistake, recovered
+            p%uu=p%uu*cs2011
+          endif    !  if (lrelativistic)
+
+        endif   !    if (lvv_as_aux .or. lvv_as_comaux) ... else
+
+      else
+        p%uu=f(l1:l2,m,n,iux:iuz)
+      endif  !  if (lconservative) ... else
+    endsubroutine calc_uu
+!***********************************************************************
     subroutine calc_pencils_hydro_nonlinear(f,p,lpenc_loc)
 !
 !  Calculate Hydro pencils.
@@ -3717,10 +3942,9 @@ module Hydro
       type (pencil_case) :: p
       logical, dimension(npencils) :: lpenc_loc
 !
-      real, dimension (nx) :: tmp,DD,tmp_rho
-      real, dimension (nx,3) :: tmp3, tmp3g
-      real, dimension (nx,3,3) :: tmp33
-      real :: cs201=1., cs2011, outest
+      real, dimension (nx) :: DD
+      real, dimension (nx,3) :: tmp3g
+      real :: outest
       integer :: j
 !
       intent(in)   :: lpenc_loc
@@ -3729,102 +3953,11 @@ module Hydro
 !  uu is directly p%uu=f(l1:l2,m,n,iux:iuz), but with lconservative
 !  it is the momentum, or T^{0i} in the relativistic case.
 !
-      if (lrelativistic_eos) cs201=1.+cs20
-      cs2011=1./cs201
-
       if (lpenc_loc(i_uu)) then
-        if (lconservative) then
-          tmp_rho=f(l1:l2,m,n,irho)
-          if (lpenc_loc(i_T00)) p%T00=tmp_rho
-          if (lvv_as_aux .or. lvv_as_comaux) then
-            p%uu=f(l1:l2,m,n,ivx:ivz)
-          else
-            tmp3=f(l1:l2,m,n,iux:iuz)
-!
-!  alberto: tmp_rho is required to be reconstructed for higgsless.
-!  Unless the p%uu pencil is taken from the ivv chunk of the farray, the
-!  following smoothing is only used for diagnostics.
-!
-            if (.not.lhiggsless_old.and.lhiggsless) then
-              if (width_hless==0.) then
-                where(real(t) < f(l1:l2,m,n,ihless)) tmp_rho=tmp_rho-eps_hless
-              else
-                tmp_rho=real(tmp_rho-eps_hless &
-                  *max(0.d0, min(1.d0, (f(l1:l2,m,n,ihless)+0.5d0*width_hless_absolute-t)/width_hless_absolute)))
-!print*,'AXEL1'
-!AB: this is never accessed
-              endif
-            else
-              if (lhiggsless_old) call warning('calc_pencils_hydro', &
-                            'pencil u is not correctly computed for lhiggsless_old')
-            endif
-            if (lrelativistic) then
-!
-!  In the relativistic case, which must also be conservative, cs201=4/3, if cs2=1/3.
-!  At this point, the Lorentz factor gamma^2 is already available.
-!  We solve here Eq. (39) of the notes.
-!
-              !cs201=cs20+1.
-              ! tmp_rho=f(l1:l2,m,n,irho)
-              !if (.not.lhiggsless_old.and.lhiggsless) then
-              !  where(real(t) < f(l1:l2,m,n,ihless)) tmp_rho=tmp_rho-eps_hless
-              !endif
-              if (.not.llorentz_as_aux) then
-                call fatal_error('calc_pencils_hydro_nonlinear', &
-                                  'llorentz_as_aux should be True to reconstruct p%uu')
-              endif
-              if (lmagnetic) then
-!
-                if (full_3D) then
-                  DD=(f(l1:l2,m,n,irho)-.5*B_ext2)/(1.-.25/f(l1:l2,m,n,ilorentz))+B_ext2
-!AB: not yet calculated
-                  call invmat_DB(DD,p%bb,tmp33)
-                  call multmv(tmp33,tmp3,p%uu)
-                else
-                  tmp=1./((f(l1:l2,m,n,irho)-.5*B_ext2)/(1.-.25/f(l1:l2,m,n,ilorentz))+B_ext2)
-                  call multsv_mn(tmp,tmp3,p%uu)
-                endif
-              else
-                ! alberto: when llorentz_as_aux is not chosen this will not
-                !          be correct
-                !tmp=1./(tmp_rho/(1.-.25/f(l1:l2,m,n,ilorentz)))
-                tmp=1.-cs20*cs2011/f(l1:l2,m,n,ilorentz)
-                tmp=tmp/tmp_rho
-                call multsv_mn(tmp,tmp3,p%uu)
-                ! alberto: added p%rho1 for conservative and relativistic case
-                p%rho1=(cs201*f(l1:l2,m,n,ilorentz)-cs20)/tmp_rho
-              endif
-!print*,'AXEL7: used B_ext2'
-!
-!  In the non-relativisitic (but conservative) case, f(:,:,:,iuu) is the momentum,
-!  so to get the velocity, we have to divide by it.
-!
-            else
-              p%rho1=1./tmp_rho
-              call multsv_mn(p%rho1,tmp3,p%uu)
-              ! alberto: I commented the line below by mistake, recovered
-              p%uu=p%uu*cs2011
-            endif    !  if (lrelativistic)
-            ! alberto: once computed pencil u from f-array, store temporarily
-            ! for all pencils below to be correctly computed, T0i remains
-            ! stored in tmp3
-            if (lcorrect_penc_u) f(l1:l2,m,n,iux:iuz)=p%uu
-
-          endif   !    if (lvv_as_aux .or. lvv_as_comaux) ... else
-
-          if (lpenc_loc(i_T0i)) p%T0i=f(l1:l2,m,n,iux:iuz)
-          if (lpenc_loc(i_Tij)) then
-            p%Tij(:,1) = f(l1:l2,m,n,iTij)
-            p%Tij(:,2) = f(l1:l2,m,n,iTij+1)
-            p%Tij(:,3) = f(l1:l2,m,n,iTij+2)
-            p%Tij(:,4) = f(l1:l2,m,n,iTij+3)
-            p%Tij(:,5) = f(l1:l2,m,n,iTij+4)
-            p%Tij(:,6) = f(l1:l2,m,n,iTij+5)
-          endif
-        else
-          p%uu=f(l1:l2,m,n,iux:iuz)
-        endif  !  if (lconservative) ... else
-      endif    !  if (lpenc_loc(i_uu))
+        call calc_uu(f,p)
+      endif 
+! Tij
+      call calc_Tij(f,p,lpenc_loc)
 ! u2
       if (lpenc_loc(i_u2)) call dot2_mn(p%uu,p%u2)
 
@@ -3915,6 +4048,7 @@ module Hydro
           ! tini is tiny(1.0), added to avoid division by zero
           p%lorentz = 1./max(1.-min(p%u2,1.-tini), tini)
         endif
+        p%lorentz_gamma = sqrt(p%lorentz)
       endif
       if (lpenc_loc(i_velx).and.ldensity) then
         call dot_mn_sv_pencil(p%uu,sqrt(abs(p%rho*cs201)),tmp3g)
@@ -3922,15 +4056,6 @@ module Hydro
       endif
       ! alberto: we might want to consider higgsless also for non-conservative
       if (.not.lhiggsless_old.and.lhiggsless) p%hless = f(l1:l2,m,n,ihless)
-!
-! alberto: recover T0i in f-array (temporarily, we have stored the
-!          actual velocity for good reconstruction of all pencils)
-!
-      if (lconservative.and.lcorrect_penc_u) then
-        if (.not.lvv_as_aux.and..not.lvv_as_comaux) then
-          f(l1:l2,m,n,iux:iuz)=tmp3
-        endif
-      endif
 !
     endsubroutine calc_pencils_hydro_nonlinear
 !***********************************************************************
@@ -4201,6 +4326,95 @@ module Hydro
 !
     endsubroutine update_char_vel_hydro
 !***********************************************************************
+    subroutine advec_uu(f,df,p)
+
+      use Sub, only: dot, dot2,div_tensor
+      use Deriv, only: der
+
+      real, contiguous, dimension(:,:,:,:) :: f
+      real, contiguous, dimension(:,:,:,:) :: df
+      type (pencil_case) :: p
+
+      integer :: i,j
+      real, dimension (nx) :: tmp, ugu_Schur_x, ugu_Schur_y, ugu_Schur_z
+      real, dimension (nx,3) :: divTij
+      real, dimension (nx,3,3) :: puij_Schur
+
+      if (.not. lconservative .and. .not. lweno_transport .and. &
+          .not. lno_meridional_flow .and. .not. lfargo_advection) then
+        if (lSchur_3D3D1D_uu) then
+          call dot(p%uu,p%uij(:,1,:),ugu_Schur_x)
+          call dot(p%uu,p%uij(:,2,:),ugu_Schur_y)
+          ugu_Schur_z=p%uu(:,3)*p%uij(:,3,3)
+          df(l1:l2,m,n,iux)=df(l1:l2,m,n,iux)-ugu_Schur_x
+          df(l1:l2,m,n,iuy)=df(l1:l2,m,n,iuy)-ugu_Schur_y
+          df(l1:l2,m,n,iuz)=df(l1:l2,m,n,iuz)-ugu_Schur_z
+        elseif (lSchur_2D2D3D_uu) then
+          do j=1,3
+          do i=1,3
+            puij_Schur(:,i,j) = p%uij(:,i,j)
+          enddo
+          enddo
+          puij_Schur(:,1,3) = 0
+          puij_Schur(:,2,3) = 0
+          call dot(p%uu,puij_Schur(:,1,:),ugu_Schur_x)
+          call dot(p%uu,puij_Schur(:,2,:),ugu_Schur_y)
+          call dot(p%uu,puij_Schur(:,3,:),ugu_Schur_z)
+          df(l1:l2,m,n,iux)=df(l1:l2,m,n,iux)-ugu_Schur_x
+          df(l1:l2,m,n,iuy)=df(l1:l2,m,n,iuy)-ugu_Schur_y
+          df(l1:l2,m,n,iuz)=df(l1:l2,m,n,iuz)-ugu_Schur_z
+        elseif (lSchur_2D2D1D_uu) then
+          do j=1,3
+          do i=1,3
+            puij_Schur(:,i,j) = p%uij(:,i,j)
+          enddo
+          enddo
+          puij_Schur(:,1,3) = 0
+          puij_Schur(:,2,3) = 0
+          call dot(p%uu,puij_Schur(:,1,:),ugu_Schur_x)
+          call dot(p%uu,puij_Schur(:,2,:),ugu_Schur_y)
+          ugu_Schur_z=p%uu(:,3)*p%uij(:,3,3)
+          df(l1:l2,m,n,iux)=df(l1:l2,m,n,iux)-ugu_Schur_x
+          df(l1:l2,m,n,iuy)=df(l1:l2,m,n,iuy)-ugu_Schur_y
+          df(l1:l2,m,n,iuz)=df(l1:l2,m,n,iuz)-ugu_Schur_z
+        else
+          df(l1:l2,m,n,iux:iuz)=df(l1:l2,m,n,iux:iuz)-p%ugu
+        endif
+      endif
+!
+      if (ldensity.and.lconservative) then
+        call div_tensor(f,divTij,iTij,lyz_first=.true.)
+        df(l1:l2,m,n,iux:iuz) = df(l1:l2,m,n,iux:iuz)- divTij
+        if (lext_force) then
+          do i=0,2
+            df(l1:l2,m,n,iuu+i)=df(l1:l2,m,n,iuu+i)+p%ext_force(:,2+i)
+          enddo
+        endif
+!
+      endif
+!
+!  WENO transport.
+!
+      if (lweno_transport) then
+        do j=1,3
+          df(l1:l2,m,n,iux-1+j)=df(l1:l2,m,n,iux-1+j)-(p%transpurho(:,j)-p%uu(:,j)*p%transprho)*p%rho1
+        enddo
+      endif
+!
+!  No meridional flow : turn off the meridional flow (in spherical)
+!  useful for debugging.
+!
+!  18-Mar-2010/AJ: this should probably go in a special module.
+!  12-Mar-2017/WL: Agree, looks very specific.
+!
+      if (lno_meridional_flow) then
+        f(l1:l2,m,n,iux:iuy)=0.
+        df(l1:l2,m,n,iuz)=df(l1:l2,m,n,iuz)-p%ugu(:,3)
+      endif
+!
+      if (lfargo_advection) df(l1:l2,m,n,iux:iuz)=df(l1:l2,m,n,iux:iuz)-p%uuadvec_guu
+    endsubroutine advec_uu
+!***********************************************************************
     subroutine duu_dt(f,df,p)
 !
 !  velocity evolution
@@ -4229,9 +4443,8 @@ module Hydro
       intent(inout) :: f,df
 
       real, dimension (nx,3) :: uu1, tmpv
-      real, dimension (nx) :: tmp, ftot, ugu_Schur_x, ugu_Schur_y, ugu_Schur_z
+      real, dimension (nx) :: tmp, ftot
       real, dimension (nx) :: arad_normal, pradrc2
-      real, dimension (nx,3,3) :: puij_Schur
       real :: hubble_factor
       integer :: i,j
 !
@@ -4255,100 +4468,7 @@ module Hydro
 !  but that is currently done in noentropy.
 !
       if (ladvection_velocity) then
-        if (.not. lconservative .and. .not. lweno_transport .and. &
-            .not. lno_meridional_flow .and. .not. lfargo_advection) then
-          if (lSchur_3D3D1D_uu) then
-            call dot(p%uu,p%uij(:,1,:),ugu_Schur_x)
-            call dot(p%uu,p%uij(:,2,:),ugu_Schur_y)
-            ugu_Schur_z=p%uu(:,3)*p%uij(:,3,3)
-            df(l1:l2,m,n,iux)=df(l1:l2,m,n,iux)-ugu_Schur_x
-            df(l1:l2,m,n,iuy)=df(l1:l2,m,n,iuy)-ugu_Schur_y
-            df(l1:l2,m,n,iuz)=df(l1:l2,m,n,iuz)-ugu_Schur_z
-          elseif (lSchur_2D2D3D_uu) then
-            do j=1,3
-            do i=1,3
-              puij_Schur(:,i,j) = p%uij(:,i,j)
-            enddo
-            enddo
-            puij_Schur(:,1,3) = 0
-            puij_Schur(:,2,3) = 0
-            call dot(p%uu,puij_Schur(:,1,:),ugu_Schur_x)
-            call dot(p%uu,puij_Schur(:,2,:),ugu_Schur_y)
-            call dot(p%uu,puij_Schur(:,3,:),ugu_Schur_z)
-            df(l1:l2,m,n,iux)=df(l1:l2,m,n,iux)-ugu_Schur_x
-            df(l1:l2,m,n,iuy)=df(l1:l2,m,n,iuy)-ugu_Schur_y
-            df(l1:l2,m,n,iuz)=df(l1:l2,m,n,iuz)-ugu_Schur_z
-          elseif (lSchur_2D2D1D_uu) then
-            do j=1,3
-            do i=1,3
-              puij_Schur(:,i,j) = p%uij(:,i,j)
-            enddo
-            enddo
-            puij_Schur(:,1,3) = 0
-            puij_Schur(:,2,3) = 0
-            call dot(p%uu,puij_Schur(:,1,:),ugu_Schur_x)
-            call dot(p%uu,puij_Schur(:,2,:),ugu_Schur_y)
-            ugu_Schur_z=p%uu(:,3)*p%uij(:,3,3)
-            df(l1:l2,m,n,iux)=df(l1:l2,m,n,iux)-ugu_Schur_x
-            df(l1:l2,m,n,iuy)=df(l1:l2,m,n,iuy)-ugu_Schur_y
-            df(l1:l2,m,n,iuz)=df(l1:l2,m,n,iuz)-ugu_Schur_z
-          else
-            df(l1:l2,m,n,iux:iuz)=df(l1:l2,m,n,iux:iuz)-p%ugu
-          endif
-        endif
-!
-        if (ldensity.and.lconservative) then
-!
-!  diagonals first
-!
-          call der(f,iTij+0,tmp,1) ; df(l1:l2,m,n,iux)=df(l1:l2,m,n,iux)-tmp
-          call der(f,iTij+1,tmp,2) ; df(l1:l2,m,n,iuy)=df(l1:l2,m,n,iuy)-tmp
-          call der(f,iTij+2,tmp,3) ; df(l1:l2,m,n,iuz)=df(l1:l2,m,n,iuz)-tmp
-!
-!  "Tij4" = T12
-!  "Tij5" = T23
-!  "Tij6" = T31
-!  next the off-diagonals
-!  T_11,1 + T_12,2 + T_13,3 = (0,1) + (3,2) + (5,3); (T23=T32 does not enter)
-!
-          call der(f,iTij+3,tmp,2) ; df(l1:l2,m,n,iux)=df(l1:l2,m,n,iux)-tmp
-          call der(f,iTij+5,tmp,3) ; df(l1:l2,m,n,iux)=df(l1:l2,m,n,iux)-tmp
-!
-!  T_21,1 + T_22,2 + T_23,3 = (1,2) + (3,1) + (4,3); (T13=T31 does not enter)
-!
-          call der(f,iTij+3,tmp,1) ; df(l1:l2,m,n,iuy)=df(l1:l2,m,n,iuy)-tmp
-          call der(f,iTij+4,tmp,3) ; df(l1:l2,m,n,iuy)=df(l1:l2,m,n,iuy)-tmp
-!
-!  T_31,1 + T_32,2 + T_33,3 = (2,3) + (5,1) + (4,2); (T12=T21 does not enter)
-!
-          call der(f,iTij+5,tmp,1) ; df(l1:l2,m,n,iuz)=df(l1:l2,m,n,iuz)-tmp
-          call der(f,iTij+4,tmp,2) ; df(l1:l2,m,n,iuz)=df(l1:l2,m,n,iuz)-tmp
-!
-        endif
-!
-!  WENO transport.
-!
-        if (lweno_transport) then
-          do j=1,3
-            df(l1:l2,m,n,iux-1+j)=df(l1:l2,m,n,iux-1+j)-(p%transpurho(:,j)-p%uu(:,j)*p%transprho)*p%rho1
-          enddo
-        endif
-!
-!  No meridional flow : turn off the meridional flow (in spherical)
-!  useful for debugging.
-!
-!  18-Mar-2010/AJ: this should probably go in a special module.
-!  12-Mar-2017/WL: Agree, looks very specific.
-!
-        if (lno_meridional_flow) then
-          f(l1:l2,m,n,iux:iuy)=0.
-          df(l1:l2,m,n,iuz)=df(l1:l2,m,n,iuz)-p%ugu(:,3)
-        endif
-!
-        if (lfargo_advection) df(l1:l2,m,n,iux:iuz)=df(l1:l2,m,n,iux:iuz)-p%uuadvec_guu
-!
-!  endif from ladvection_velocity
-!
+       call advec_uu(f,df,p)
       endif
 !
 !  Coriolis force, -2*Omega x u (unless lprecession=T)
@@ -4467,9 +4587,14 @@ module Hydro
       endif
 !
 !  Add possibility of forcing that is not delta-correlated in time.
+!  If lforcing_cont_uu_diff=T, then we force with respect to the difference.
 !
       if (lforcing_cont_uu) then
-        df(l1:l2,m,n,iux:iuz)=df(l1:l2,m,n,iux:iuz) + ampl_fcont_uu*p%fcont(:,:,iforcing_cont_uu)
+        if (lforcing_cont_uu_diff) then
+          df(l1:l2,m,n,iux:iuz)=df(l1:l2,m,n,iux:iuz) + ampl_fcont_uu*(p%fcont(:,:,iforcing_cont_uu)-p%uu)
+        else
+          df(l1:l2,m,n,iux:iuz)=df(l1:l2,m,n,iux:iuz) + ampl_fcont_uu*p%fcont(:,:,iforcing_cont_uu)
+        endif
       endif
 !
 !  Damp motions in some regions for some time spans if desired.
@@ -4513,6 +4638,7 @@ module Hydro
       if (tau_damp_ruxm/=0.) df(l1:l2,m,n,iux)=df(l1:l2,m,n,iux)-ruxm*p%rho1*tau_damp_ruxm1
       if (tau_damp_ruym/=0.) df(l1:l2,m,n,iuy)=df(l1:l2,m,n,iuy)-ruym*p%rho1*tau_damp_ruym1
       if (tau_damp_ruzm/=0.) df(l1:l2,m,n,iuz)=df(l1:l2,m,n,iuz)-ruzm*p%rho1*tau_damp_ruzm1
+
 !
 !  Apply border profiles
 !
@@ -4554,12 +4680,12 @@ module Hydro
       real, dimension(:,:,:,:) :: f
       type(pencil_case), intent(in) :: p
 !
-      real, dimension (nx,3) :: uxo
+      real, dimension (nx,3) :: uxo, tmpv
       real, dimension (nx) :: space_part_re,space_part_im,u2t,uot,out,fu
-      real, dimension (nx) :: odel2um,uref,curlo2,qo,quxo,graddivu2
+      real, dimension (nx) :: odel2um, uref, curlo2, qo, quxo, graddivu2, tmp
       real, dimension (nx,Nmodes_SH) :: urlm
       real, dimension (nx) :: rmask, lorr
-      real :: kx,cs201=1.
+      real :: kx
       integer :: k
 !
 !  Calculate maxima and rms values for diagnostic purposes
@@ -4576,6 +4702,11 @@ module Hydro
         if (.not.lmultithread) then
           if (idiag_dtF/=0) call max_mn_name(Fmax/cdtf,idiag_dtF,l_dt=.true.)
           call max_mn_name(Fmax,idiag_taufmin,lreciprocal=.true.)
+        endif
+
+        if (idiag_coriolis_number/=0) then
+          call dot2(coriolis_force,qo)
+          call sum_mn_name(sqrt(qo/(p%ugu2+tini)),idiag_coriolis_number)
         endif
 !
 ! urlm
@@ -4686,6 +4817,8 @@ module Hydro
         if (idiag_rux2m/=0) call sum_mn_name(p%rho*p%uu(:,1)**2,idiag_rux2m)
         if (idiag_ruy2m/=0) call sum_mn_name(p%rho*p%uu(:,2)**2,idiag_ruy2m)
         if (idiag_ruz2m/=0) call sum_mn_name(p%rho*p%uu(:,3)**2,idiag_ruz2m)
+
+
         ! alberto: needs to be changed as p%rho and p%uu
         !          contain physical rho and uu (instead of T00 and T0i)
         ! call sum_mn_name(p%rho,idiag_T00m)
@@ -4699,26 +4832,17 @@ module Hydro
         if (idiag_T0z2m/=0) call sum_mn_name(p%T0i(:,3)**2,idiag_T0z2m)
         if (idiag_T0irms/=0) call sum_mn_name(p%T0i(:,1)**2 + p%T0i(:,2)**2 + &
                                               p%T0i(:,3)**2,idiag_T0irms,lsqrt=.true.)
-        if (idiag_Txxm/=0) call sum_mn_name(p%Tij(:,1),idiag_Txxm)
-        if (idiag_Tyym/=0) call sum_mn_name(p%Tij(:,2),idiag_Tyym)
-        if (idiag_Tzzm/=0) call sum_mn_name(p%Tij(:,3),idiag_Tzzm)
-        if (idiag_Txym/=0) call sum_mn_name(p%Tij(:,4),idiag_Txym)
-        if (idiag_Tyzm/=0) call sum_mn_name(p%Tij(:,5),idiag_Tyzm)
-        if (idiag_Tzxm/=0) call sum_mn_name(p%Tij(:,6),idiag_Tzxm)
+        if (idiag_Txxm/=0) call sum_mn_name(p%Tij(:,i11),idiag_Txxm)
+        if (idiag_Tyym/=0) call sum_mn_name(p%Tij(:,i22),idiag_Tyym)
+        if (idiag_Tzzm/=0) call sum_mn_name(p%Tij(:,i33),idiag_Tzzm)
+        if (idiag_Txym/=0) call sum_mn_name(p%Tij(:,i12),idiag_Txym)
+        if (idiag_Tyzm/=0) call sum_mn_name(p%Tij(:,i23),idiag_Tyzm)
+        if (idiag_Tzxm/=0) call sum_mn_name(p%Tij(:,i31),idiag_Tzxm)
         if (idiag_velxrms/=0) call sum_mn_name(p%velx(:,1)**2 + p%velx(:,2)**2 + p%velx(:,3)**2,&
                                                idiag_velxrms,lsqrt=.true.)
         if (idiag_velxx2m/=0) call sum_mn_name(p%velx(:,1)**2,idiag_velxx2m)
         if (idiag_velxy2m/=0) call sum_mn_name(p%velx(:,2)**2,idiag_velxy2m)
         if (idiag_velxz2m/=0) call sum_mn_name(p%velx(:,3)**2,idiag_velxz2m)
-        ! if (iTij/=0) then
-        !   !Kishore: if iTij==0, we will end up doing an out of bounds access. Ideally, the quantities below would be pencils, but I am just doing a quick fix for now.
-        !   call sum_mn_name(f(l1:l2,m,n,iTij+0),idiag_Txxm)
-        !   call sum_mn_name(f(l1:l2,m,n,iTij+1),idiag_Tyym)
-        !   call sum_mn_name(f(l1:l2,m,n,iTij+2),idiag_Tzzm)
-        !   call sum_mn_name(f(l1:l2,m,n,iTij+3),idiag_Txym)
-        !   call sum_mn_name(f(l1:l2,m,n,iTij+4),idiag_Tyzm)
-        !   call sum_mn_name(f(l1:l2,m,n,iTij+5),idiag_Tzxm)
-        ! endif
         call sum_mn_name(p%ekin,idiag_ekin)
         call sum_mn_name(p%ekin,idiag_EEK)
         if (idiag_EEK2/=0) call sum_mn_name(p%ekin**2,idiag_EEK2)
@@ -4915,6 +5039,21 @@ module Hydro
           call dot(p%curlo,uxo,quxo)
           call sum_mn_name(quxo,idiag_quxom)
         endif
+!
+!  For <2*nu*q.sglnrho>, we need qsglnrhom
+!
+        if (idiag_qsglnrhom/=0) then
+          call dot(p%curlo,p%sglnrho,tmp)
+          call sum_mn_name(tmp,idiag_qsglnrhom)
+        endif
+!
+!  <o.(glnr x gdu)>
+!
+        if (idiag_oglnrxgdum/=0) then
+          call cross(p%glnrho,p%graddivu,tmpv)
+          call dot(p%curlo,tmpv,tmp)
+          call sum_mn_name(tmp,idiag_oglnrxgdum)
+        endif
 
         if (idiag_qezxum/=0) then
           call sum_mn_name( -p%curlo(:,1)*p%uu(:,2) + p%curlo(:,2)*p%uu(:,1),idiag_qezxum)
@@ -5076,7 +5215,7 @@ module Hydro
             idiag_Ryzupmz/=0) then
           where (p%uu(:,3) > 0.)
             uus = p%uu(:,3)
-            uzmask = p%uu(:,3)/abs(p%uu(:,3))
+            uzmask = 1.
           elsewhere
             uus=0.
             uzmask = 0.
@@ -5097,12 +5236,12 @@ module Hydro
             idiag_Rxzdownmz/=0 .or. idiag_Ryzdownmz/=0) then
           where (p%uu(:,3) < 0.)
             uus = p%uu(:,3)
-            uzmask = -p%uu(:,3)/abs(p%uu(:,3))
+            uzmask = 1.
           elsewhere
             uus = 0.
             uzmask = 0.
           endwhere
-          if (idiag_ffdownmz/=0) call xysum_mn_name_z(-uus/abs(p%uu(:,3)),idiag_ffdownmz)
+          if (idiag_ffdownmz/=0) call xysum_mn_name_z(uzmask,idiag_ffdownmz)
           call xysum_mn_name_z(uus,idiag_uzdownmz)
           if (idiag_ruzdownmz/=0) call xysum_mn_name_z(p%rho*uus,idiag_ruzdownmz)
           if (idiag_uz2downmz/=0) call xysum_mn_name_z(uus**2,idiag_uz2downmz)
@@ -5420,9 +5559,9 @@ module Hydro
         if (idiag_uxuzmxz/=0) call ysum_mn_name_xz(p%uu(:,1)*p%uu(:,3),idiag_uxuzmxz)
         if (idiag_uyuzmxz/=0) call ysum_mn_name_xz(p%uu(:,2)*p%uu(:,3),idiag_uyuzmxz)
         call ysum_mn_name_xz(p%ou,idiag_oumxz)
-        call ysum_mn_name_xz(p%oo(:,1)**2,idiag_ox2mxz)
-        call ysum_mn_name_xz(p%oo(:,2)**2,idiag_oy2mxz)
-        call ysum_mn_name_xz(p%oo(:,3)**2,idiag_oz2mxz)
+        if (idiag_ox2mxz/=0) call ysum_mn_name_xz(p%oo(:,1)**2,idiag_ox2mxz)
+        if (idiag_oy2mxz/=0) call ysum_mn_name_xz(p%oo(:,2)**2,idiag_oy2mxz)
+        if (idiag_oz2mxz/=0) call ysum_mn_name_xz(p%oo(:,3)**2,idiag_oz2mxz)
 
         call ysum_mn_name_xz(p%oo(:,2),idiag_oymxz)
 !
@@ -5470,7 +5609,7 @@ module Hydro
             idiag_Ryzupmxy/=0) then
           where (p%uu(:,1) > 0.)
             uus = p%uu(:,1)
-            uxmask = p%uu(:,1)/abs(p%uu(:,1))
+            uxmask = 1.
           elsewhere
             uus=0.
             uxmask = 0.
@@ -5491,12 +5630,12 @@ module Hydro
             idiag_Rxzdownmxy/=0 .or. idiag_Ryzdownmxy/=0) then
           where (p%uu(:,1) < 0.)
             uus = p%uu(:,1)
-            uxmask = -p%uu(:,1)/abs(p%uu(:,1))
+            uxmask = 1.
           elsewhere
             uus = 0.
             uxmask = 0.
           endwhere
-          if (idiag_ffdownmxy/=0) call zsum_mn_name_xy(-uus/abs(p%uu(:,1)),idiag_ffdownmxy)
+          if (idiag_ffdownmxy/=0) call zsum_mn_name_xy(uxmask,idiag_ffdownmxy)
           Call zsum_mn_name_xy(uus,idiag_uxdownmxy)
           if (idiag_ruxdownmxy/=0) call zsum_mn_name_xy(p%rho*uus,idiag_ruxdownmxy)
           if (idiag_ux2downmxy/=0) call zsum_mn_name_xy(uus**2,idiag_ux2downmxy)
@@ -5546,8 +5685,13 @@ module Hydro
         if (ivid_o2  /=0) call store_slices(p%o2,o2_xy,o2_xz,o2_yz,o2_xy2,o2_xy3,o2_xy4,o2_xz2,o2_r)
         if (ivid_ou  /=0) call store_slices(p%ou,ou_xy,ou_xz,ou_yz,ou_xy2,ou_xy3,ou_xy4,ou_xz2,ou_r)
         if (ivid_Ma2 /=0) call store_slices(p%Ma2,mach_xy,mach_xz,mach_yz,mach_xy2,mach_xy3,mach_xy4,mach_xz2,mach_r)
+        if (ivid_hless/=0) call store_slices(p%hless,hless_xy,hless_xz,hless_yz,hless_xy2,hless_xy3,hless_xy4,hless_xz2,hless_r)
         if (ivid_uu_sph/=0) call store_slices(p%uu_sph,uu_sph_xy,uu_sph_xz,uu_sph_yz,uu_sph_xy2, &
                                                        uu_sph_xy3,uu_sph_xy4,uu_sph_xz2,uu_sph_r)
+        if (ivid_Ft  /=0) call store_slices(p%ext_force(:,1),Ft_xy,Ft_xz,Ft_yz,Ft_xy2,Ft_xy3,Ft_xy4,Ft_xz2,Ft_r)
+        if (ivid_Fx  /=0) call store_slices(p%ext_force(:,2),Fx_xy,Fx_xz,Fx_yz,Fx_xy2,Fx_xy3,Fx_xy4,Fx_xz2,Fx_r)
+        if (ivid_Fy  /=0) call store_slices(p%ext_force(:,3),Fy_xy,Fy_xz,Fy_yz,Fy_xy2,Fy_xy3,Fy_xy4,Fy_xz2,Fy_r)
+        if (ivid_Fz  /=0) call store_slices(p%ext_force(:,4),Fz_xy,Fz_xz,Fz_yz,Fz_xy2,Fz_xy3,Fz_xy4,Fz_xz2,Fz_r)
       endif
 
       if (lSGS_hydro) call calc_diagnostics_SGS_hydro(p)
@@ -5669,7 +5813,6 @@ module Hydro
       use EquationOfState, only: cs20
       real, contiguous, dimension(:,:,:,:) :: f
       intent(inout) :: f
-      real :: cs201=1., cs2011
       real, dimension (mx) :: delx
       real, dimension (mx) :: rho, rho1, press, rho_gam21, rho_gam20, lorentz_gamma2=1.
       real, dimension (mx) :: ss2, hydro_energy, hydro_energy1, rat, rat0, vA2_pseudo
@@ -5677,8 +5820,6 @@ module Hydro
       integer ::  iter_relB,j,jhless
       real, dimension (mx,3) :: ss
 
-      if (lrelativistic_eos) cs201=1.+cs20
-      cs2011=1./cs201
       if (iTij==0) call fatal_error("hydro_after_boundary","must compute Tij for lconservative")
 
       do n=1,mz
@@ -5769,7 +5910,7 @@ module Hydro
           rho=hydro_energy/(cs201*lorentz_gamma2-cs20)
           rho_gam21=1./(cs201*rho*lorentz_gamma2+B_ext2)
         else
-          if(.not. lrelativistic) then
+          if (.not. lrelativistic) then
             rho=f(:,m,n,irho)
             rho_gam21=1./rho
           else
@@ -5821,13 +5962,10 @@ module Hydro
         enddo
 !
 !  off-diagonal terms:
-!  "Tij4" = T12
-!  "Tij5" = T23
-!  "Tij6" = T31
 !
-        f(:,m,n,iTij+3+0)=rho_gam21*f(:,m,n,iuu+0)*f(:,m,n,iuu+1)
-        f(:,m,n,iTij+3+1)=rho_gam21*f(:,m,n,iuu+1)*f(:,m,n,iuu+2)
-        f(:,m,n,iTij+3+2)=rho_gam21*f(:,m,n,iuu+2)*f(:,m,n,iuu+0)
+        f(:,m,n,iT12)=rho_gam21*f(:,m,n,iux)*f(:,m,n,iuy)
+        f(:,m,n,iT23)=rho_gam21*f(:,m,n,iuy)*f(:,m,n,iuz)
+        f(:,m,n,iT31)=rho_gam21*f(:,m,n,iuz)*f(:,m,n,iux)
 !
 !  compute velocity, if as comaux
 !
@@ -6212,7 +6350,6 @@ module Hydro
           c2=2*Omega
           df(l1:l2,m,n,velind  )=df(l1:l2,m,n,velind  )+c2*uu(:,2)
           df(l1:l2,m,n,velind+1)=df(l1:l2,m,n,velind+1)-c2*uu(:,1)
-!
         endif
 !
 !  Add centrifugal force (doing this with periodic boundary
@@ -6547,6 +6684,7 @@ module Hydro
     subroutine update_fade_fact
 
       use GPU, only: update_on_gpu
+
       real, save :: last_t = -1.0
       real, save :: fade_fact_old = -1.0
       integer, save :: fade_fact_index_on_gpu = -1
@@ -6614,9 +6752,8 @@ module Hydro
         endif
       endif
 
-      if (lgpu .and. fade_fact_old /= fade_fact) then
+      if (lgpu .and. fade_fact_old /= fade_fact) &
         call update_on_gpu(fade_fact_index_on_gpu,'AC_fade_fact__mod__hydro',fade_fact)
-      endif
 
       fade_fact_old = fade_fact
 
@@ -6642,13 +6779,15 @@ module Hydro
 !  Damping coefficient is dampu (if >0) or |dampu|/dt (if dampu <0).
 !  With ldamp_fade=T, damping coefficient is smoothly fading out
 !
-        if ((dampu /= 0.) .and. (t < tdamp)) then
-          if (dampu > 0.0) then
-            ! absolute damping per time unit
-            df(l1:l2,m,n,iux:iuz) = df(l1:l2,m,n,iux:iuz) - fade_fact*dampu*f(l1:l2,m,n,iux:iuz)
-          else
-            ! dampu < 0: damping per time-step (dt is multiplied in timestep)
-            df(l1:l2,m,n,iux:iuz) = df(l1:l2,m,n,iux:iuz) + fade_fact*dampu/dt*f(l1:l2,m,n,iux:iuz)
+        if (dampu /= 0.0) then
+          if (t < tdamp) then
+            if (dampu > 0.0) then
+              ! absolute damping per time unit
+              df(l1:l2,m,n,iux:iuz) = df(l1:l2,m,n,iux:iuz) - fade_fact*dampu*f(l1:l2,m,n,iux:iuz)
+            else
+              ! dampu < 0: damping per time-step (dt is multiplied in timestep)
+              df(l1:l2,m,n,iux:iuz) = df(l1:l2,m,n,iux:iuz) + fade_fact*dampu/dt*f(l1:l2,m,n,iux:iuz)
+            endif
           endif
         endif
 !
@@ -6712,13 +6851,15 @@ module Hydro
 !
     endsubroutine udamping
 !***********************************************************************
-    subroutine read_hydro_init_pars(iostat)
+    subroutine read_hydro_init_pars(iomsg)
 !
       use File_io, only: parallel_unit
 !
-      integer, intent(out) :: iostat
+      character(LEN=*), intent(out) :: iomsg
+      integer :: iostat
 !
-      read(parallel_unit, NML=hydro_init_pars, IOSTAT=iostat)
+      read(parallel_unit, NML=hydro_init_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
 !
     endsubroutine read_hydro_init_pars
 !***********************************************************************
@@ -6730,15 +6871,17 @@ module Hydro
 !
     endsubroutine write_hydro_init_pars
 !***********************************************************************
-    subroutine read_hydro_run_pars(iostat)
+    subroutine read_hydro_run_pars(iomsg)
 !
       use File_io, only: parallel_unit
 !
-      integer, intent(out) :: iostat
+      character(LEN=*), intent(out) :: iomsg
+      integer :: iostat
 !
-      read(parallel_unit, NML=hydro_run_pars, IOSTAT=iostat)
+      read(parallel_unit, NML=hydro_run_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
 !
-      if (lSGS_hydro) call read_SGS_hydro_run_pars(iostat)      
+      if (lSGS_hydro) call read_SGS_hydro_run_pars(iomsg)      
 !
     endsubroutine read_hydro_run_pars
 !***********************************************************************
@@ -7134,6 +7277,8 @@ module Hydro
         idiag_qmax=0
         idiag_qom=0
         idiag_quxom=0
+        idiag_qsglnrhom=0
+        idiag_oglnrxgdum=0
         idiag_qezxum=0
         idiag_quysm=0
         idiag_jxbrqm=0
@@ -7233,9 +7378,11 @@ module Hydro
         idiag_udpxym=0;idiag_udpyzm=0;idiag_udpxzm=0
         idiag_taufmin=0
         idiag_dtF=0
+        idiag_coriolis_number=0
         idiag_nshift=0
         idiag_frict=0; idiag_pradrc2=0
         ivid_oo=0; ivid_o2=0; ivid_ou=0; ivid_divu=0; ivid_u2=0; ivid_Ma2=0; ivid_uu_sph=0
+        ivid_Ft=0; ivid_Fx=0; ivid_Fy=0; ivid_Fz=0; ivid_hless=0;
         idiag_ruxph1mz=0
         idiag_ruxph2mz=0
         idiag_ruxph3mz=0
@@ -7418,6 +7565,8 @@ module Hydro
         call parse_name(iname,cname(iname),cform(iname),'qmax',idiag_qmax)
         call parse_name(iname,cname(iname),cform(iname),'qom',idiag_qom)
         call parse_name(iname,cname(iname),cform(iname),'quxom',idiag_quxom)
+        call parse_name(iname,cname(iname),cform(iname),'qsglnrhom',idiag_qsglnrhom)
+        call parse_name(iname,cname(iname),cform(iname),'oglnrxgdum',idiag_oglnrxgdum)
         call parse_name(iname,cname(iname),cform(iname),'qezxum',idiag_qezxum)
         call parse_name(iname,cname(iname),cform(iname),'quysm',idiag_quysm)
         call parse_name(iname,cname(iname),cform(iname),'jxbrqm',idiag_jxbrqm)
@@ -7503,6 +7652,7 @@ module Hydro
         call parse_name(iname,cname(iname),cform(iname),'udpxzm',idiag_udpxzm)
         call parse_name(iname,cname(iname),cform(iname),'taufmin',idiag_taufmin)
         call parse_name(iname,cname(iname),cform(iname),'dtF',idiag_dtF)
+        call parse_name(iname,cname(iname),cform(iname),'Com',idiag_coriolis_number)
         call parse_name(iname,cname(iname),cform(iname),'nshift',idiag_nshift)
         call parse_name(iname,cname(iname),cform(iname),'uduum',idiag_uduum)
         call parse_name(iname,cname(iname),cform(iname),'frict',idiag_frict)
@@ -7891,7 +8041,12 @@ module Hydro
         call parse_name(inamev,cnamev(inamev),cformv(inamev),'divu',ivid_divu)
         call parse_name(inamev,cnamev(inamev),cformv(inamev),'u2',  ivid_u2)
         call parse_name(inamev,cnamev(inamev),cformv(inamev),'Ma2', ivid_Ma2)
+        call parse_name(inamev,cnamev(inamev),cformv(inamev),'hless', ivid_hless)
         call parse_name(inamev,cnamev(inamev),cformv(inamev),'uu_sph',ivid_uu_sph)
+        call parse_name(inamev,cnamev(inamev),cformv(inamev),'Ft',ivid_Ft)
+        call parse_name(inamev,cnamev(inamev),cformv(inamev),'Fx',ivid_Fx)
+        call parse_name(inamev,cnamev(inamev),cformv(inamev),'Fy',ivid_Fy)
+        call parse_name(inamev,cnamev(inamev),cformv(inamev),'Fz',ivid_Fz)
       enddo
 !
 !  write column where which hydro variable is stored
@@ -7954,6 +8109,21 @@ module Hydro
 !
         case ('Ma2')
           call assign_slices_scal(slices,mach_xy,mach_xz,mach_yz,mach_xy2,mach_xy3,mach_xy4,mach_xz2,mach_r)
+
+        case ('hless')
+          call assign_slices_scal(slices,hless_xy,hless_xz,hless_yz,hless_xy2,hless_xy3,hless_xy4,hless_xz2,hless_r)
+         
+        case ('Ft')
+          call assign_slices_scal(slices,Ft_xy,Ft_xz,Ft_yz,Ft_xy2,Ft_xy3,Ft_xy4,Ft_xz2,Ft_r)
+
+        case ('Fx')
+          call assign_slices_scal(slices,Fx_xy,Fx_xz,Fx_yz,Fx_xy2,Fx_xy3,Fx_xy4,Fx_xz2,Fx_r)
+
+        case ('Fy')
+          call assign_slices_scal(slices,Fy_xy,Fy_xz,Fy_yz,Fy_xy2,Fy_xy3,Fy_xy4,Fy_xz2,Fy_r)
+
+        case ('Fz')
+          call assign_slices_scal(slices,Fz_xy,Fz_xz,Fz_yz,Fz_xy2,Fz_xy3,Fz_xy4,Fz_xz2,Fz_r)
 !
 !  Velocity in spherical coordinates
 !
@@ -9015,6 +9185,10 @@ module Hydro
         where (f(l1:l2,m,n,iuy)<-velocity_ceiling) f(l1:l2,m,n,iuy)=-velocity_ceiling
         where (f(l1:l2,m,n,iuz)<-velocity_ceiling) f(l1:l2,m,n,iuz)=-velocity_ceiling
       endif
+
+      if (velocity_floor/=impossible) then
+        f(l1:l2,m,n,iux:iuz) = max(f(l1:l2,m,n,iux:iuz),velocity_floor)
+      endif
 !
     endsubroutine impose_velocity_ceiling
 !***********************************************************************
@@ -9160,6 +9334,12 @@ module Hydro
 !
     endsubroutine calc_gradu
 !***********************************************************************
+    subroutine hydro_save_diagnostic_controls
+    endsubroutine hydro_save_diagnostic_controls
+!***********************************************************************
+    subroutine hydro_restore_diagnostic_controls
+    endsubroutine hydro_restore_diagnostic_controls
+!***********************************************************************
     subroutine pushpars2c(p_par)
 
     use Syscalls, only: copy_addr
@@ -9270,7 +9450,7 @@ module Hydro
     call copy_addr(prof_amp4,p_par(100)) ! (my)
     call copy_addr(uumz_prof,p_par(101)) ! (nz) (3)
     call copy_addr(omega_prof,p_par(102)) ! (nx) (ny)
-    call copy_addr(Omegav,p_par(103)) ! (3)
+    call copy_addr(Omegav,p_par(103)) ! (3) dconst
 
     call string_to_enum(enum_friction_tdep,friction_tdep)
     call copy_addr(enum_friction_tdep,p_par(104)) ! int
@@ -9292,7 +9472,6 @@ module Hydro
     if (allocated(zhless)) call copy_addr(zhless,p_par(119)) ! (nhless__mod__hydro)
     call copy_addr(width_hless,p_par(120))
     call copy_addr(width_hless_absolute,p_par(121))
-    call copy_addr(lcorrect_penc_u,p_par(122)) ! bool
     call copy_addr(lcalc_uuavg,p_par(123)) ! bool
     call copy_addr(lremove_mean_angmom,p_par(124)) ! bool
     call copy_addr(luij_as_aux,p_par(125)) ! bool
@@ -9300,11 +9479,32 @@ module Hydro
     call copy_addr(luij_test,p_par(127)) ! bool
     call copy_addr(iforcing_cont_uu,p_par(128)) ! int
     call copy_addr(lconservative_pressure_on_rhs,p_par(129)) ! bool
+    call copy_addr(iuu_sphr,p_par(130)) ! int
+    call copy_addr(iuu_spht,p_par(131)) ! int
+    call copy_addr(iuu_sphp,p_par(132)) ! int
     call keep_compiler_quiet(look_as_aux)
     call keep_compiler_quiet(luuk_as_aux)
     call keep_compiler_quiet(u_out_kep)
     call keep_compiler_quiet(x2_ff_uu)
 
+    call copy_addr(idiag_coriolis_number,p_par(133)) ! int
+    call copy_addr(lforcing_cont_uu_diff,p_par(134)) ! bool
+    call copy_addr(lext_force,p_par(135)) ! bool
+    call copy_addr(cs201,p_par(136))
+    call copy_addr(cs20_corr,p_par(137))
+    call copy_addr(cs2011,p_par(138))
+
+    call copy_addr(velocity_floor,p_par(139))
+
+    call copy_addr(it11,p_par(140)) ! int
+    call copy_addr(it12,p_par(141)) ! int
+    call copy_addr(it13,p_par(142)) ! int
+    call copy_addr(it21,p_par(143)) ! int
+    call copy_addr(it22,p_par(144)) ! int
+    call copy_addr(it23,p_par(145)) ! int
+    call copy_addr(it31,p_par(146)) ! int
+    call copy_addr(it32,p_par(147)) ! int
+    call copy_addr(it33,p_par(148)) ! int
     endsubroutine pushpars2c
 !***********************************************************************
 endmodule Hydro

@@ -119,6 +119,8 @@ class Power(object):
                 self._read_power_1d(power_name, file_name, datadir)
             elif file_name == "power_krms.dat":
                 self._read_power_krms(power_name, file_name, datadir)
+            elif "cyl_power" in file_name:
+                self._read_power_cyl(power_name, file_name, datadir)
             else:
                 self._read_power(power_name, file_name, datadir)
 
@@ -456,6 +458,34 @@ class Power(object):
         self.t = time.astype(np.float32)
         setattr(self, power_name, power_array)
 
+    def _read_power_cyl(self, power_name, file_name, datadir):
+        """
+        Handles output of power subroutine when lcylindrical_spectra=T
+        """
+        nk = self._get_nk_xyz(datadir)
+        dim = read.dim(datadir=datadir)
+        block_size = np.ceil(nk*dim.nzgrid/8) + 1
+
+        time = []
+        power_array = []
+        with open(os.path.join(datadir, file_name), "r") as f:
+            for line_idx, line in enumerate(f):
+                if line_idx % block_size == 0:
+                    time.append(float(line.strip()))
+                else:
+                    for value_string in line.strip().split():
+                        power_array.append(ffloat(value_string))
+
+        # Reformat into arrays.
+        time = np.array(time)
+        power_array = (
+            np.array(power_array)
+            .reshape([len(time), dim.nzgrid, nk])
+            .astype(np.float32)
+        )
+        self.t = time.astype(np.float32)
+        setattr(self, power_name, power_array)
+
     @functools.lru_cache(maxsize=128)
     def _get_nk_xyz(self, datadir):
         """
@@ -517,23 +547,29 @@ class Power(object):
 
         for file_name in file_list_in:
             fileext = file_name.split('.')[-1]
-            if file_name[:5] == "power" and fileext in ["dat", "h5"]:
-                """
-                Examples for power_name:
-                powero.dat -> o
-                powero.u_xy.dat -> ou_xy
-                power_krms.dat -> krms
-                powerux_xy.dat -> ux_xy
-                """
-                fname_no_ext = file_name.removesuffix(f".{fileext}")
-                power_name = fname_no_ext.replace(".", "") #dots not allowed in attribute names
-                power_name = power_name.removeprefix("power").removeprefix("_")
+            for prefix, keysuffix in [
+                ("power", ""),
+                ("cyl_power", "_cyl"),
+                ]:
+                if file_name.startswith(prefix) and fileext in ["dat", "h5"]:
+                    """
+                    Examples for power_name:
+                    powero.dat -> o
+                    powero.u_xy.dat -> ou_xy
+                    power_krms.dat -> krms
+                    powerux_xy.dat -> ux_xy
+                    cyl_power_kin.dat -> kin_cyl
+                    """
+                    fname_no_ext = file_name.removesuffix(f".{fileext}")
+                    power_name = fname_no_ext.replace(".", "") #dots not allowed in attribute names
+                    power_name = power_name.removeprefix(prefix).removeprefix("_")
+                    power_name += keysuffix
 
-                if not quiet:
-                    print("appending", power_name)
+                    if not quiet:
+                        print("appending", power_name)
 
-                power_list.append(power_name)
-                file_list.append(file_name)
+                    power_list.append(power_name)
+                    file_list.append(file_name)
 
         return power_list, file_list
 

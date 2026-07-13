@@ -75,7 +75,7 @@ module Sub
   public :: mult_matrix, mult_mat_vv, invmat_DB
 !
   public :: read_line_from_file, control_file_exists
-  public :: noform
+  public :: noform, len_fmtd_expr
 !
   public :: update_snaptime, read_snaptime
   public :: shift_dt, set_dt
@@ -120,6 +120,10 @@ module Sub
   public :: find_index_by_bisection
   public :: calc_scl_factor
   public :: get_dxyzs
+  public :: get_random_vec
+  public :: sample_poisson_waiting_time
+  public :: solve3x3
+
 !
   interface poly                ! Overload the `poly' function
     module procedure poly_0
@@ -590,20 +594,16 @@ module Sub
 !***********************************************************************
     subroutine dot_mn(a,b,c,ladd)
 !
-!  Dot product, c=a.b, on pencil arrays
+!  Dot product, c=a.b, on pencil arrays.
 !
 !   3-apr-01/axel+gitta: coded
 !  24-jun-08/MR: ladd added for incremental work
 !
       use General, only: loptest
 !
-      real, dimension (:,:) :: a,b
-      real, dimension (:) :: c
-!
-      logical, optional :: ladd
-!
-      intent(in) :: a,b,ladd
-      intent(inout) :: c
+      real, dimension (:,:), intent(IN) :: a,b
+      real, dimension (:), intent(INOUT) :: c
+      logical, optional, intent(IN) :: ladd
 !
       integer :: i
       logical :: l0
@@ -1751,27 +1751,84 @@ module Sub
 !
     endsubroutine div
 !***********************************************************************
-    subroutine div_tensor(f,divergence,itensor)
+    subroutine div_tensor(f,divergence,itensor,lyz_first)
       !Calculates the divergence of a symmetric tensor
       !Assumes the tensor is symmetric and that indices are in the following increasing order:
-      !itensor=xx,yy,zz,xy,xz,yz
+      !itensor=xx,yy,zz,xy,xz,yz or optionally xx,yy,zz,xy,yz,xz
+
+      use Deriv, only: der
+      use General, only: loptest
 
       real, contiguous, dimension(:,:,:,:), intent(in) :: f
       real, dimension(nx,3), intent(out) :: divergence
       integer, intent(in) :: itensor
-      integer :: itensor_xx,itensor_yy,itensor_zz
-      integer :: itensor_xy,itensor_xz,itensor_yz
+      logical, intent(in), optional :: lyz_first
+      integer :: i11,i22,i33
+      integer :: i12,i13,i23
+      real, dimension(nx) :: d11_1, d12_2, d13_3
+      real, dimension(nx) :: d12_1, d22_2, d23_3
+      real, dimension(nx) :: d13_1, d23_2, d33_3
+      real, dimension(nx) :: f11,f12,f13,f22,f23,f33
 
-      itensor_xx = itensor
-      itensor_yy = itensor+1
-      itensor_zz = itensor+2
-      itensor_xy = itensor+3
-      itensor_xz = itensor+4
-      itensor_yz = itensor+5
+      i11 = itensor
+      i22 = itensor+1
+      i33 = itensor+2
+      i12 = itensor+3
 
-      call div(f,0,divergence(:,1),inds=(/itensor_xx,itensor_xy,itensor_xz/))
-      call div(f,0,divergence(:,2),inds=(/itensor_xy,itensor_yy,itensor_yz/))
-      call div(f,0,divergence(:,3),inds=(/itensor_xz,itensor_yz,itensor_zz/))
+      if(loptest(lyz_first)) then
+        i23 = itensor+4
+        i13 = itensor+5
+      else
+        i13 = itensor+4
+        i23 = itensor+5
+      endif
+
+      call der(f,i11,d11_1,1)
+      call der(f,i12,d12_2,2)
+      call der(f,i13,d13_3,3)
+
+      call der(f,i12,d12_1,1)
+      call der(f,i22,d22_2,2)
+      call der(f,i23,d23_3,3)
+
+      call der(f,i13,d13_1,1)
+      call der(f,i23,d23_2,2)
+      call der(f,i33,d33_3,3)
+
+
+      divergence(:,1) = d11_1 + d12_2 + d13_3
+      divergence(:,2) = d12_1 + d22_2 + d23_3
+      divergence(:,3) = d13_1 + d23_2 + d33_3
+
+
+      if (lspherical_coords) then
+        f11 = f(l1:l2,m,n,i11)
+        f12 = f(l1:l2,m,n,i12)
+        f13 = f(l1:l2,m,n,i13)
+
+        f22 = f(l1:l2,m,n,i22)
+        f23 = f(l1:l2,m,n,i23)
+        f33 = f(l1:l2,m,n,i33)
+
+        divergence(:,1)=divergence(:,1) &
+             +r1_mn*(2.0*f11-f22-f33) &
+             +r1_mn*cotth(m)*f12
+        
+        divergence(:,2)=divergence(:,2) +&
+                3*r1_mn*f12 + cotth(m)*r1_mn*(f22-f33)
+      
+        divergence(:,3)=divergence(:,3) &
+             +3*r1_mn*f13 &
+             +2.0*r1_mn*cotth(m)*f23
+      endif
+      if (lcylindrical_coords) then
+         divergence(:,1) = divergence(:,1) &
+                 + rcyl_mn1*(f11-f22)
+         divergence(:,2) = divergence(:,2) &
+                 + 2*rcyl_mn1*(f12)
+         divergence(:,3) = divergence(:,2) &
+                 + 1*rcyl_mn1*f13
+      endif
 
     endsubroutine div_tensor
 !***********************************************************************
@@ -3869,7 +3926,7 @@ module Sub
 !
     endsubroutine rdim
 !***********************************************************************
-    subroutine read_snaptime(file,tout,nout,dtout,t_temp)
+    subroutine read_snaptime(file,tout,nout,dtout,t_temp,existed)
 !
 !  Read in output time for next snapshot (or similar) from control file.
 !
@@ -3888,6 +3945,7 @@ module Sub
 !
       integer, parameter :: lun = 31
       logical :: exist, exist1
+      logical, optional, intent(OUT) :: existed
       integer, parameter :: nbcast_array=2
       real, dimension(nbcast_array) :: bcast_array
       real(KIND=rkind8) :: t0
@@ -3956,6 +4014,11 @@ module Sub
           close(lun)
         endif
 !
+!  For correctly initializing tinit, we need to know in the calling routine
+!  whether the file existed. If it did, tinit would not be touched.
+!
+        if (present(existed)) existed=exist
+!
 !  Broadcast tout and nout in one go.
 !
         bcast_array(1) = tout
@@ -3997,10 +4060,12 @@ module Sub
       integer, parameter :: lun = 31
       integer ::  ntsnap=0, jtsnap=0
       logical :: lwrite, litsnap = .false.
-      real :: t_sp   ! t in single precision for backwards compatibility
+      real :: t_sp   ! t in single precision (=sp) for backwards compatibility
       logical, save :: lfirstcall=.true.
       real, save :: deltat_threshold
       real, dimension(:), allocatable :: tsnap_list
+!
+!  Never do output if the time is NaN.
 !
       if (notanumber(real (t))) then
         lout=.false.
@@ -4012,6 +4077,7 @@ module Sub
       t_sp=real(t)
 !
 !  Check if no writing tout is requested.
+!  If nowrite=T (which is F by default) is set in src/param_io.f90, then lwrite=F.
 !
       lwrite = .true.
       if (present(nowrite)) lwrite = .not. nowrite
@@ -4055,6 +4121,9 @@ module Sub
         endif
       endif
 !
+!  Consider output when t_sp >= tout. Note that these may not
+!  be code time, if t_trigger is not the code_time.
+!
       if ((t_sp >= tout) .or. &
 !      if (lout.or.t_sp    >= tout             .or. &
           (abs(t_sp-tout) <  deltat_threshold) .or. &
@@ -4078,13 +4147,11 @@ module Sub
 !  When toutoff=1., the output times would be 1.1, 1.2, 1.5, etc.
 !
           if (dtout<0.0) then
-            !tout=toutoff+(tout-toutoff)*10.**onethird
             tout=real(toutoff+(tout-toutoff)*10.**onesixth)
           elseif (itsnap/=impossible_int) then
             tout=huge_real
           else
             tout=tout+abs(dtout)
-!           if (.not.lout) tout=tout+abs(dtout)
           endif
         endif
 !
@@ -4150,7 +4217,9 @@ module Sub
     endsubroutine set_next_dt
 !***********************************************************************
     subroutine set_dt(dt1_)
-
+!
+!  This routine is called from src/equ.f90 and sets the actual time step.
+!
       use Mpicomm, only: mpiallreduce_max, MPI_COMM_PENCIL
 
       real :: dt1_
@@ -4177,7 +4246,7 @@ module Sub
       if (loutput_varn_at_exact_tsnap) call shift_dt(dt)
       ! Timestep growth limiter
       if (ddt > 0.) dt1_last=dt1_local/ddt
-
+!
     endsubroutine set_dt
 !***********************************************************************
     subroutine vecout(lun,file,vv,thresh,nvec)
@@ -4534,12 +4603,15 @@ module Sub
 !
     endsubroutine identify_bcs
 !***********************************************************************
-    function noform(cname,lcomplex)
+    function noform(cname,lcomplex,addlengths,addtexts)
 !
-!  Given a string of the form `name(format)',
+!  Given a string cname of the form `name(format)',
 !  returns the name without format, fills empty space
 !  of correct length (depending on format) with dashes.
-
+!  If additional data (like extrema positions) are associated with the diagnostic requested by cname:
+!  addlength: length of all strings for additional data.
+!  addtext: array with header names for additional data.
+!
 !  For output as legend.dat and first line of time_series.dat.
 !
 !  22-jun-02/axel: coded
@@ -4547,17 +4619,19 @@ module Sub
 !  26-aug-13/MR: unnecessary p descriptors removed from cform
 !
       use Cparam, only: max_col_width
-      use General, only: loptest
+      use General, only: loptest,ioptest
 !
       character (len=*) :: cname
       logical, optional :: lcomplex
-      character (len=max_col_width) :: noform,cform,cnumber,dashes
-      integer :: index_e,index_f,index_g,index_i,index_d,index_r,index1,index2
-      integer :: iform0,iform1,iform2,length,number,number1,number2,io_code
+      integer, dimension(:), optional :: addlengths
+      character(LEN=*), dimension(:), optional :: addtexts
+
+      character (len=max_col_width) :: noform,cform,dashes
+      integer :: iform0,iform1,iform2,length,number,number1,number2,dashlen,lendiff,ii
 !
       intent(in)  :: cname
 !
-!  Fill DASHES with, well, dashes.
+!  Fill dashes with -'s.
 !
       dashes = repeat('-', max_col_width)
 !
@@ -4578,7 +4652,55 @@ module Sub
         length=iform0-1
       endif
 !
-!  Find length of formatted expression, examples: f10.2, e10.3, g12.1 .
+!  length is now length of diagnostic name.
+!
+!  Find length of expression formatted with format cform.
+!
+      number=len_fmtd_expr(cform)
+!
+!  With complex numbers, length is doubled + (, ).
+!
+      if (loptest(lcomplex)) number = 2*number+4
+      number1=max(0,(number-length)/2)
+      number2=max(1,number-length-number1) ! at least one separating dash
+!
+!  Sanity check.
+!
+      if (number1+length+number2 > max_col_width) &
+        call error("noform","Length of diagnostic name and/or width of format > max_col_width. -"// &
+                   " Increase max_col_width or sanitize print.in{,.double}")
+!
+      noform=dashes(:number1)//cname(:length)//dashes(:number2)
+
+      if (present(addlengths)) then
+        if (.not.present(addtexts)) return   ! addlength and addtext need to come together
+        !print*, 'addlengths,textlen,dahslen=',addlengths,textlen,dashlen 
+        do ii=1,size(addtexts)
+          lendiff=addlengths(ii)-len_trim(addtexts(ii))
+          if (lendiff>=0) then
+            dashlen=floor(real(lendiff)/2.)
+          else
+            dashlen=1
+          endif
+          noform=trim(noform)//dashes(1:dashlen)//trim(addtexts(ii))//dashes(1:dashlen)
+        enddo
+      endif
+!
+    endfunction noform
+!***********************************************************************
+    function len_fmtd_expr(cform) result (number)
+!
+!  Find length=number of formatted expression from format cform, examples: f10.2, e10.3, g12.1 .
+!
+!  5-may-26/MR: carved out from noform
+!
+      character(LEN=*) :: cform
+      integer :: number
+
+      character (len=len(cform)) :: cnumber
+      integer :: index_e,index_f,index_g,index_i,index_d,index_r,index1,index2
+      integer :: io_code
+
 !  index_1 is the position of the format type (f,e,g), and
 !  index_d is the position of the dot.
 !
@@ -4599,24 +4721,12 @@ module Sub
 !
 !  Error while reading or end of file.
 !
-        print*,'noform: formatting problem'
+        print*,'len_fmtd_expr: formatting problem'
         print*,'problematic cnumber= <',cnumber,'>'
         number=10
       endif
-      if (loptest(lcomplex)) number = 2*number+4
-      number1=max(0,(number-length)/2)
-      number2=max(1,number-length-number1) ! at least one separating dash
-!
-!  Sanity check.
-!
-      if (number1+length+number2 > max_col_width) then
-        call error("noform", &
-                   "Increase max_col_width or sanitize print.in{,.double}")
-      endif
-!
-      noform=dashes(1:number1)//cname(1:length)//dashes(1:number2)
-!
-    endfunction noform
+
+    endfunction len_fmtd_expr
 !***********************************************************************
     function levi_civita(i,j,k)
 !
@@ -7309,6 +7419,7 @@ nameloop: do
         if (vec == 3) then
           call farray_register_auxiliary (trim(name), index, vector=3, communicated=communicated,&
           rhs=rhs,read_from_gpu=read_from_gpu)
+!if (lroot) print*, 'name,index=',name,index 
         elseif (vec == 2) then
           call farray_register_auxiliary (trim(name), index, array=2, communicated=communicated,&
           rhs=rhs,read_from_gpu=read_from_gpu)
@@ -7322,6 +7433,7 @@ nameloop: do
       else
         if (lroot) print *, 'register_report_aux: i'//trim(name)//' =', index
         call farray_index_append ('i'//trim(name), index, vec)
+        !call farray_index_append (name, index, lroot, vec)
       endif
 !
     endsubroutine register_report_aux
@@ -7444,6 +7556,8 @@ nameloop: do
       if (present(mask)) then
         if ( mask>=1 .and. mask <=3 ) msk=mask
       endif
+!
+!  Note that this currently only works for 6th order, not for 10th order.
 !
       call calc_del6_for_upwind(f,k,uu,del6f_upwind,msk)
 !
@@ -7707,7 +7821,9 @@ nameloop: do
       real, dimension(nz) :: rms_loc
       integer :: k
 !
-      forall(k = n1:n2) rms_loc(k-nghost) = sum(f(l1:l2,m1:m2,k,iv:iv+2)**2)
+      do concurrent (k = n1:n2)
+        rms_loc(k-nghost) = sum(f(l1:l2,m1:m2,k,iv:iv+2)**2)
+      enddo
       call mpiallreduce_sum(rms_loc, rms, nz)
       rms = sqrt(rms / nxygrid)
 !
@@ -8783,9 +8899,13 @@ if (notanumber(f(ll,mm,2:mz-2,iff))) print*, 'DIFFZ:k,ll,mm=', k,ll,mm
       real, dimension(nx,3) :: uu
       real, dimension(nx,3,3) :: uij, sij
 
+      integer :: ivel
+
+      ivel = merge(ivv,iuu,ivv/=0)  !  if velocity is in auxiliary ivv (conservative) use ivv
+
 ! uij from f
-      call gij(f,iuu,uij,1)
-      uu=f(l1:l2,m,n,iux:iuz)
+      call gij(f,ivel,uij,1)
+      uu=f(l1:l2,m,n,ivel:ivel+2)
 ! divu -> uij2
       call div_mn(uij,sij2,uu)
 ! sij
@@ -9478,5 +9598,136 @@ if (notanumber(f(ll,mm,2:mz-2,iff))) print*, 'DIFFZ:k,ll,mm=', k,ll,mm
       endif
 
     endsubroutine check_for_nans_globally
-!***********************************************************************    
+!***********************************************************************
+    subroutine get_random_vec(a, ampl)
+!
+!     Get a vector with a random direction and a prescribed magnitude (default 1)
+!
+!     2026-Jun-03/Kishore: coded
+!
+      use General, only: random_number_wrapper
+!
+      real, dimension(3), intent(out) :: a
+      real, intent(in), optional :: ampl
+!
+      real, dimension(2) :: rnd
+      real :: theta, phi
+!
+      call random_number_wrapper(rnd)
+      theta = rnd(1)*pi
+      phi = rnd(2)*2*pi
+!
+      a(1) = sin(theta)*cos(phi)
+      a(2) = sin(theta)*sin(phi)
+      a(3) = cos(theta)
+!
+      if (present(ampl)) a = ampl * a
+!
+    endsubroutine
+!***********************************************************************
+  function sample_poisson_waiting_time(rate) result(interval)
+!
+! Samples how much till the next event following a Poisson process of constant rate.
+! Can be used as a building block to sample non-uniform Poisson processes as well:
+! see special/klein_gordon.f90
+!
+!  30-jun-26/TP: carved from interstellar
+!
+      use General, only:  random_number_wrapper
+
+      real, intent(IN) :: rate
+      real :: interval
+
+      real :: u
+      call random_number_wrapper(u)
+      interval = -log(u)*(1/rate)
+
+  endfunction sample_poisson_waiting_time
+!***********************************************************************
+subroutine solve3x3(A, b, x)
+  implicit none
+
+  real, intent(in)  :: A(3,3)
+  real, intent(in)  :: b(3)
+  real, intent(out) :: x(3)
+
+  real :: M(3,3)
+  real :: rhs(3)
+  real :: factor
+  real :: temp
+  real, parameter :: eps = 1d-14
+  real :: maxval
+  integer :: i, j, k, pivot
+
+  M = A
+  rhs = b
+
+  !--------------------------
+  ! Forward elimination
+  !--------------------------
+  do k = 1,2
+
+     pivot = k
+     maxval = abs(M(k,k))
+
+     do i = k+1,3
+        if (abs(M(i,k)) > maxval) then
+           maxval = abs(M(i,k))
+           pivot = i
+        endif
+     enddo
+
+     if (maxval < eps) then
+        return
+     endif
+
+     if (pivot /= k) then
+
+        do j = 1,3
+           temp = M(k,j)
+           M(k,j) = M(pivot,j)
+           M(pivot,j) = temp
+        enddo
+
+        temp = rhs(k)
+        rhs(k) = rhs(pivot)
+        rhs(pivot) = temp
+
+     endif
+
+     do i = k+1,3
+
+        factor = M(i,k)/M(k,k)
+
+        do j = k,3
+           M(i,j) = M(i,j) - factor*M(k,j)
+        enddo
+
+        rhs(i) = rhs(i) - factor*rhs(k)
+
+     enddo
+
+  enddo
+
+  if (abs(M(3,3)) < eps) then
+     return
+  endif
+
+  !--------------------------
+  ! Back substitution
+  !--------------------------
+
+  x(3) = rhs(3)/M(3,3)
+
+  do i = 2,1,-1
+     x(i) = rhs(i)
+     do j = i+1,3
+        x(i) = x(i) - M(i,j)*x(j)
+     enddo
+     x(i) = x(i)/M(i,i)
+  enddo
+
+end subroutine solve3x3
+!***********************************************************************
+
 endmodule Sub

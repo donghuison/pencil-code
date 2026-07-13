@@ -54,6 +54,7 @@ module Particles
   real :: xp3=0.0, yp3=0.0, zp3=0.0, vpx3=0.0, vpy3=0.0, vpz3=0.0
   real :: Lx0=0.0, Ly0=0.0, Lz0=0.0
   real :: delta_vp0=1.0, tausp1=0.0, rpbeta=0.0
+  real :: cone_half_angle_deg = 0.0
   real :: nu_epicycle=0.0, nu_epicycle2=0.0
   real :: beta_dPdr_dust=0.0, beta_dPdr_dust_scaled=0.0
   real :: tausg_min=0.0, tausg1_max=0.0, epsp_friction_increase=100.0
@@ -235,7 +236,8 @@ module Particles
       thermophoretic_T0, lnostore_uu, ldt_grav_par, ldragforce_radialonly, &
       lsinkpoint, xsinkpoint, ysinkpoint, zsinkpoint, rsinkpoint, &
       lcoriolis_force_par, lcentrifugal_force_par, ldt_adv_par, Lx0, Ly0, &
-      Lz0, lglobalrandom, lswap_radius_and_number, linsert_particles_continuously, &
+      Lz0, cone_half_angle_deg, &
+      lglobalrandom, lswap_radius_and_number, linsert_particles_continuously, &
       lrandom_particle_pencils, lnocalc_np, lnocalc_rhop, &
       np_const, rhop_const, particle_radius, lignore_rhop_swarm, &
       rhopmat, Deltauy_gas_friction, xp1, &
@@ -293,6 +295,7 @@ module Particles
       l_shell, k_shell, lparticlemesh_pqs_assignment, pscalar_sink_rate, &
       lpscalar_sink, lsherwood_const, lnu_draglaw, nu_draglaw,lbubble, &
       rpbeta_species, rpbeta, gab_width, initxxp, initvvp, &
+      cone_half_angle_deg, &
       particles_insert_ramp_time, tstart_insert_particles, birthring_r, &
       birthring_width, lsimple_volume, &
       lgaussian_birthring, tstart_rpbeta, linsert_as_many_as_possible, &
@@ -314,6 +317,7 @@ module Particles
   integer :: idiag_rpm=0, idiag_rp2m=0
   integer :: idiag_vpxm=0, idiag_vpym=0, idiag_vpzm=0   ! DIAG_DOC: $u_{part}$
   integer :: idiag_vpx2m=0, idiag_vpy2m=0, idiag_vpz2m=0 ! DIAG_DOC: $u^2_{part}$
+  integer :: idiag_vpcoalx2m=0, idiag_vpcoaly2m=0, idiag_vpcoalz2m=0 ! DIAG_DOC: $v^2_{coal,part}$ (thermal/coalescence velocity entering the Brownian coagulation kernel)
   integer :: idiag_ekinp=0     ! DIAG_DOC: $E_{kin,part}$
 !  integer :: idiag_vtherm500=0
   integer :: idiag_vpxmax=0, idiag_vpymax=0, idiag_vpzmax=0, idiag_vpmax=0 ! DIAG_DOC: $MAX(u_{part})$
@@ -384,6 +388,16 @@ module Particles
       call append_npvar('ivpx',ivpx)
       call append_npvar('ivpy',ivpy)
       call append_npvar('ivpz',ivpz)
+!
+!  Auxiliary slot for the particle drag (response) time tau_p. Only the Brownian
+!  coagulation kernel (and its vpcoal diagnostics) read this slot.
+!
+      if (lbrownian_forces .and. lparticles_coagulation) call append_npaux('taup',itaup)
+!
+!  Share whether Brownian forces are active, so the coagulation module can
+!  decide whether to apply the thermal-velocity (coalescence) correction.
+!
+      call put_shared_variable('lbrownian_forces', lbrownian_forces, caller='register_particles')
 !
 !  Set indices for particle assignment.
 !
@@ -1051,7 +1065,7 @@ module Particles
       real, dimension(mx,my,mz,mfarray), intent(out) :: f
       real, dimension(mpar_loc,mparray), intent(out) :: fp
       integer, dimension(mpar_loc,3), intent(out) :: ineargrid
-      real, dimension(mpar_loc) :: rr_tmp, az_tmp
+      real, dimension(mpar_loc) :: rr_tmp, az_tmp, OO_tmp
 !
       real, dimension(3) :: uup, Lxyz_par, xyz0_par, xyz1_par
       real :: vpx_sum, vpy_sum, vpz_sum
@@ -2178,6 +2192,13 @@ module Particles
       if (ldiffuse_passive) f(:,:,:,idlncc) = 0.0
       if (ldiffuse_dragf) f(:,:,:,idfx:idfz) = 0.0
 !
+!  Stamp the parcel "birth time".  itage, imshg and imech are registered by
+!  particles_breakup.
+!  
+      if (itage /= 0) fp(1:npar_loc,itage) = t
+      if (imshg /= 0) fp(1:npar_loc,imshg) = 0.0
+      if (imech /= 0) fp(1:npar_loc,imech) = 0.0
+!
     endsubroutine init_particles
 !***********************************************************************
     subroutine insert_lost_particles(f,fp,ineargrid)
@@ -2436,6 +2457,22 @@ module Particles
                 fp(npar_loc_old+1:npar_loc,ivpz) = vpz0
               endif
 !
+            case ('spray-cone')
+!
+              if (cone_half_angle_deg < 0.0 .or. cone_half_angle_deg > 90.0) &
+                  call fatal_error_local('insert_particles', &
+                  'cone_half_angle_deg must lie in [0, 90]')
+              do k = npar_loc_old+1, npar_loc
+                call random_number_wrapper(rr_tmp(k))
+                call random_number_wrapper(az_tmp(k))
+                rr_tmp(k) = rr_tmp(k) * cone_half_angle_deg * (pi/180.0)
+                az_tmp(k) = az_tmp(k) * 2.0*pi
+                OO_tmp(k) = sqrt(vpx0*vpx0 + vpy0*vpy0 + vpz0*vpz0)
+                fp(k,ivpx) = OO_tmp(k) * sin(rr_tmp(k)) * cos(az_tmp(k))
+                fp(k,ivpy) = OO_tmp(k) * sin(rr_tmp(k)) * sin(az_tmp(k))
+                fp(k,ivpz) = sign(OO_tmp(k) * cos(rr_tmp(k)), vpz0)
+              enddo
+!
             case ('zero')
 !              if (lroot) print*, 'insert_particles: Zero particle velocity'
               fp(1:npar_loc,ivpx:ivpz) = 0.0
@@ -2459,6 +2496,13 @@ module Particles
           if (lparticles_radius) call set_particle_radius(f,fp,npar_loc_old+1,npar_loc)
           if (lparticles_number) call set_particle_number(f,fp,npar_loc_old+1,npar_loc)
           if (lbirthring_depletion) fp(npar_loc_old+1:npar_loc,ibrtime) = 0.0
+!
+!  Stamp the parcel "birth time" so the breakup module can compute an age
+!  (t - t_birth) for the Huh-Gosman turbulence-decay laws.
+!
+          if (itage /= 0) fp(npar_loc_old+1:npar_loc,itage) = t
+          if (imshg /= 0) fp(npar_loc_old+1:npar_loc,imshg) = 0.0
+          if (imech /= 0) fp(npar_loc_old+1:npar_loc,imech) = 0.0
 !
 !  Particles are not allowed to be present in non-existing dimensions.
 !  This would give huge problems with interpolation later.
@@ -3542,6 +3586,8 @@ module Particles
       real :: Omega2
       integer :: npar_found
       logical :: lheader, lfirstcall=.true.
+      real, dimension(mpar_loc) :: coalfac
+      integer :: kcoal
 !
 !  Print out header information in first time step.
 !
@@ -3671,6 +3717,29 @@ module Particles
             call sum_par_name(fp(1:npar_loc,ivpy)**2,idiag_vpy2m)
         if (idiag_vpz2m /= 0) &
             call sum_par_name(fp(1:npar_loc,ivpz)**2,idiag_vpz2m)
+!
+!  Mean square of the thermal (coalescence) velocity that enters the Brownian
+!  coagulation kernel, v_th = vp*sqrt(dt/(2*tau_p)), so v_th^2 = vp^2*dt/(2*tau_p).
+!  This is the time-step-independent equipartition velocity (~ k_B T/m_p), as
+!  opposed to the raw random-walk displacement rate stored in ivp[xyz]. The
+!  factor dt/(2*tau_p) is computed per particle.
+!
+        if (itaup>0 .and. (idiag_vpcoalx2m/=0 .or. idiag_vpcoaly2m/=0 .or. &
+            idiag_vpcoalz2m/=0)) then
+          do kcoal=1,npar_loc
+            if (fp(kcoal,itaup)>0.0) then
+              coalfac(kcoal)=0.5*dt/fp(kcoal,itaup)
+            else
+              coalfac(kcoal)=0.0
+            endif
+          enddo
+          if (idiag_vpcoalx2m /= 0) &
+              call sum_par_name(fp(1:npar_loc,ivpx)**2*coalfac(1:npar_loc),idiag_vpcoalx2m)
+          if (idiag_vpcoaly2m /= 0) &
+              call sum_par_name(fp(1:npar_loc,ivpy)**2*coalfac(1:npar_loc),idiag_vpcoaly2m)
+          if (idiag_vpcoalz2m /= 0) &
+              call sum_par_name(fp(1:npar_loc,ivpz)**2*coalfac(1:npar_loc),idiag_vpcoalz2m)
+        endif
         if (idiag_vprms /= 0) &
             call sum_par_name((fp(1:npar_loc,ivpx)**2 &
             +fp(1:npar_loc,ivpy)**2 &
@@ -4406,6 +4475,11 @@ module Particles
                   call calc_brownian_force_Li_Ahmadi(fp,k,ineargrid(k,:),stocunn(k),bforce)
                 else
                   call calc_brownian_force(f,fp,k,ineargrid(k,:),bforce,tausp1_par)
+!
+!  Store the particle drag time tau_p (=1/tausp1) for the Brownian coagulation
+!  kernel. See calc_brownian_force / particles_coagulation_pencils.
+!
+                  if (itaup>0) fp(k,itaup) = 1.0/tausp1_par
                 endif
                 fp(k,ivpx:ivpz) = fp(k,ivpx:ivpz) + bforce/tausp1_par
               endif
@@ -5293,6 +5367,11 @@ module Particles
               call calc_brownian_force_Li_Ahmadi(fp,k,ineargrid(k,:),stocunn(k),bforce)
             else
               call calc_brownian_force(f,fp,k,ineargrid(k,:),bforce,tausp1)
+!
+!  Store the particle drag time tau_p (=1/tausp1) for the Brownian coagulation
+!  kernel. See particles_coagulation_pencils.
+!
+              if (itaup>0) fp(k,itaup) = 1.0/tausp1
             endif
             dfp(k,ivpx:ivpz) = dfp(k,ivpx:ivpz)+bforce
           enddo
@@ -7015,17 +7094,19 @@ endif
 !      
     endsubroutine particles_diffusion
 !***********************************************************************
-    subroutine read_particles_init_pars(iostat)
+    subroutine read_particles_init_pars(iomsg)
 !
       use File_io, only: parallel_unit
 !
-      integer, intent(out) :: iostat
+      character(LEN=*), intent(out) :: iomsg
+      integer :: iostat
 !
-      read (parallel_unit, NML=particles_init_pars, IOSTAT=iostat)
+      read (parallel_unit, NML=particles_init_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
 !
 ! if we are using particles_potential
 !
-      if (lparticles_potential) call read_particles_pot_init_pars(iostat)
+      if (lparticles_potential) call read_particles_pot_init_pars(iomsg)
 !
     endsubroutine read_particles_init_pars
 !***********************************************************************
@@ -7041,17 +7122,19 @@ endif
 !
     endsubroutine write_particles_init_pars
 !***********************************************************************
-    subroutine read_particles_run_pars(iostat)
+    subroutine read_particles_run_pars(iomsg)
 !
       use File_io, only: parallel_unit
 !
-      integer, intent(out) :: iostat
+      character(LEN=*), intent(out) :: iomsg
+      integer :: iostat
 !
-      read (parallel_unit, NML=particles_run_pars, IOSTAT=iostat)
+      read (parallel_unit, NML=particles_run_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
 !
 ! if we are using particles_potential
 !
-      if (lparticles_potential) call read_particles_pot_run_pars(iostat)
+      if (lparticles_potential) call read_particles_pot_run_pars(iomsg)
 !
 !  If we have bubbles, the advective derivative has to be saved in
 !  an auxiliary variable
@@ -7135,6 +7218,9 @@ endif
         idiag_vpx2m = 0
         idiag_vpy2m = 0
         idiag_vpz2m = 0
+        idiag_vpcoalx2m = 0
+        idiag_vpcoaly2m = 0
+        idiag_vpcoalz2m = 0
         idiag_ekinp = 0
         idiag_vpxmax = 0
         idiag_vpymax = 0
@@ -7265,6 +7351,9 @@ endif
         call parse_name(iname,cname(iname),cform(iname),'vpx2m',idiag_vpx2m)
         call parse_name(iname,cname(iname),cform(iname),'vpy2m',idiag_vpy2m)
         call parse_name(iname,cname(iname),cform(iname),'vpz2m',idiag_vpz2m)
+        call parse_name(iname,cname(iname),cform(iname),'vpcoalx2m',idiag_vpcoalx2m)
+        call parse_name(iname,cname(iname),cform(iname),'vpcoaly2m',idiag_vpcoaly2m)
+        call parse_name(iname,cname(iname),cform(iname),'vpcoalz2m',idiag_vpcoalz2m)
         call parse_name(iname,cname(iname),cform(iname),'ekinp',idiag_ekinp)
         call parse_name(iname,cname(iname),cform(iname),'vpxmax',idiag_vpxmax)
         call parse_name(iname,cname(iname),cform(iname),'vpymax',idiag_vpymax)

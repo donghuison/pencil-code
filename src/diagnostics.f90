@@ -115,6 +115,7 @@ module Diagnostics
 
   character (len=intlen) :: ch1davg, ch2davg
   integer :: ixav_max
+  integer, dimension (:), allocatable :: maxranks
 !
 ! Variables for Yin-Yang grid: z-averages.
 !
@@ -141,7 +142,7 @@ module Diagnostics
       real :: intdr_rel, intdtheta_rel, intdphi_rel, intdz_rel, intrdr_sph
       integer :: i
 
-      if(.not.allocated(phiavg_profile)) then
+      if (.not.allocated(phiavg_profile)) then
         allocate(phiavg_profile(nrcyl,nx))
         phiavg_profile = 0.0
       endif
@@ -320,7 +321,7 @@ module Diagnostics
 !  26-aug-13/MR: corrected insertion of imaginary values
 !  12-jan-17/MR: undefined diagnostics suppressed in output
 !
-      use General, only: safe_character_append, compress
+      use General, only: safe_character_append, compress, expand_1Dindex, find_proc_coords
       use Cparam, only: max_col_width
       use IO, only: IO_strategy
       use HDF5_IO, only: output_timeseries
@@ -328,10 +329,11 @@ module Diagnostics
       use Syscalls, only: system_cmd
 !
       character (len=max_diagnostics*max_col_width) :: fform,legend,line
-      integer :: iname, nnamel
-      real, dimension(2*nname) :: buffer
+      integer :: iname,nnamel,ix_loc,iy_loc,iz_loc,rank,ipx_loc,ipy_loc,ipz_loc
+      real, dimension(5*nname) :: buffer
       integer, parameter :: lun=1
       logical, save :: lfirst_call = .true.
+      integer :: itype, iname_loc, inamel
 !
 !  Add general (not module-specific) quantities for diagnostic output. If the
 !  timestep (=dt) is to be written, it is known only after time_step, so the best
@@ -339,13 +341,13 @@ module Diagnostics
 !  point or double precision.
 !
       if (lroot) then
+!
         call save_name(tdiagnos,idiag_t)
         call save_name(dtdiagnos,idiag_dt)
         call save_name(eps_rkf_diagnos,idiag_eps_rkf)
         call save_name(one_real*(itdiagnos-1),idiag_it)
 !
-!  Whenever itype_name=ilabel_max_dt, scale result by dt (for printing Courant
-!  time).
+!  Whenever itype_name=ilabel_max_dt, scale result by dt (for printing Courant time).
 !
         do iname=1,nname
           if (itype_name(iname)==ilabel_max_dt) fname(iname)=dtdiagnos*fname(iname)
@@ -375,23 +377,53 @@ module Diagnostics
         if (ldebug) write(*,*) 'before writing prints'
         buffer(1:nname) = fname(1:nname)
 !
-!  Add accumulated values to current ones if existent.
+!  Add accumulated values in fname_keep to current ones if existent.
 !
         where( fname_keep(1:nname) /= impossible .and. &
-               itype_name(1:nname)<ilabel_complex ) &
+               itype_name(1:nname)<ilabel_ignore .and. itype_name(1:nname)>=0 ) &
            buffer(1:nname) = buffer(1:nname)+fname_keep(1:nname)
 !
-!  Write 'time_series.h5' if output format is HDF5
+!  Write 'time_series.h5' if output format is HDF5.
 !
         if (IO_strategy == "HDF5".and.lwrite_ts_hdf5) call output_timeseries (buffer, fname_keep)
         nnamel=nname
-        call compress(buffer,cform=='',nnamel)
+!
+        call compress(buffer,cform=='' .or. itype_name==ilabel_ignore,nnamel)
 !
 !  Insert imaginary parts behind real ones if quantity is complex.
 !
         do iname=nname,1,-1
           if (itype_name(iname)>=ilabel_complex .and. cform(iname)/='') &
-            call insert(buffer,(/fname_keep(iname)/),iname+1,nnamel)
+            call insert(buffer,(/fname_keep(iname)/),iname+1,nnamel)      !MR: correct after compression?
+        enddo
+!
+!  Expand fname_keep and insert into buffer if entry is a location.
+!
+        inamel=nnamel
+
+        do iname=nname,1,-1
+
+          itype=itype_name(iname)
+          if (itype<0) then
+            iname_loc = itype/ilabel_extr_lim   ! extract the location index
+
+            if (iname_loc>0) then               ! extremum with location
+!
+!  Expand the data item into location indicesn and rank.
+!
+              call expand_1Dindex(fname_keep(iname),ix_loc,iy_loc,iz_loc,rank=rank)
+              call find_proc_coords(rank,ipx_loc,ipy_loc,ipz_loc)    ! proc coordinates from rank
+              if (index(cform(iname_loc),'.0')/=0) then     ! integer-implying format -> global indices in timeseries
+                call insert(buffer,(/real(ix_loc+ipx_loc*nx),real(iy_loc+ipy_loc*ny),real(iz_loc+ipz_loc*nz), &
+                            real(rank)/),inamel+1,nnamel)
+              else                                          ! float-implying format -> coordinates in timeseries
+                call insert(buffer,(/xgrid(ix_loc+ipx_loc*nx),ygrid(iy_loc+ipy_loc*ny),zgrid(iz_loc+ipz_loc*nz), &
+                            real(rank)/),inamel+1,nnamel)
+              endif
+            endif
+          endif
+          if (itype/=ilabel_ignore .and. cform(iname)/='') inamel=inamel-1
+
         enddo
 !
 !  Put output line into a string.
@@ -407,18 +439,18 @@ module Diagnostics
           lfirst_call = .false.
         endif
         write(lun,'(a)') trim(line)
-        !flush(lun)               ! this is a F2003 feature...
+        flush(lun)
         close(lun)
         if (lupdate_cvs) call system_cmd("cvs ci -m 'automatic update' > /dev/null 2>&1")
 !
 !  Write to stdout.
 !
         write(*,'(a)') trim(line)
-        !flush(6)                 ! this is a F2003 feature....
+        flush(6)
 !
-      endif                      ! (lroot)
+        if (ldebug) write(*,*) 'exit prints'
 !
-      if (ldebug) write(*,*) 'exit prints'
+      endif     ! if (lroot)
 !
 !  reset non-accumulating values (marked with zero in fname_keep)
 !
@@ -497,17 +529,20 @@ module Diagnostics
 !  12-jan-17/MR: undefined diagnostics suppressed in format
 !
       use General, only: safe_character_append, itoa
-      use Sub, only: noform
+      use Sub, only: noform, len_fmtd_expr
 !
       character (len=*)          ,intent(OUT) :: fform
       character (len=*), optional,intent(OUT) :: legend
 !
-      character, parameter :: comma=','
-      character(len=40)    :: tform
-      integer              :: iname,index_i,index_d,length
-      logical              :: lcompl
-      real                 :: rlength,dlength
-      integer              :: dlength2
+      character, parameter:: comma=','
+      character(len=256)  :: tform
+      character(len=32)   :: cform_loc,cform_ext
+      integer             :: iname,index_i,index_d,length,iname_loc
+      logical             :: lcompl
+      real                :: rlength,dlength
+      integer             :: dlength2,lenrank,lenloc
+      character(len=4), dimension(4) :: addtexts
+      integer, dimension(4) :: addlengths
 !
 !  Produce the format.
 !
@@ -516,13 +551,52 @@ module Diagnostics
 !
         do iname=1,nname
 !
+          if (itype_name(iname)==ilabel_ignore) cycle
+
           if (cform(iname)/='') then
 
             lcompl=itype_name(iname)>=ilabel_complex
 
             if (lcompl) then
+
               tform = comma//'" ("'//comma//trim(cform(iname))//comma &
-                      //'","'//comma//trim(cform(iname))//comma//'")"'
+                            //'","'//comma//trim(cform(iname))//comma//'")"'
+              if (present(legend)) call safe_character_append(legend,noform(cname(iname),lcomplex=.true.))
+
+            elseif (itype_name(iname)<0 .and. itype_name(iname)/ilabel_extr_lim>0) then ! extrema with location
+
+              iname_loc = itype_name(iname)/ilabel_extr_lim  ! index of location diagnostic
+              cform_loc = cform(iname_loc)
+              if (iname==iname_loc) then
+                cform_ext = 'g11.2'      ! only location was requested, so give extrema a flexible format
+              else   
+                cform_ext = cform(iname)
+              endif
+
+              lenrank=floor(alog10(real(ncpus)))+1     !  number of digits for rank from ncpus
+              lenloc = len_fmtd_expr(trim(cform_loc))  !  length of time-series entry acc. to cform_loc
+              tform = comma//trim(cform_ext)//comma &
+                           //'" ("'//comma//trim(cform_loc)//comma &
+                           //'","'//comma//trim(cform_loc)//comma &
+                           //'","'//comma//trim(cform_loc)//comma &
+                           //'", "'//comma//'f'//trim(itoa(lenrank+1))//'.0,TL1,")"'!  format for rank
+!
+               if (present(legend)) then
+!
+!  Lengths for formatted entries of location, brackets and commas included.
+!
+                 addlengths = (/lenloc+2,lenloc+1,lenloc+1,lenrank+1/)
+!
+!  Additional header texts for location.
+!
+                if (index(cform_loc,'.0')/=0) then         ! a quasi-integer format -> indices
+                  addtexts=(/'ix  ','iy  ','iz  ','rank'/)
+                else                                       ! float format -> coordinates
+                  addtexts=(/'x   ','y   ','z   ','rank'/)
+                endif
+                call safe_character_append(legend,noform(cname(iname),addlengths=addlengths,addtexts=addtexts))
+              endif
+
             else
               if (fname(iname)/=0.) then
 !
@@ -547,11 +621,10 @@ module Diagnostics
                 endif
               endif
               if (cform(iname)/='') tform = comma//trim(cform(iname))
+              if (present(legend)) call safe_character_append(legend,noform(cname(iname)))
 
             endif
             call safe_character_append(fform, trim(tform))
-            if (present(legend)) call safe_character_append(legend, noform(cname(iname),lcompl))
-
           endif
         enddo
         call safe_character_append(fform, ')')
@@ -569,8 +642,15 @@ module Diagnostics
 !
 !  If line contains spurious dots, remove them.
 !
-      ind=index(line,'. ')
-      if (ind >= 1) line(ind:ind)=' '
+      ind=1
+      do while (ind>0)
+        ind=index(line,'. ')
+        if (ind > 0) line(ind:ind)=' '   ! better '', but requires another function
+        ind=index(line,'.)')
+        if (ind > 0) line(ind:ind)=' '
+        ind=index(line,'.,')
+        if (ind > 0) line(ind:ind)=' '
+      enddo
 !
 !  If the line contains unreadable characters, then comment out line.
 !
@@ -772,10 +852,10 @@ module Diagnostics
       real, dimension(nlname), intent(inout):: vname
       logical,optional,        intent(in)   :: lcomplex
 !
-      real, dimension (nlname) :: fmax_tmp, fsum_tmp, fmax, fsum, fweight_tmp
+      real, dimension (nlname) :: fmax, fsum, fweight_tmp
       real :: vol
-      integer :: iname, imax_count, isum_count, nmax_count, nsum_count, itype
-      logical :: lweight_comm, lalways
+      integer :: iname, imax_count, isum_count, itype
+      logical :: lweight_comm,lalways,llocations
       integer, parameter :: lun=1
       character (len=fnlen) :: datadir='data',path=''
       character (len=fnlen) :: fform='(1p30e12.4)'
@@ -789,19 +869,25 @@ module Diagnostics
       lweight_comm=.false.
 
       lalways=.not.loptest(lcomplex)
+      llocations=.false.
 
       do iname=1,nlname
 
         itype = itype_name(iname)
-
+        if (itype==ilabel_ignore) cycle
+!
+!  If called with lcomplex=T, nothing is done unless there are entries with
+!  itype>=ilabel_complex, indicating complex numbers.
+!
         if (lalways.or.itype>=ilabel_complex) then
-          if (itype<0) then
+          if (itype<0) then                        ! max/min
             imax_count=imax_count+1
-            fmax_tmp(imax_count)=vname(iname)
+            fmax(imax_count)=vname(iname)
+            if (itype/ilabel_extr_lim>0) llocations=.true.   ! true if there is at least one "locations" diagnostic
           elseif (itype>0) then
             itype = mod(itype,ilabel_complex)
             isum_count=isum_count+1
-            fsum_tmp(isum_count)=vname(iname)
+            fsum(isum_count)=vname(iname)
             if (itype==ilabel_sum_weighted .or. &
                 itype==ilabel_sum_weighted_sqrt .or. &
                 itype==ilabel_sum_par .or. &
@@ -811,30 +897,42 @@ module Diagnostics
               lweight_comm=.true.
             endif
           endif
+
         endif
       enddo
-      nmax_count=imax_count
-      nsum_count=isum_count
 
-      if (nmax_count==0 .and. nsum_count==0) return
+      if (imax_count==0 .and. isum_count==0) return
 !
 !  Allow for the possibility of writing fsum_tmp/nw for each processor separately.
 !
-      if (lwrite_fsum) then
+      if (lwrite_fsum.and.isum_count>0) then
         call safe_character_assign(path,trim(datadir)//'/proc'//itoa(iproc))
         open (lun,file=trim(path)//'/fsum.dat',status='unknown',position='append')
-        write (lun,fform) t, fsum_tmp/nw
+        write (lun,fform) t, fsum/nw
         close(lun)
       endif
 !
 !  Communicate over all processors.
 !
-      call mpireduce_max(fmax_tmp,fmax,nmax_count)
-      call mpireduce_sum(fsum_tmp,fsum,nsum_count)  !,nonblock=maxreq)        ! wrong for Yin-Yang due to overlap
-      if (lweight_comm) call mpireduce_sum(fweight_tmp,fweight,nsum_count)!   ~
+      if (imax_count>0) then
+        if (llocations) then
+          if (.not.allocated(maxranks)) allocate(maxranks(imax_count))
+          call mpireduce_max(fmax,maxranks,imax_count)   ! Get the maximum values and the ranks where they occur.
+!
+!  Fetch the encoded maximum locations from the ranks where they occur into fname_keep for the slots,
+!  for which locations are requested (mask is (itype_name(1:nlname)/ilabel_extr_lim)>0)
+!
+          call fetch_to_process_masked(fname_keep,nlname,(itype_name(1:nlname)/ilabel_extr_lim)>0,maxranks)
+        else
+          call mpireduce_max(fmax,imax_count)
+        endif
+      endif
+      call mpireduce_sum(fsum,isum_count)  !,nonblock=maxreq)              ! wrong for Yin-Yang due to overlap
+      if (lweight_comm) call mpireduce_sum(fweight_tmp,fweight,isum_count) !   ~
+
       !call mpiwait(maxreq)
 !
-!  The result is present only on the root processor.
+!  The results are present only on the root processor.
 !
       if (lroot) then
 !
@@ -842,15 +940,19 @@ module Diagnostics
 !
         imax_count=0
         isum_count=0
+
         do iname=1,nlname
 !
           itype = itype_name(iname)
+          if (itype==ilabel_ignore) cycle
+          if (itype<0) itype = mod(itype,ilabel_extr_lim)   ! extract base label for extrema
+
           if (lalways.or.itype>=ilabel_complex) then
 
-            if (itype<0) then ! max
+            if (itype<0) then !  extrema
               imax_count=imax_count+1
 !
-              if (itype==ilabel_max)            &
+              if (itype==ilabel_max) &
                   vname(iname)=-offset_min_calc+fmax(imax_count)
 !
               if (itype==ilabel_max_sqrt)       &
@@ -944,7 +1046,7 @@ module Diagnostics
           endif
         enddo
 !
-      endif
+      endif   ! if (lroot)
 !
     endsubroutine diagnostic
 !***********************************************************************
@@ -1009,7 +1111,7 @@ module Diagnostics
 !
               call mpiallreduce_sum_int(ncount,nsum,nz,IXYPLANE)
 !
-              if(itype_name_z(idiag) == ilabel_sum) then
+              if (itype_name_z(idiag) == ilabel_sum) then
 !
 !  Form average by dividing by nsum. Dividing by dA_xy_rel1
 !  necessary as below the average is multiplied by that.
@@ -1695,7 +1797,6 @@ module Diagnostics
 !
 !  21-sep-17/MR: coded
 !
-
       integer :: iname
       logical, optional :: lsqrt, llog10, lint, lsum, lmax, lmin, lsurf, ldt
 
@@ -1877,49 +1978,89 @@ module Diagnostics
 !
     endsubroutine sum_name_int
 !***********************************************************************
-    subroutine max_mn_name(a,iname,lsqrt,l_dt,lneg,lreciprocal,mask)
+    subroutine max_mn_name(a,iname,lsqrt,l_dt,lneg,lreciprocal,mask,iname_loc)
 !
 !  Successively calculate maximum of a, which is supplied at each call.
 !  Start from zero if lfirstpoint=.true.
+!  Optional mask is conveyed to maxval/maxloc.
+!  Optional iname_loc>0 indicates that additionally the location of the maximum is requested.
 !
 !   1-apr-01/axel+wolf: coded
 !   4-may-02/axel: adapted for fname array
 !  23-jun-02/axel: allows for taking square root in the end
 !  29-jun-12/MR: incorporated test for iname/=0
+!  29-apr-26/MR: added optional parameter iname_loc
 !
+      use General, only: ioptest,posindex_to_1Dindex,expand_1Dindex
+
       real, dimension (nx) :: a
       integer :: iname
       logical, optional :: lsqrt,l_dt,lneg,lreciprocal
       logical, dimension (nx), optional :: mask
+      integer, optional :: iname_loc
+!
+      real :: newmax
+      logical :: lchanged
+      integer, dimension(1) :: max_loc
+      integer :: iname_loc_,indloc
 !
       if (iname==0) return
 !
-      if (lfirstpoint) then
-        if(present(mask)) then
-          fname(iname)=maxval(a,mask)
-        else
-          fname(iname)=maxval(a)
-        endif
+      lchanged=.true.
+      if (present(mask)) then
+        newmax=maxval(a,mask)
       else
-        if(present(mask)) then
-          fname(iname)=max(fname(iname),maxval(a,mask))
+        newmax=maxval(a)
+      endif
+      if (lfirstpoint) then
+        fname(iname)=newmax
+      else
+        if (newmax > fname(iname)) then
+          fname(iname)=newmax
         else
-          fname(iname)=max(fname(iname),maxval(a))
+          lchanged=.false.
         endif
+      endif
+
+      iname_loc_=ioptest(iname_loc)
+      if (iname_loc_/=0 .and. lchanged) then
+        if (present(mask)) then
+          max_loc=maxloc(a,mask)
+        else
+          max_loc=maxloc(a)
+        endif
+        fname_keep(iname) = posindex_to_1Dindex(max_loc(1),m-nghost,n-nghost,iproc_world)
       endif
 !
 !  Set corresponding entry in itype_name.
 !
-      if (loptest(lsqrt)) then
-        itype_name(iname)=ilabel_max_sqrt
-      elseif (loptest(l_dt)) then
-        itype_name(iname)=ilabel_max_dt
-      elseif (loptest(lneg)) then
-        itype_name(iname)=ilabel_max_neg
-      elseif (loptest(lreciprocal)) then
-        itype_name(iname)=ilabel_max_reciprocal
-      else
-        itype_name(iname)=ilabel_max
+      if (lfirstpoint) then
+        if (loptest(lsqrt)) then
+          itype_name(iname)=ilabel_max_sqrt
+        elseif (loptest(l_dt)) then
+          itype_name(iname)=ilabel_max_dt
+        elseif (loptest(lneg)) then
+          itype_name(iname)=ilabel_max_neg
+        elseif (loptest(lreciprocal)) then
+          itype_name(iname)=ilabel_max_reciprocal
+        else
+          itype_name(iname)=ilabel_max
+        endif
+!
+!  Encode the index for the location diagnostic in the type
+!
+        if (iname_loc_/=0) then
+          itype_name(iname) = itype_name(iname) + ilabel_extr_lim*iname_loc_
+          if (iname_loc_/=iname) then
+!
+!  If there is a separate extremum slot in fname, the location slot is ignored when finalizing the diagnostic.
+!
+            itype_name(iname_loc_)=ilabel_ignore
+          else       ! if only location was asked for, change the diagnostic name by removing pending "loc".
+            indloc=index(cname(iname),'loc')
+            if (indloc>0) cname(iname)=cname(iname)(1:indloc-1)//cname(iname)(indloc+3:)
+          endif
+        endif
       endif
 !
     endsubroutine max_mn_name
@@ -3270,13 +3411,13 @@ module Diagnostics
 !
       integer :: stat
 !
-      if(.not. allocated(fname)) then
+      if (.not. allocated(fname)) then
          allocate(fname(nnamel),stat=stat)
          if (stat>0) call fatal_error('allocate_fnames','Could not allocate fname')
          if (ldebug) print*, 'allocate_fnames    : allocated memory for '// &
                              'fname   with nname   =', nnamel
       endif
-      if(.not. allocated(fname_keep)) then
+      if (.not. allocated(fname_keep)) then
         allocate(fname_keep(nnamel),stat=stat)
         if (stat>0) call fatal_error('allocate_fnames','Could not allocate fname_keep')
       endif
@@ -3293,22 +3434,22 @@ module Diagnostics
 !
       integer :: stat
       allocate(cname(nnamel),stat=stat)
-      if (ldebug) print*, 'allocate_fnames    : allocated memory for '// &
-                          'cname   with nname   =', nnamel
+      if (ldebug) print*, 'allocate_cnames: allocated memory for '// &
+                          'cname with nname =', nnamel
       if (ldebug) flush(6)
-      if (stat>0) call fatal_error('allocate_fnames','Could not allocate cname')
+      if (stat>0) call fatal_error('allocate_cnames','Could not allocate cname')
       cname=''
 !
       allocate(cform(nnamel),stat=stat)
       if (stat>0) call fatal_error('allocate_fnames','Could not allocate cform')
-      if (ldebug) print*, 'allocate_fnames    : allocated memory for '// &
-                          'cform   with nname   =', nnamel
+      if (ldebug) print*, 'allocate_cnames: allocated memory for '// &
+                          'cform with nname =', nnamel
       cform=''
 !
       allocate(itype_name(nnamel),stat=stat)
-      if (stat>0) call fatal_error('allocate_fnames','Could not allocate itype_name')
-      if (ldebug) print*, 'allocate_fnames    : allocated memory for '// &
-                          'itype_name with nname   =', nnamel
+      if (stat>0) call fatal_error('allocate_cnames','Could not allocate itype_name')
+      if (ldebug) print*, 'allocate_cnames: allocated memory for '// &
+                          'itype_name with nname =', nnamel
       itype_name=ilabel_save
 
     endsubroutine
@@ -4093,6 +4234,7 @@ module Diagnostics
     if (l2davgfirst) t2davgfirst_save=real(t) ! (2-D averages are for THIS time)
     if (lvideo     ) tslice_save=real(t) ! (slices are for THIS time)
     if (lout_sound ) tsound_save=real(t)
+!   NOTE: tspec_save is set in powersnap
     if (ldiagnos) then
       dt_save = dt
       it_save = it
@@ -4141,12 +4283,10 @@ module Diagnostics
     Hp_target   = Hp_target_save
     appa_target = appa_target_save
 
-    if (ldiagnos) then
-      tdiagnos  = real(t_save)
-      dtdiagnos = dt_save
-      itdiagnos = it_save
-      eps_rkf_diagnos = eps_rkf_save
-    endif
+    tdiagnos  = real(t_save)
+    dtdiagnos = dt_save
+    itdiagnos = it_save
+    eps_rkf_diagnos = eps_rkf_save
 
     tspec = real(tspec_save)
     lpencil = lpencil_save

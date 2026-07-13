@@ -64,8 +64,6 @@ module Testfield_general
             lforcing_cont_aatest=.false.
 !
   logical, dimension(7):: lresitest_prof=.false.
-  logical              :: ltestfield_profile_eta_z
-  equivalence (lresitest_prof(inz),ltestfield_profile_eta_z)   ! for compatibility
 !
   real :: etatest=0.,etatest1=0.,       &
           etatest_hyper3=0.,            &
@@ -224,7 +222,7 @@ module Testfield_general
         endif
 !
       else
-        ltestfield_profile_eta_z = .false.
+        lresitest_prof(inz) = .false.
       endif
 !
     endsubroutine initialize_testfield_general
@@ -444,13 +442,15 @@ module Testfield_general
 !
     endsubroutine pencil_interdep_testfield
 !***********************************************************************
-    subroutine read_testfield_init_pars(iostat)
+    subroutine read_testfield_init_pars(iomsg)
 !
       use File_io, only: parallel_unit
 !
-      integer, intent(out) :: iostat
+      character(LEN=iomsglen), intent(out) :: iomsg
+      integer :: iostat
 !
-      read(parallel_unit, NML=testfield_init_pars, IOSTAT=iostat)
+      read(parallel_unit, NML=testfield_init_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
 !
     endsubroutine read_testfield_init_pars
 !***********************************************************************

@@ -2749,7 +2749,6 @@ module Dustdensity
 !
           do l=1,nx
             lgh=l+nghost
-            if (lmdvar) md = f(lgh,m,n,imd)
             do i=1,ndustspec
               do j=i,ndustspec
 !
@@ -3088,13 +3087,15 @@ module Dustdensity
 !
     endsubroutine dust_coagulation
 !***********************************************************************
-    subroutine read_dustdensity_init_pars(iostat)
+    subroutine read_dustdensity_init_pars(iomsg)
 !
       use File_io, only: parallel_unit
 !
-      integer, intent(out) :: iostat
+      character(LEN=*), intent(out) :: iomsg
+      integer :: iostat
 !
-      read(parallel_unit, NML=dustdensity_init_pars, IOSTAT=iostat)
+      read(parallel_unit, NML=dustdensity_init_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
 !
     endsubroutine read_dustdensity_init_pars
 !***********************************************************************
@@ -3106,13 +3107,15 @@ module Dustdensity
 !
     endsubroutine write_dustdensity_init_pars
 !***********************************************************************
-    subroutine read_dustdensity_run_pars(iostat)
+    subroutine read_dustdensity_run_pars(iomsg)
 !
       use File_io, only: parallel_unit
 !
-      integer, intent(out) :: iostat
+      character(LEN=*), intent(out) :: iomsg
+      integer :: iostat
 !
-      read(parallel_unit, NML=dustdensity_run_pars, IOSTAT=iostat)
+      read(parallel_unit, NML=dustdensity_run_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
 !
     endsubroutine read_dustdensity_run_pars
 !***********************************************************************

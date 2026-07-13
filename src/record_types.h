@@ -51,6 +51,8 @@ integer, parameter :: id_record_HYDRO_TSFORCE    = 284
 integer, parameter :: id_record_HYDRO_LOCATION   = 285
 integer, parameter :: id_record_HYDRO_AMPL       = 286
 integer, parameter :: id_record_HYDRO_WAVENUMBER = 287
+integer, parameter :: id_record_HYDRO_QVEC_GB    = 288
+integer, parameter :: id_record_HYDRO_AVEC_GB    = 289
 
 ! Magnetic
 integer, parameter :: id_record_MAGNETIC_PHASE   = 311
@@ -68,3 +70,7 @@ integer, parameter :: id_record_SPECIAL_LNKMIN0  = 340
 
 ! special/gravitational_waves_hTXk.f90
 integer, parameter :: id_record_DT_GW            = 350
+
+! special/backreact_infl.f90
+integer, parameter :: id_record_LHEATING_ALWAYS  = 360
+integer, parameter :: id_record_LSOLVE_FOR_PHI   = 361

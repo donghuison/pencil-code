@@ -19,13 +19,19 @@ sim = pc.sim.get(path="..", quiet=True)
 
 sl = pc.read.slices(
     field = ["bb3"],
-    extension = ["xy"],
     datadir=sim.datadir,
     quiet=True,
     )
 
-with open(f'{__file__[:-3]}.out', 'w') as f:
-    f.write('sl.xy.bb3[1,4:9,13] :')
-    for b in sl.xy.bb3[1,4:9,13]:
-        f.write(f' {b:g}')
+def write(f, qty):
+    f.write(f"{qty} :")
+    for xp in eval(qty):
+        f.write(f' {xp:g}')
     f.write('\n')
+
+with open(f'{__file__[:-3]}.out', 'w') as f:
+    write(f, "sl.xy.bb3[1,4:9,13]")
+    write(f, "sl.position.xy")
+    write(f, "sl.position.xy2")
+    write(f, "sl.position.xz")
+    write(f, "sl.position.yz")

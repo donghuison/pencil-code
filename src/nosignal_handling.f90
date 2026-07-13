@@ -30,11 +30,13 @@ module Signal_handling
 !
     endsubroutine signal_prepare
 !***********************************************************************
-    subroutine read_signal_init_pars(iostat)
+    subroutine read_signal_init_pars(iomsg)
 !
-      integer, intent(out) :: iostat
+      use Cparam, only: iomsglen
+
+      character(LEN=*), intent(out) :: iomsg
 !
-      iostat = 0
+      iomsg=""
 !
     endsubroutine read_signal_init_pars
 !***********************************************************************

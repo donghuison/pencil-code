@@ -419,7 +419,6 @@ contains
     call copy_addr(ldisp_current,p_par(1362)) ! bool
     call copy_addr(hp_target,p_par(1363)) ! real dconst
     call copy_addr(appa_target,p_par(1364)) ! real dconst
-    call copy_addr(lwrite_phiaverages,p_par(1365)) ! bool
     call copy_addr(dx1_scalar,p_par(1366))
     call copy_addr(dy1_scalar,p_par(1367))
     call copy_addr(dz1_scalar,p_par(1368))
@@ -474,6 +473,8 @@ contains
     call copy_addr(ivy,p_par(1418)) ! int
     call copy_addr(ivz,p_par(1419)) ! int
     call copy_addr(tau_aver1,p_par(1420)) 
+    call copy_addr(lbaryons,p_par(1421)) ! bool
+    call copy_addr(density_scale_factor,p_par(1422))
 
   endsubroutine pushpars2c
 !***********************************************************************
