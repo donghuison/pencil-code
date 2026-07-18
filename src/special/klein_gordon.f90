@@ -91,6 +91,7 @@ module Special
   implicit none
 !
   include '../special.h'
+  include '../record_types.h'
 !
 !
 ! Declare index of new variables in f array (if any).
@@ -177,6 +178,12 @@ module Special
   real :: plasma_coupling_coeff=0.0
   logical :: lplasma_coupling=.false.
   integer :: continuation_offset = 0
+  
+! Sovan : Perturbative Reheating
+!
+  real :: w_phi=0.0, G_phi=0.0, lnrho_phi0=0.0, rho_phi=impossible
+!  logical :: lperturbative_reheating=.false., lreheating_vacuum=.false., lreheating_hom=.false.
+
 
 ! Video data
  integer :: ivid_del2phi=0,ivid_Vprime=0,ivid_gphi1=0,ivid_g2phi1=0,ivid_V=0
@@ -207,7 +214,7 @@ module Special
       V0_usr, v_usr, alpha_usr, beta_usr, lphi_normalized_units, bubble_size_factor, &
       bubble_wall_width_factor,number_of_bubbles,bubble_positions, &
       beta,bubble_size,bubble_wall_width,linitialize_seed, &
-      chi_quartic, continuation_offset
+      chi_quartic, continuation_offset, rho_phi, w_phi, G_phi, lnrho_phi0
 !
   namelist /special_run_pars/ &
       initspecial, phi0, dphi0, phimass, sign_phimass2, eps, ascale_ini, &
@@ -218,7 +225,8 @@ module Special
       coupl_phipsi, c_psi, lspeed_of_light_dt,lnucleate_bubbles, bubble_size_factor,&
       max_bubble_nucleation_rate, bubble_wall_width_factor,number_of_bubbles,&
       lgenerate_bubble_times,beta,nucleation_rate_choice,bubble_position_criteria,tf,&
-      bubble_size,bubble_wall_width,plasma_coupling_coeff,lplasma_coupling
+      bubble_size,bubble_wall_width,plasma_coupling_coeff,lplasma_coupling, &
+      rho_phi, w_phi, G_phi, lnrho_phi0
 !
 ! Diagnostic variables (needs to be consistent with reset list below).
 !
@@ -239,6 +247,8 @@ module Special
   integer :: idiag_lnam=0       ! DIAG_DOC: $\left<\ln a\right>$
   integer :: idiag_Vprimem=0    ! DIAG_DOC: $\left<V_{,\phi}\right>$
   integer :: idiag_Vprimepsim=0 ! DIAG_DOC: $\left<V_{,\psi}\right>$
+  integer :: idiag_rho_phi=0   ! DIAG_DOC: $\left<\rho phi\right>$
+  integer :: idiag_a=0    ! DIAG_DOC: $\left<\ascale\right>$ !Sovan
   integer :: idiag_ddotam=0     ! DIAG_DOC: $a''/a$
   integer :: idiag_a2rhopm=0    ! DIAG_DOC: $a^2 (rho+p)$
   integer :: idiag_a2rhom=0     ! DIAG_DOC: $a^2 rho$
@@ -264,6 +274,13 @@ module Special
   real :: a2rhopsim_all_diagnos, a2rhogpsim_all_diagnos
 
   integer :: ia0 = 0, iW0 = 0
+
+  integer :: ivel = 0
+  real :: previous_wall_vel = impossible
+  real :: min_distance = impossible
+  real :: next_wall_vel = 0.
+  real :: wall_gamma = impossible
+  logical :: lwall_friction = .false.
 
   contains
 !****************************************************************************
@@ -306,6 +323,9 @@ module Special
       endif
 !
       if (lflrw) call farray_register_ode('lna',ilna)
+      if (lperturbative_reheating.and.lreheating_hom) then ! Sovan
+        call farray_register_ode('ilnrho_phi',ilnrho_phi)
+      endif
       if (lrho_chi) call farray_register_ode('infl_rho_chi',iinfl_rho_chi)
 !
 !  for power spectra, it is convenient to use ispecialvar and
@@ -326,6 +346,21 @@ module Special
       call put_shared_variable('lphi_hypercharge',lphi_hypercharge)
       call put_shared_variable('lwaterfall',lwaterfall)
       call put_shared_variable('lflrw',lflrw)
+!
+! Sovan
+      if (ldensity.and.lperturbative_reheating) then
+        call put_shared_variable('w_phi',w_phi)
+        call put_shared_variable('G_phi',G_phi)
+        call put_shared_variable('rho_phi',rho_phi)
+        call put_shared_variable('a2',a2)
+        call put_shared_variable('a21',a21)
+      endif
+!
+!      if (ldensity) then
+!        call put_shared_variable('lperturbative_reheating',lperturbative_reheating)
+!        call put_shared_variable('lreheating_hom',lreheating_hom)
+!        call put_shared_variable('lreheating_vacuum',lreheating_vacuum)
+!      endif
 !
     endsubroutine register_special
 !***********************************************************************
@@ -440,8 +475,9 @@ module Special
 !
       use SharedVariables, only: get_shared_variable, put_shared_variable
       use FArrayManager, only: farray_index_by_name_ode, farray_index_by_name
-      use General, only: random_number_wrapper
+      use General, only: random_number_wrapper, itoa
       use Slices_methods, only: alloc_slice_buffers
+      use MpiComm, only: nprocs
 !
       real,  dimension (mx,my,mz,mfarray) :: f
       integer :: iLCDM_lna,i
@@ -541,6 +577,14 @@ module Special
         lallow_bprime_zero=.false.
         mass_chi=0.
       endif
+! Sovan :
+      if (lperturbative_reheating) then
+!        if (lhydro.and.lconservative)
+!        if (lhydro) call fatal_error('initialize_density', & ! added the lhydro flag with lconservative ! Sovan
+!                           'choose lconservative=F to run perturbative reheating')
+        ! give initial condition for ODE when using homogeneous reheating
+        if (ilnrho_phi /= 0) f_ode(ilnrho_phi)=lnrho_phi0
+      endif
 
       ! if iee = 0 then disp_current module is not called
       if (iee /= 0 .and. lphi_hypercharge) then
@@ -586,8 +630,15 @@ module Special
         t_next_bubble = bubble_times(1)
       endif
 
-      if (plasma_coupling_coeff /= 0.0) then
+      if (lhydro .and. plasma_coupling_coeff /= 0.0) then
         lplasma_coupling = .true.
+      else
+        lwall_friction = .true.
+      endif
+
+      if(lwall_friction .and. nprocs > 1)  then
+        call fatal_error("initialize_special: lwall_friction only implemented for single proc but used='", &
+                                 itoa(nprocs))
       endif
 !
       if (.not.lhydro .and. lplasma_coupling) then
@@ -600,6 +651,12 @@ module Special
       else
         allocate(lconservative)
         lconservative=.false.
+      endif
+
+      if(lconservative) then
+        ivel = ivv
+      else
+        ivel = iuu
       endif
 
       if (ivid_del2phi/=0) call alloc_slice_buffers(del2phi_xy,del2phi_xz,del2phi_yz,&
@@ -848,11 +905,32 @@ module Special
         lpenc_requested(i_ext_force) = .true.
       endif
 
-      if(lpenc_requested(i_ext_force)) then
-        lpenc_requested(i_gphi) = .true.
+      if(lwall_friction) then
+        lpenc_requested(i_omega_phi)=.true.
+        lpenc_requested(i_plasma_friction)=.true.
+      endif
+
+!
+      if (ldensity.and.lperturbative_reheating) then ! Sovan
+        lpenc_requested(i_rho)=.true.
+!        lpenc_requested(i_lnrhon)=.true.
       endif
 !
     endsubroutine pencil_criteria_special
+!***********************************************************************
+    subroutine pencil_interdep_special(lpencil_in)
+!
+!  Interdependency among pencils provided by this module are specified here.
+!
+!  18-07-06/tony: coded
+!
+      logical, dimension(npencils), intent(inout) :: lpencil_in
+!
+        if(lpencil_in(i_plasma_friction)) then
+          lpencil_in(i_gphi) = .true.
+        endif
+!
+    endsubroutine pencil_interdep_special
 !***********************************************************************
     subroutine calc_pencils_special(f,p)
 !
@@ -869,21 +947,25 @@ module Special
 !
       intent(in) :: f
       intent(inout) :: p
-      integer ::  i, j
+      integer ::  i, j, l
       real, dimension(nx) :: friction_coeff
       real, dimension(nx) :: u_dot_gphi
       real, parameter :: T=1.
+      real :: distance
 
 ! phi
       if (lpencil(i_phi)) p%phi = f(l1:l2,m,n,iphi)
 ! dphi
       if (lpencil(i_dphi)) p%dphi=f(l1:l2,m,n,idphi)
+
+      if(lwaterfall) then
 ! psi
-      if (lpencil(i_psi)) p%psi = f(l1:l2,m,n,ipsi)
+        if (lpencil(i_psi)) p%psi = f(l1:l2,m,n,ipsi)
 ! dpsi
-      if (lpencil(i_dpsi)) p%dpsi=f(l1:l2,m,n,idpsi)
+        if (lpencil(i_dpsi)) p%dpsi=f(l1:l2,m,n,idpsi)
+      endif
 ! phi_doublet (only computes the 3 remaining components, the first is in p%phi)
-      if (lpencil(i_phi_doublet_mod)) then
+      if (lphi_doublet .and. lpencil(i_phi_doublet_mod)) then
         do i=1,3
           p%phi_doublet(:,i)=f(l1:l2,m,n,iphi+i)
           p%dphi_doublet(:,i)=f(l1:l2,m,n,idphi+i)
@@ -895,8 +977,11 @@ module Special
       endif
 ! gphi
       if (lpencil(i_gphi)) call grad(f,iphi,p%gphi)
+
+      if(lwaterfall) then
 ! gpsi
-      if (lpencil(i_gpsi)) call grad(f,ipsi,p%gpsi)
+        if (lpencil(i_gpsi)) call grad(f,ipsi,p%gpsi)
+      endif
 !
 ! cov_der computation for Higgs doublet with weak and/or hypercharge
 ! covariant derivative is D_mu = partial_mu - i g W_mu^a tau^a/2 - i g' Y B_mu/2
@@ -909,7 +994,7 @@ module Special
           if (.not. lphi_hom) then
             do j=1,3
               call der(f, iphi+i, dfdxs(:, i+1, j), j)
-              p%cov_der(:, j+1, i+1) = dfdxs(:, i, j)
+              p%cov_der(:, j+1, i+1) = dfdxs(:, i+1, j)
             enddo
           endif
         enddo
@@ -1050,23 +1135,37 @@ module Special
           call fatal_error("dspecial_dt: No such Vprime_choice: ", trim(Vprime_choice))
       endselect
 
-      if(lpencil(i_plasma_friction)) then
-        friction_coeff = plasma_coupling_coeff*p%phi**2/T
-        call dot_mn(p%uu,p%gphi,u_dot_gphi)
-        if(lconservative) then
-          if(ivv /= 0) then
-            call u_dot_grad(f,ivv,p%gphi,f(l1:l2,m,n,ivx:ivz),u_dot_gphi,UPWIND=.true.)
-          else
-            call fatal_error("dspecial_dt: ","Need velocity for u_dot_grad")
-          endif
-        else
-          call u_dot_grad(f,iuu,p%uij,p%uu,p%ugu,UPWIND=.true.)
+      if(lwall_friction) then
+        if(lfirst) then
+          previous_wall_vel = next_wall_vel
+          wall_gamma = 1./sqrt(1-previous_wall_vel**2)
+          min_distance = 1e100
         endif
-        p%plasma_friction = friction_coeff*p%lorentz_gamma*(p%dphi + u_dot_gphi)
+        do l=l1,l2
+          distance = abs(0.5-f(l,m,n,iphi))
+          if(distance < min_distance) then
+            min_distance = distance
+            next_wall_vel = -f(l,m,n,idphi)/p%gphi(l-nghost,1)
+          endif
+        enddo
+      endif
+
+      if(lpencil(i_plasma_friction)) then
+        if(lplasma_coupling) then
+          friction_coeff = plasma_coupling_coeff*p%phi**2/T
+          call u_dot_grad(f,ivel,p%gphi,p%uu,u_dot_gphi,UPWIND=.true.)
+          p%plasma_friction = friction_coeff*p%lorentz_gamma*(p%dphi + u_dot_gphi)
+        else if(lwall_friction) then
+          friction_coeff = plasma_coupling_coeff
+          p%plasma_friction = friction_coeff*wall_gamma*(p%dphi + (-previous_wall_vel)*p%gphi(:,1))
+        endif
+      endif
+
+      if(lpencil(i_omega_phi)) then
+        p%omega_phi = -p%Vthermal_prime-p%plasma_friction
       endif
 
       if(lpencil(i_ext_force) .and. lplasma_coupling) then
-        p%omega_phi = -p%Vthermal_prime-p%plasma_friction
         p%ext_force(:,1)   = p%ext_force(:,1) -p%dphi*(p%omega_phi)
         do i=1,3
           p%ext_force(:,i+1) = p%ext_force(:,i+1) + p%gphi(:,i)*p%omega_phi
@@ -1092,6 +1191,8 @@ module Special
         case ('friedmann')
           Hscript=sqrt((8.*pi/3.)*a2rhom_all)
           if (lgpu) call get_a2
+        case ('perturbative_reheating') ! Sovan
+          Hscript=sqrt(a2rhom_all/3.0)
         case default
           call fatal_error("dspecial_dt: No such Hscript_choice: ", trim(Hscript_choice))
       endselect
@@ -1292,7 +1393,7 @@ module Special
               pref_Hubble*Hscript*p%dphi-pref_Vprime*p%Vprime
 !
 !       added coupling with plasma
-        if (lplasma_coupling) then
+        if (lplasma_coupling .or. lwall_friction) then
           df(l1:l2,m,n,idphi)=df(l1:l2,m,n,idphi)+p%omega_phi
         endif
 !
@@ -1373,6 +1474,11 @@ module Special
       call get_Hscript_and_a2(Hscript,a2rhom_all)
       if (lflrw) df_ode(ilna)=df_ode(ilna)+Hscript
 !
+      if (lperturbative_reheating.and.lreheating_hom) then ! Sovan
+        rho_phi=exp(f_ode(ilnrho_phi))
+        df_ode(ilnrho_phi)=df_ode(ilnrho_phi)-ascale*(1 + w_phi)*G_phi!*rho_phi
+      endif
+!
 !  Energy density of the charged particles.
 !  This is currently only done for <sigE>*<E^2>, and not for <sigE*E^2>.
 !
@@ -1415,6 +1521,7 @@ module Special
         if (lflrw) lnascale=f_ode(ilna)
         call save_name(Hscript_diagnos,idiag_Hscriptm)
         call save_name(lnascale,idiag_lnam)
+        call save_name(ascale,idiag_a) ! Sovan
         call save_name(ddotam_all_diagnos,idiag_ddotam)
         call save_name(a2rhopm_all_diagnos,idiag_a2rhopm)
         call save_name(a2rhom_all_diagnos,idiag_a2rhom)
@@ -1422,6 +1529,7 @@ module Special
         call save_name(a2rhogphim_all_diagnos,idiag_a2rhogphim)
         call save_name(a2rhopsim_all_diagnos,idiag_a2rhopsim)
         call save_name(a2rhogpsim_all_diagnos,idiag_a2rhogpsim)
+        call save_name(rho_phi,idiag_rho_phi) ! Sovan
         call save_name(rho_chi,idiag_rho_chi)
         call save_name(sigEm_all_diagnos,idiag_sigEma)
         call save_name(sigBm_all_diagnos,idiag_sigBma)
@@ -1542,6 +1650,43 @@ module Special
 !
     endsubroutine write_special_run_pars
 !***********************************************************************
+    subroutine input_persist_special_id(id,done)
+!
+!  Read in the parameters of the next SNI
+!
+!  13-Dec-2011/Bourdin.KIS: reworked
+!  14-jul-2015/fred: removed obsolete Remnant persistant variable from current
+!  read and added new cluster variables. All now consistent with any io
+!
+      use IO, only: read_persist, lun_input
+!
+      integer, intent(in) :: id
+      logical, intent(inout) :: done
+!
+      select case (id)
+        case (id_record_WALL_VEL)
+          done = read_persist ('WALL_VEL', next_wall_vel)
+      endselect
+!
+    endsubroutine input_persist_special_id
+!*****************************************************************************
+    logical function output_persistent_special()
+!
+!  Writes out the time of the next SNI
+!
+!  13-Dec-2011/Bourdin.KIS: reworked
+!  15-jun-2015/axel: adapted from interstellar during office hours
+!
+      use IO, only: write_persist
+!
+      output_persistent_special = .true.
+!
+      if (write_persist ('WALL_VEL', id_record_WALL_VEL, next_wall_vel)) return
+!
+      output_persistent_special = .false.
+!
+    endfunction output_persistent_special
+!***********************************************************************
     subroutine rprint_special(lreset,lwrite)
 !
 !  Reads and registers print parameters relevant to special.
@@ -1569,6 +1714,7 @@ module Special
         idiag_a2rhogpsim=0; idiag_a2rhopsim=0
         idiag_Vprimem=0; idiag_Vprimepsim=0
         ivid_del2phi=0; ivid_Vprime=0; ivid_gphi1=0; ivid_g2phi1=0; ivid_V=0
+        idiag_a=0; idiag_rho_phi=0 !Sovan
       endif
 !
       do iname=1,nname
@@ -1581,11 +1727,13 @@ module Special
         call parse_name(iname,cname(iname),cform(iname),'gphirms',idiag_gphirms)
         call parse_name(iname,cname(iname),cform(iname),'Hscriptm',idiag_Hscriptm)
         call parse_name(iname,cname(iname),cform(iname),'lnam',idiag_lnam)
+        call parse_name(iname,cname(iname),cform(iname),'ascale',idiag_a) !Sovan
         call parse_name(iname,cname(iname),cform(iname),'ddotam',idiag_ddotam)
         call parse_name(iname,cname(iname),cform(iname),'a2rhopm',idiag_a2rhopm)
         call parse_name(iname,cname(iname),cform(iname),'a2rhom',idiag_a2rhom)
         call parse_name(iname,cname(iname),cform(iname),'a2rhophim',idiag_a2rhophim)
         call parse_name(iname,cname(iname),cform(iname),'a2rhogphim',idiag_a2rhogphim)
+        call parse_name(iname,cname(iname),cform(iname),'rho_phi',idiag_rho_phi) !Sovan
         call parse_name(iname,cname(iname),cform(iname),'rho_chi',idiag_rho_chi)
         call parse_name(iname,cname(iname),cform(iname),'sigEma',idiag_sigEma)
         call parse_name(iname,cname(iname),cform(iname),'sigBma',idiag_sigBma)
@@ -1763,6 +1911,9 @@ module Special
       if (lflrw) then
         lnascale=f_ode(ilna)
         ascale=exp(lnascale)
+        if (lperturbative_reheating.and.lreheating_hom) then ! Sovan
+          rho_phi=exp(f_ode(ilnrho_phi))
+        endif
       endif
       a2=ascale**2
       a21=1./a2
@@ -1899,6 +2050,7 @@ module Special
       use Sub, only: dot2_mn, grad, curl, dot_mn
 !
       real,  dimension (mx,my,mz,mfarray), intent(in) :: f
+      real :: w_r, w_p, Gamma_E
       real :: sigE1m,sigB1m
 !
 !  If requested, calculate here <dphi**2+gphi**2+(4./3.)*(E^2+B^2)/a^2>.
@@ -1908,6 +2060,7 @@ module Special
       call get_a2
       call mpibcast_real(a2)
       call mpibcast_real(a21)
+      call mpibcast_real(rho_phi) ! Sovan
 !
 !  In the following loop, go through all penciles and add up results to get e2m, etc.
 !
@@ -1969,7 +2122,32 @@ module Special
       a2rhogphim_all_diagnos = a2rhogphim_all
       a2rhogpsim_all_diagnos = a2rhogpsim_all
       ddotam_all_diagnos     = ddotam_all
-
+!
+! alberto: for homogeneous reheating, contribution from phi added after adding over nx
+!
+      if (lperturbative_reheating) then
+        w_p = 0.5 * (1.0+3.0*w_phi)
+        if (ilnrho_phi /= 0) then
+          rho_phi=exp(f_ode(ilnrho_phi)) ! Sovan :
+        else
+          if (lreheating_hom) then
+            call fatal_error("special prep_ode_right", &
+                      'set flrw=T and run backreact_infl to use lreheating_hom')
+          else
+            if (lreheating_vacuum) then
+              w_r=1.+3.*w_phi
+              Gamma_E = G_phi*w_r/3.
+!              ascale = t**(2./w_r)
+              rho_phi = exp(-Gamma_E*(a21**w_p - 1.))
+            else
+              call fatal_error("backreact_infl prep_ode_right", &
+                      'set lreheating_hom=T or lreheating_vacuum=T to run with lperturbative_reheating=T')
+            endif
+          endif
+        endif
+        a2rhom_all=a2rhom_all+rho_phi*a21**w_p
+        ddotam_all = ddotam_all - (1 - 3*w_phi)*rho_phi*a21**w_p
+      endif
       if (lflrw) call get_Hscript_and_a2(Hscript,a2rhom_all)
 !
 !  Broadcast to other processors, and each processor uses put_shared_variable
@@ -2020,6 +2198,7 @@ module Special
       real, dimension (nx) :: ddota, phi, Vpotential, edotb, sigE1, sigB1
       real, dimension (nx) :: boost, gam_EB, eprime, bprime, jprime1
       real, dimension (nx) :: psi, dpsi, gpsi2, a2rhopsi_tmp
+      real, dimension (nx) :: rho_rad !, rho_phi
 !
 !  if requested, calculate here <dphi**2+gphi**2+(4./3.)*(E^2+B^2)/a^2>
 !  rhop is purely an output quantity
@@ -2063,6 +2242,12 @@ module Special
         a2rho=a2rho+a2rhopsi_tmp
       endif
 !
+! alberto: added contribution from fluid for reheating
+! only for radiation domination (cs2 = 1/3)
+      if (ldensity.and.lperturbative_reheating) then
+        rho_rad=exp(f(l1:l2,m,n,ilnrho)) ! Sovan
+        a2rho=a2rho+rho_rad*a21
+      endif
 !  Note the .5*fourthird factor in front of (e2+b2)*a21, but that is
 !  just for rhop, which is output quantity.
 !
@@ -2282,6 +2467,8 @@ module Special
     call copy_addr(lspeed_of_light_dt,p_par(62)) ! bool
     call copy_addr(plasma_coupling_coeff,p_par(63))
     call copy_addr(lplasma_coupling,p_par(64)) ! bool
+    call copy_addr(w_phi,p_par(65))
+    call copy_addr(g_phi,p_par(66))
     endsubroutine pushpars2c
 !********************************************************************
 !********************************************************************
